@@ -63,7 +63,13 @@ public final class MineProcess {
     private Set<Block> targets = Set.of();
     private String what = "";
     private int quantity, mined;
+    /** The best few targets found by the last {@link #rescan}, not every one in the world. */
     private final Set<Long> known = new HashSet<>();
+    private int lastScan;
+    private static final int KEEP = 64;
+    /** Score penalty (blocks) for a target with no open side: dig to it only when nothing exposed is near. */
+    private static final double BURIED = 6;
+    private static final int RESCAN_TICKS = 100;
     private final Set<Long> blacklist = new HashSet<>();
     private Phase phase = Phase.IDLE;
     private List<Long> tripTargets = List.of();
@@ -111,10 +117,10 @@ public final class MineProcess {
         mined = 0;
         known.clear();
         blacklist.clear();
-        scanLoaded(mc);
+        rescan(mc);
         phase = Phase.TRAVEL;
-        chat.accept(Chat.ok("Mining {}" + (quantity > 0 ? " x{}" : "") + " ({} known in loaded chunks)",
-            quantity > 0 ? new Object[]{what, quantity, known.size()} : new Object[]{what, known.size()}));
+        chat.accept(quantity > 0 ? Chat.ok("Mining {} x{}", what, quantity) : Chat.ok("Mining {}", what));
+        if (known.isEmpty()) chat.accept(Chat.warn("None in loaded chunks yet"));
     }
 
     /** Stops mining (and the trip it started). */
@@ -136,22 +142,32 @@ public final class MineProcess {
 
     // ---- block tracking ----
 
-    private void scanLoaded(Minecraft mc) {
+    /**
+     * Finds the {@link #KEEP} best targets (nearest, exposed ones first) in loaded chunks, ring by ring outwards from
+     * the player, stopping as soon as no farther ring can hold a better one. Common blocks like stone stop after the
+     * first chunk or two instead of collecting millions of positions.
+     */
+    private void rescan(Minecraft mc) {
+        lastScan = mc.player.tickCount;
+        double px = mc.player.getX(), py = mc.player.getY(), pz = mc.player.getZ();
+        // max-heap on score: the worst kept target is on top, ready to be replaced
+        java.util.PriorityQueue<double[]> best = new java.util.PriorityQueue<>((a, b) -> Double.compare(b[0], a[0]));
         int r = mc.options.getEffectiveRenderDistance() + 1;
         int pcx = mc.player.blockPosition().getX() >> 4, pcz = mc.player.blockPosition().getZ() >> 4;
-        for (int cx = pcx - r; cx <= pcx + r; cx++)
-            for (int cz = pcz - r; cz <= pcz + r; cz++) {
-                LevelChunk c = mc.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
-                if (c != null) scan(c);
-            }
+        for (int d = 0; d <= r; d++) {
+            if (best.size() >= KEEP && (d - 1) * 16 > best.peek()[0]) break;
+            for (int cx = pcx - d; cx <= pcx + d; cx++)
+                for (int cz = pcz - d; cz <= pcz + d; cz++) {
+                    if (Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz)) != d) continue;
+                    LevelChunk c = mc.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
+                    if (c != null) scan(c, px, py, pz, best);
+                }
+        }
+        known.clear();
+        for (double[] e : best) known.add((long) e[1]);
     }
 
-    /** Called for every loaded chunk while mining. */
-    public void onChunkLoad(LevelChunk chunk) {
-        if (phase != Phase.IDLE) scan(chunk);
-    }
-
-    private void scan(LevelChunk chunk) {
+    private void scan(LevelChunk chunk, double px, double py, double pz, java.util.PriorityQueue<double[]> best) {
         LevelChunkSection[] sections = chunk.getSections();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         for (int i = 0; i < sections.length; i++) {
@@ -161,17 +177,39 @@ public final class MineProcess {
             for (int y = 0; y < 16; y++)
                 for (int z = 0; z < 16; z++)
                     for (int x = 0; x < 16; x++) {
-                        if (targets.contains(sec.getBlockState(x, y, z).getBlock())) known.add(Pos.pack(x0 + x, y0 + y, z0 + z));
+                        if (!targets.contains(sec.getBlockState(x, y, z).getBlock())) continue;
+                        int bx = x0 + x, by = y0 + y, bz = z0 + z;
+                        long p = Pos.pack(bx, by, bz);
+                        if (blacklist.contains(p)) continue;
+                        double score = Math.sqrt(sq(bx + 0.5 - px) + sq(by + 0.5 - py) + sq(bz + 0.5 - pz))
+                            + (exposed(bx, by, bz) ? 0 : BURIED);
+                        if (best.size() < KEEP) best.add(new double[]{score, p});
+                        else if (score < best.peek()[0]) {
+                            best.poll();
+                            best.add(new double[]{score, p});
+                        }
                     }
         }
     }
+
+    /** Next to air or water: reachable without digging to it. */
+    private boolean exposed(int x, int y, int z) {
+        int[][] around = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int[] d : around) {
+            BlockKind k = world.get(x + d[0], y + d[1], z + d[2]);
+            if (k == BlockKind.AIR || k == BlockKind.WATER) return true;
+        }
+        return false;
+    }
+
+    /** Called for every loaded chunk while mining (new targets are picked up by the next rescan). */
+    public void onChunkLoad(LevelChunk chunk) {}
 
     /** Called whenever a block changes in the client's world. */
     public void onBlockChanged(BlockPos pos, BlockState state) {
         if (phase == Phase.IDLE) return;
         long p = Pos.pack(pos.getX(), pos.getY(), pos.getZ());
-        if (targets.contains(state.getBlock())) known.add(p);
-        else known.remove(p);
+        if (!targets.contains(state.getBlock())) known.remove(p);
     }
 
     // ---- each tick ----
@@ -218,6 +256,8 @@ public final class MineProcess {
             else blacklist.addAll(tripTargets);
             tripStart = -1;
         }
+        long left = known.stream().filter(q -> !blacklist.contains(q)).count();
+        if (left < KEEP / 4 || player.tickCount - lastScan > RESCAN_TICKS) rescan(mc);
         List<Long> next = nearest(player, TRIP_TARGETS);
         if (next.isEmpty()) {
             finish(mined > 0 ? Chat.ok("No more {} in loaded chunks ({} mined)", what, mined)
@@ -319,7 +359,8 @@ public final class MineProcess {
     private List<Long> nearest(LocalPlayer player, int n) {
         double px = player.getX(), py = player.getY(), pz = player.getZ();
         return known.stream().filter(p -> !blacklist.contains(p) && safe(p))
-            .sorted(Comparator.comparingDouble(p -> sq(Pos.x(p) + 0.5 - px) + sq(Pos.y(p) + 0.5 - py) + sq(Pos.z(p) + 0.5 - pz)))
+            .sorted(Comparator.comparingDouble(p -> Math.sqrt(sq(Pos.x(p) + 0.5 - px) + sq(Pos.y(p) + 0.5 - py) + sq(Pos.z(p) + 0.5 - pz))
+                + (exposed(Pos.x(p), Pos.y(p), Pos.z(p)) ? 0 : BURIED)))
             .limit(n).toList();
     }
 
