@@ -79,7 +79,7 @@ class ParkourTest {
     @Test
     void lowCeilingOverTheGapBlocksTheJump() {
         GridWorld w = strip(-3, 0, 3, 6).set(1, 3, 0, BlockKind.SOLID);
-        assertEquals(INF, graph(w, true).optimisticCost(Pos.pack(-1, 1, 0), Pos.pack(3, 1, 0)));
+        assertEquals(INF, graph(w, true).evaluate(Pos.pack(-1, 1, 0), Pos.pack(3, 1, 0)));
     }
 
     @Test

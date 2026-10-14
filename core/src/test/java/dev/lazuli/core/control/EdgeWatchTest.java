@@ -45,4 +45,20 @@ class EdgeWatchTest {
         EdgeWatch w = new EdgeWatch();
         for (int t = 0; t < 3 * EdgeWatch.NO_PROGRESS_TICKS; t++) assertNull(w.update(PATH, 0, U, true, 0, true));
     }
+
+    @Test
+    void hopsOnTheRunUpOfALongJumpAreNotMisses() {
+        long u = Pos.pack(0, 1, 0), v = Pos.pack(6, 1, 0), runUp = Pos.pack(2, 1, 0), wrong = Pos.pack(2, 1, 3);
+        List<Long> path = List.of(u, v);
+        EdgeWatch w = new EdgeWatch();
+        w.update(path, 0, u, true, 0.2, false);
+        w.update(path, 0, u, false, 0.2, false);
+        assertNull(w.update(path, 0, runUp, true, 0.2, false));
+        w.update(path, 0, runUp, false, 0.2, false);
+        assertNull(w.update(path, 0, v, true, 0.2, false));
+        // landing off the line is still a miss
+        w.update(path, 0, u, true, 0.2, false);
+        w.update(path, 0, u, false, 0.2, false);
+        assertArrayEquals(new long[]{u, v}, w.update(path, 0, wrong, true, 0.2, false));
+    }
 }

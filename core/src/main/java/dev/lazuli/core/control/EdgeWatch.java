@@ -56,6 +56,9 @@ public final class EdgeWatch {
             stuckTicks = 0;
             return null;
         }
+        if (jump != null && block != jump[1] && onRunUp(jump, block)) {
+            return null; // a hop on the way to a long jump (sprint-jump chain): the jump is still under way
+        }
         if (jump != null) {
             long[] j = jump;
             jump = null;
@@ -82,6 +85,17 @@ public final class EdgeWatch {
             stuckTicks = 0;
         }
         return null;
+    }
+
+    /** A block on the straight line from a gap jump's take-off toward its target, at the take-off's height. */
+    private static boolean onRunUp(long[] j, long block) {
+        if (block == j[0] || Pos.y(block) != Pos.y(j[0])) return false;
+        double ax = Pos.x(j[0]), az = Pos.z(j[0]), dx = Pos.x(j[1]) - ax, dz = Pos.z(j[1]) - az;
+        double len2 = dx * dx + dz * dz;
+        if (len2 < 4) return false;
+        double t = ((Pos.x(block) - ax) * dx + (Pos.z(block) - az) * dz) / len2;
+        double lateral = Math.abs((Pos.x(block) - ax) * dz - (Pos.z(block) - az) * dx) / Math.sqrt(len2);
+        return t > 0 && t < 1 && lateral <= 0.75;
     }
 
     /** Gaps, and steps up (a bonked head or corner drops the player back where they started). */

@@ -2,6 +2,7 @@ package dev.lazuli.mod.control;
 
 import dev.lazuli.core.control.Builder;
 import dev.lazuli.core.control.Climber;
+import dev.lazuli.core.control.Jumper;
 import dev.lazuli.core.control.Controls;
 import dev.lazuli.core.control.EdgeWatch;
 import dev.lazuli.core.control.InputPlanner;
@@ -40,6 +41,7 @@ public final class PathExecutor {
     private final InputPlanner planner;
     private final PathFollower follower;
     private final Climber climber;
+    private final Jumper jumper;
     private final PathTracker tracker = new PathTracker();
     private final BlockView world;
     private final EdgeWatch edgeWatch = new EdgeWatch();
@@ -57,6 +59,7 @@ public final class PathExecutor {
         this.planner = new InputPlanner(world);
         this.follower = new PathFollower(world);
         this.climber = new Climber(world);
+        this.jumper = new Jumper(world);
     }
 
     public void tick(Minecraft mc) {
@@ -110,6 +113,8 @@ public final class PathExecutor {
         boolean building = c != null;
         // ladders and vines (still watched for getting stuck, unlike building)
         if (c == null && idx >= 0) c = climber.tick(state, path, idx);
+        // long and upward gap jumps: played exactly as proven, not left to the input planner
+        if (c == null && !building) c = jumper.tick(state, path, idx, sprint);
         boolean interacting = c != null;
         if (interacting) {
             planner.reset();
@@ -158,5 +163,6 @@ public final class PathExecutor {
         edgeWatch.reset();
         planner.reset();
         follower.reset();
+        jumper.reset();
     }
 }

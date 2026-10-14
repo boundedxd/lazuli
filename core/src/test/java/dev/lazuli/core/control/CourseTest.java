@@ -30,6 +30,7 @@ class CourseTest {
         InputPlanner planner = new InputPlanner(w);
         PathFollower fallback = new PathFollower(w);
         Climber climber = new Climber(w);
+        Jumper jumper = new Jumper(w);
         PathTracker tracker = new PathTracker();
         float yaw = PathFollower.yawTo(sx, sz, gx, gz);
         final float heading = yaw;
@@ -71,6 +72,7 @@ class CourseTest {
                 s.vx, s.vy, s.vz, s.sprinting, s.noJumpDelay, s.minorHorizontalCollision);
             long t0 = System.nanoTime();
             Controls c = idx < 0 ? null : climber.tick(st, path, idx);
+            if (c == null) c = jumper.tick(st, path, idx, true);
             boolean climbing = c != null;
             if (climbing) planner.reset();
             else if (idx >= 0) c = planner.plan(st, path.subList(0, Builder.walkableEnd(w, path, idx, 64) + 1), idx, true, MAX_TURN);

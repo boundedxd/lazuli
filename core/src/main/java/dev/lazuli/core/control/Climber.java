@@ -70,7 +70,7 @@ public final class Climber {
      * Moves toward the middle of column (bx, bz), a little off the wall, without overshooting, facing {@code yaw}: the velocity wanted shrinks
      * with the distance, and W/S and A/D each push whichever way closes the gap between wanted and actual.
      */
-    private static Controls seek(PlayerState p, int bx, int bz, int[] wall, float yaw, float pitch, boolean sneak) {
+    static Controls seek(PlayerState p, int bx, int bz, int[] wall, float yaw, float pitch, boolean sneak) {
         double tx = bx + 0.5 - wall[0] * OFF_WALL, tz = bz + 0.5 - wall[1] * OFF_WALL;
         double wx = (tx - p.x()) * SEEK_GAIN, wz = (tz - p.z()) * SEEK_GAIN;
         double len = Math.hypot(wx, wz), dist = len / SEEK_GAIN;

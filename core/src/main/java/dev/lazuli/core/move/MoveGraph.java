@@ -244,7 +244,10 @@ public final class MoveGraph implements Graph {
         double dx = vx - ux, dz = vz - uz, d = Math.hypot(dx, dz);
         if (d > JUMP_RANGE + 1e-9) return INF;
         if (Double.isNaN(feet(u)) || Double.isNaN(feet(v))) return INF;
-        int top = Math.max(uy, vy) + 2;
+        // room for the body along the way (head-hitters included: the physics decides how far a capped jump goes)
+        int top = Math.max(uy, vy) + 1;
+        // the lowest ceiling over the arc, as height above the take-off: caps how high (so how long) the jump flies
+        double ceiling = Double.POSITIVE_INFINITY;
         // walk the straight line between the centers: the arc needs room, and there must be a real gap
         double ux0 = ux + 0.5, uz0 = uz + 0.5, nx = dx / d, nz = dz / d, px = -nz * 0.3, pz = nx * 0.3;
         double firstGap = -1, lastGap = -1;
@@ -265,6 +268,7 @@ public final class MoveGraph implements Graph {
                 for (int y = low; y <= top; y++) {
                     if (!openCell(bx, y, bz)) return INF;
                 }
+                if (!openCell(bx, top + 1, bz)) ceiling = Math.min(ceiling, top + 1 - uy - Standing.BODY);
             }
             prevCell = cell;
             for (int side = -1; side <= 1; side += 2) {
@@ -280,7 +284,9 @@ public final class MoveGraph implements Graph {
         if (gapLen > maxFlight(dy) + 2 * PLAYER_HALF_WIDTH) return INF;
         // the landing counts anywhere inside v, so the center travels at least d - 0.71; and it can't land before the
         // arc (or a fall, going down) gets there
-        return Math.max(Reach.minTicks(d - 0.71), airTicks(dy, dy > 0 ? 2.2 : 1.2)) + Costs.JUMP_PENALTY + risk(d);
+        double cap = Math.min(ceiling, dy > 0 ? 2.2 : 1.2);
+        if (dy > 0 && cap < dy) return INF; // no room to rise onto it
+        return Math.max(Reach.minTicks(d - 0.71), airTicks(dy, cap)) + Costs.JUMP_PENALTY + risk(d);
     }
 
     /** Ticks per block of jump beyond a 2-block gap: long jumps leave little margin, so a slower sure way can win. */

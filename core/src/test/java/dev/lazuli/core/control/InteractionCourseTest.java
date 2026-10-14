@@ -131,6 +131,8 @@ public class InteractionCourseTest {
         PathFollower fallback = new PathFollower(w);
         PathTracker tracker = new PathTracker();
         EdgeWatch edgeWatch = new EdgeWatch();
+        Climber climber = new Climber(w);
+        Jumper jumper = new Jumper(w);
         float yaw = PathFollower.yawTo(sx, sz, gx, gz), pitch = 10f;
         long lastBlock = Long.MIN_VALUE;
         int offPath = 0;
@@ -170,7 +172,17 @@ public class InteractionCourseTest {
             Controls c = builder.tick(st, path, idx, block, in.allowBreak(), in.allowPlace());
             String who = "build";
             boolean building = c != null;
-            if (!building && idx >= 0) {
+            if (c == null && idx >= 0) {
+                c = climber.tick(st, path, idx);
+                who = "climb";
+            }
+            if (c == null && !building) {
+                c = jumper.tick(st, path, idx, true);
+                who = "jump";
+            }
+            if (c != null) {
+                planner.reset();
+            } else if (idx >= 0) {
                 List<Long> walkable = path.subList(0, Builder.walkableEnd(w, path, idx, 64) + 1);
                 c = planner.plan(st, walkable, idx, true, CourseTest.MAX_TURN);
                 who = "mpc";
@@ -182,8 +194,6 @@ public class InteractionCourseTest {
                     c = fallback.tick(st, walkable.subList(Math.min(idx, walkable.size() - 1), walkable.size()), true);
                     who = "follow";
                 }
-            } else {
-                planner.reset();
             }
             long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(s.vx, s.vz), building);
             if (failed != null) session.edgeFailed(failed[0], failed[1]);
