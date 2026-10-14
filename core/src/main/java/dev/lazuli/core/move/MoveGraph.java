@@ -79,13 +79,6 @@ public final class MoveGraph implements Graph {
         return Standing.standable(w, x, y, z);
     }
 
-    /** A cell the jump arc can pass through: no collision, no liquid (unknown counts as open). */
-    private boolean openCell(int x, int y, int z) {
-        BlockKind k = w.get(x, y, z);
-        if (k == BlockKind.UNKNOWN) return true;
-        if (k == BlockKind.WATER) return false;
-        return w.physics(x, y, z).empty();
-    }
 
     /** Feet height at u (NaN if not standable), cached: the search asks about the same cells hundreds of times. */
     private double feet(long u) {
@@ -244,50 +237,27 @@ public final class MoveGraph implements Graph {
         double dx = vx - ux, dz = vz - uz, d = Math.hypot(dx, dz);
         if (d > JUMP_RANGE + 1e-9) return INF;
         if (Double.isNaN(feet(u)) || Double.isNaN(feet(v))) return INF;
-        // room for the body along the way (head-hitters included: the physics decides how far a capped jump goes)
-        int top = Math.max(uy, vy) + 1;
-        // the lowest ceiling over the arc, as height above the take-off: caps how high (so how long) the jump flies
-        double ceiling = Double.POSITIVE_INFINITY;
-        // walk the straight line between the centers: the arc needs room, and there must be a real gap
-        double ux0 = ux + 0.5, uz0 = uz + 0.5, nx = dx / d, nz = dz / d, px = -nz * 0.3, pz = nx * 0.3;
-        double firstGap = -1, lastGap = -1;
-        long prevCell = Long.MIN_VALUE;
-        int steps = (int) Math.ceil(d / 0.25);
-        for (int i = 1; i < steps; i++) {
-            double t = i * 0.25, cx = ux0 + nx * t, cz = uz0 + nz * t;
-            int bx = (int) Math.floor(cx), bz = (int) Math.floor(cz);
-            boolean ends = (bx == ux && bz == uz) || (bx == vx && bz == vz);
-            boolean gap = gapColumn(bx, Math.min(uy, vy), bz);
-            if (gap && !ends) {
-                if (firstGap < 0) firstGap = t;
-                lastGap = t;
-            }
-            long cell = Pos.pack(bx, 0, bz);
-            if (!ends && cell != prevCell) {
-                int low = gap ? Math.min(uy, vy) : uy;
-                for (int y = low; y <= top; y++) {
-                    if (!openCell(bx, y, bz)) return INF;
-                }
-                if (!openCell(bx, top + 1, bz)) ceiling = Math.min(ceiling, top + 1 - uy - Standing.BODY);
-            }
-            prevCell = cell;
-            for (int side = -1; side <= 1; side += 2) {
-                int sx = (int) Math.floor(cx + px * side), sz = (int) Math.floor(cz + pz * side);
-                if ((sx == ux && sz == uz) || (sx == vx && sz == vz)) continue;
-                for (int y = uy; y <= top - 1; y++) {
-                    if (!openCell(sx, y, sz)) return INF;
-                }
-            }
+        JumpLine line = JumpLine.straight(w, u, v);
+        double extra = 0;
+        if (line.blocked) {
+            // a neo: round the end of whatever is in the way
+            if (d > JumpLine.NEO_RANGE || dy > 0) return INF;
+            line = JumpLine.bent(w, u, v);
+            if (line == null) return INF;
+            extra = NEO_PENALTY;
         }
-        if (firstGap < 0) return INF; // nothing to jump over: walking edges cover it
-        double gapLen = lastGap - firstGap + 0.25;
+        if (line.firstGap < 0) return INF; // nothing to jump over: walking edges cover it
+        double gapLen = line.lastGap - line.firstGap + 0.25;
         if (gapLen > maxFlight(dy) + 2 * PLAYER_HALF_WIDTH) return INF;
-        // the landing counts anywhere inside v, so the center travels at least d - 0.71; and it can't land before the
-        // arc (or a fall, going down) gets there
-        double cap = Math.min(ceiling, dy > 0 ? 2.2 : 1.2);
+        double cap = Math.min(line.ceiling, dy > 0 ? 2.2 : 1.2);
         if (dy > 0 && cap < dy) return INF; // no room to rise onto it
-        return Math.max(Reach.minTicks(d - 0.71), airTicks(dy, cap)) + Costs.JUMP_PENALTY + risk(d);
+        // the landing counts anywhere inside v, so the center travels at least the line less 0.71; and it can't land
+        // before the arc (or a fall, going down) gets there
+        return Math.max(Reach.minTicks(line.length - 0.71), airTicks(dy, cap)) + Costs.JUMP_PENALTY + extra + risk(d);
     }
+
+    /** On top of a jump's cost, a neo's: a curve in the air leaves less margin than a straight jump. */
+    static final double NEO_PENALTY = 10;
 
     /** Ticks per block of jump beyond a 2-block gap: long jumps leave little margin, so a slower sure way can win. */
     static final double RISK_PER_BLOCK = 20;
@@ -401,20 +371,8 @@ public final class MoveGraph implements Graph {
         return found;
     }
 
-    /**
-     * A column a jump at this level has to clear: nothing to stand on at it or one below. Shallower dips are walked
-     * (down and back up), and the input planner hops them on its own when that's faster, so they need no jump edges;
-     * without this, hills would sprout thousands of jump edges the physics then has to reject.
-     */
     private boolean gapColumn(int x, int y, int z) {
-        if (Standing.hasSupport(w, x, y, z)) return false;
-        return !Standing.hasSupport(w, x, y - 1, z) || hazard(x, y - 1, z) || hazard(x, y - 2, z);
-    }
-
-    /** Lava, fire, water...: a dip holding one is never walked through. */
-    private boolean hazard(int x, int y, int z) {
-        BlockKind k = w.get(x, y, z);
-        return k == BlockKind.DANGER || k == BlockKind.WATER;
+        return JumpLine.gapColumn(w, x, y, z);
     }
 
     private static int[][] jumpOffsets() {

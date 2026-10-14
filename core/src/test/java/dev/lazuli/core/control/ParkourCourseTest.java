@@ -54,4 +54,20 @@ class ParkourCourseTest {
     void fourGapAfterAHopRunUp() {
         assertArrives(drive(gapTo(4, 0), -6, 1, 0, 9, 1, 0, 300), 300);
     }
+
+    /**
+     * A neo: a wall 3 high and 6 long (x = 1, z = -5..0) between a 1-wide run-up and a 2-wide landing, nothing under
+     * the wall's end, so the only way across is a jump curving round it. (Onto a 1-wide landing it can't be done.)
+     */
+    private static GridWorld neo(int across) {
+        GridWorld w = strip(-4, 0);
+        w.fill(1, 1, -5, 1, 3, 0, BlockKind.SOLID).fill(1, -3, -5, 1, 0, 0, BlockKind.SOLID);
+        w.fill(across, 0, 0, across + 4, 0, 1, BlockKind.SOLID);
+        return w;
+    }
+
+    @Test
+    void neoRoundTheEndOfAWall() {
+        assertArrives(drive(neo(2), -4, 1, 0, 6, 1, 0, 300), 300);
+    }
 }

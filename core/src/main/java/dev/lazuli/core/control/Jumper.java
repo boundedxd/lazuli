@@ -32,6 +32,8 @@ public final class Jumper {
     /** Air ticks so far (scripts count braking from leaving the ground), and whether it has left the ground. */
     private int air;
     private boolean flew;
+    /** The yaw played last tick (a neo turns in the air). */
+    private float facing;
     /** Ticks spent lining up; past {@link #PREP_LIMIT} the input planner gets the jump after all. */
     private int prep;
     private static final int PREP_LIMIT = 60;
@@ -46,12 +48,12 @@ public final class Jumper {
         t = -1;
     }
 
-    /** Whether u -> v is a jump the input planner shouldn't be trusted with. */
-    public static boolean hard(long u, long v) {
+    /** Whether u -> v is a jump the input planner shouldn't be trusted with: long, up a level, or a neo. */
+    public static boolean hard(BlockView world, long u, long v) {
         int dx = Pos.x(v) - Pos.x(u), dz = Pos.z(v) - Pos.z(u);
         if (Math.max(Math.abs(dx), Math.abs(dz)) < 2) return false;
         double d = Math.hypot(dx, dz);
-        return d >= HARD - 1e-9 || Pos.y(v) > Pos.y(u) && d >= HARD_UP - 1e-9;
+        return d >= HARD - 1e-9 || Pos.y(v) > Pos.y(u) && d >= HARD_UP - 1e-9 || JumpEvaluator.neo(world, u, v);
     }
 
     /** Controls for a hard jump starting at the player's node, or null if the next edge isn't one (or it landed). */
@@ -59,7 +61,7 @@ public final class Jumper {
         if (t >= 0 && script != null) return play(p);
         if (idx < 0 || idx + 1 >= path.size()) return null;
         long u = path.get(idx), v = path.get(idx + 1);
-        if (!hard(u, v)) {
+        if (!hard(world, u, v)) {
             reset();
             return null;
         }
@@ -77,6 +79,7 @@ public final class Jumper {
             JumpEvaluator.Script go = fromHere(p);
             if (go != null) {
                 script = go;
+                facing = go.yaw();
                 t = 0;
                 air = 0;
                 flew = false;
@@ -93,7 +96,7 @@ public final class Jumper {
         if (lands(p, script)) return script;
         if (script.jumpTick() < 0) return null;
         for (int jt = script.jumpTick() - 1; jt >= 0; jt--) {
-            JumpEvaluator.Script s = new JumpEvaluator.Script(script.yaw(), jt, script.brakeAt(), script.after(), script.ticks());
+            JumpEvaluator.Script s = script.withJumpTick(jt);
             if (lands(p, s)) return s;
         }
         return null;
@@ -111,9 +114,22 @@ public final class Jumper {
             flew = false; // a hop on the run-up
         }
         int[] in = input(s, t, air, p.onGround());
+        facing = facing(s, facing, t, air, p.x(), p.z());
+        int strafe = s.strafe(airIndex(s, t, air));
         if (flew || !p.onGround()) air++;
         t++;
-        return new Controls(in[0] > 0, in[0] < 0, in[1] == 1, in[0] > 0 && sprint, s.yaw(), PITCH, 0, false);
+        return new Controls(in[0] > 0, in[0] < 0, in[1] == 1, in[0] > 0 && sprint, facing, PITCH, strafe, false);
+    }
+
+    /** The yaw for script tick {@code t} ({@code air} ticks in the air), as {@link JumpEvaluator} played it. */
+    private float facing(JumpEvaluator.Script s, float prev, int t, int air, double x, double z) {
+        int a = airIndex(s, t, air);
+        return a >= 0 ? JumpEvaluator.yaw(s, prev, a, x, z, edgeV) : s.yaw();
+    }
+
+    /** Which air tick of the script tick {@code t} is, -1 before take-off (or hopping). */
+    private static int airIndex(JumpEvaluator.Script s, int t, int air) {
+        return s.jumpTick() >= 0 ? t - s.jumpTick() - 1 : s.jumpTick() == JumpEvaluator.HOP ? -1 : air;
     }
 
     /** {forward, jump} for script tick {@code t}, {@code air} ticks after leaving the ground. */
@@ -137,9 +153,11 @@ public final class Jumper {
         double fv = feet(v);
         int air = 0;
         boolean flew = false;
+        float yaw = script.yaw();
         for (int k = 0; k < 120; k++) {
             int[] in = input(script, k, air, s.onGround);
-            s.step(in[0], 0, in[1] == 1, in[0] > 0 && sprint, false, script.yaw());
+            yaw = facing(script, yaw, k, air, s.x, s.z);
+            s.step(in[0], script.strafe(airIndex(script, k, air)), in[1] == 1, in[0] > 0 && sprint, false, yaw);
             if (!s.onGround) {
                 flew = true;
                 air++;

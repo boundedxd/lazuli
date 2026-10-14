@@ -251,7 +251,7 @@ public final class Builder {
         for (int i = Math.max(0, from); i < end; i++) {
             if (!actions(world, path.get(i), path.get(i + 1)).isEmpty()) return i;
             if (dev.lazuli.core.move.Climbing.edge(world, path.get(i), path.get(i + 1))) return i; // the climber's
-            if (Jumper.hard(path.get(i), path.get(i + 1))) return i; // the jumper's
+            if (Jumper.hard(world, path.get(i), path.get(i + 1))) return i; // the jumper's
         }
         return path.size() - 1;
     }
