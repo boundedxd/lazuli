@@ -7,6 +7,7 @@ import dev.lazuli.core.world.BlockView;
 import dev.lazuli.core.world.WorldCache;
 import dev.lazuli.mod.config.LazuliConfig;
 import dev.lazuli.mod.control.PathExecutor;
+import dev.lazuli.mod.control.Tools;
 import dev.lazuli.mod.control.TraceRecorder;
 import dev.lazuli.mod.render.LazuliRenderer;
 import main.walksy.lib.core.gui.WalksyLibPanelScreen;
@@ -54,8 +55,9 @@ public final class LazuliClient implements ClientModInitializer {
 		LazuliConfig.stopAction = () -> session.stop();
 		recorder = new TraceRecorder(FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("traces"), this::chat);
 
-		session = new PathingSession(cache, cache::minY, cache::maxY, settings, worker, this::chat);
-		executor = new PathExecutor(session, settings, cache);
+		session = new PathingSession(cache, cache::minY, cache::maxY, settings, worker, this::chat,
+			() -> Tools.snapshot(Minecraft.getInstance().player, settings));
+		executor = new PathExecutor(session, settings, cache, this::chat);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -103,7 +105,7 @@ public final class LazuliClient implements ClientModInitializer {
 				openConfigNextTick = true; // the chat screen is still closing
 			}
 		});
-		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal);
+		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal, cache);
 
 		ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
 			if (Minecraft.getInstance().player == null) return true;

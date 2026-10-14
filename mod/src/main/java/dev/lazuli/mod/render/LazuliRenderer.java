@@ -3,6 +3,9 @@ package dev.lazuli.mod.render;
 import dev.lazuli.core.goal.Goal;
 import dev.lazuli.core.goal.GoalBlock;
 import dev.lazuli.core.goal.GoalXZ;
+import dev.lazuli.core.move.Digging;
+import dev.lazuli.core.move.MoveGraph;
+import dev.lazuli.core.world.BlockView;
 import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.world.Pos;
@@ -27,13 +30,20 @@ import java.util.function.Supplier;
 public final class LazuliRenderer {
     private static final int MAX_NODES = 256;
     private static final double LIFT = 0.05;
+    /** Path edges ahead whose breaks and placements are outlined. */
+    private static final int ACTION_EDGES = 48;
+    private static final int BREAK_COLOR = 0xFFFF5040;
+    private static final int PLACE_COLOR = 0xFF40E0FF;
 
     private final PathingSession session;
     private final Settings settings;
     private final Supplier<double[]> prediction;
     private final Supplier<Goal> pendingGoal;
+    private final BlockView world;
 
-    public LazuliRenderer(PathingSession session, Settings settings, Supplier<double[]> prediction, Supplier<Goal> pendingGoal) {
+    public LazuliRenderer(PathingSession session, Settings settings, Supplier<double[]> prediction, Supplier<Goal> pendingGoal,
+                          BlockView world) {
+        this.world = world;
         this.session = session;
         this.settings = settings;
         this.prediction = prediction;
@@ -51,6 +61,15 @@ public final class LazuliRenderer {
             int color = LazuliConfig.pathColor.getRGB();
             for (int i = 0; i + 1 < Math.min(path.size(), MAX_NODES); i++) {
                 Gizmos.line(center(path.get(i)), center(path.get(i + 1)), color, width);
+            }
+            // blocks the path will break (red) and place (cyan)
+            MoveGraph g = new MoveGraph(world, settings.maxFallHeight.get(), true, 1, settings.allowParkour.get());
+            for (int i = 0; i + 1 < Math.min(path.size(), ACTION_EDGES); i++) {
+                for (Digging.Action a : g.actions(path.get(i), path.get(i + 1))) {
+                    long n = a.pos();
+                    Gizmos.cuboid(new BlockPos(Pos.x(n), Pos.y(n), Pos.z(n)),
+                        GizmoStyle.stroke(a.place() ? PLACE_COLOR : BREAK_COLOR, width));
+                }
             }
         }
         if (pathing && LazuliConfig.renderPrediction) {

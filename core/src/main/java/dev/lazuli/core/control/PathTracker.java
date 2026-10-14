@@ -26,8 +26,11 @@ public final class PathTracker {
             lastIdx = -1;
         }
         int from = Math.max(0, lastIdx);
-        int idx = find(path, from, bx, by, bz);
-        if (idx < 0 && from > 0) idx = find(path, 0, bx, by, bz);
+        // the exact block anywhere nearby (also behind: back down a pillar's cell after a jump) before any column match
+        int idx = exact(path, from, bx, by, bz);
+        if (idx < 0 && from > 0) idx = exact(path, Math.max(0, from - SEARCH), bx, by, bz);
+        if (idx < 0) idx = column(path, from, bx, bz);
+        if (idx < 0 && from > 0) idx = column(path, 0, bx, bz);
         if (idx >= 0) {
             lastIdx = idx;
             return idx;
@@ -53,12 +56,17 @@ public final class PathTracker {
         return idx >= 0 && path.get(idx) == Pos.pack(bx, by, bz);
     }
 
-    private static int find(List<Long> path, int from, int bx, int by, int bz) {
-        int limit = Math.min(path.size(), from + SEARCH);
+    private static int exact(List<Long> path, int from, int bx, int by, int bz) {
+        int limit = Math.min(path.size(), from + 2 * SEARCH);
         for (int i = from; i < limit; i++) {
             long n = path.get(i);
             if (Pos.x(n) == bx && Pos.y(n) == by && Pos.z(n) == bz) return i;
         }
+        return -1;
+    }
+
+    private static int column(List<Long> path, int from, int bx, int bz) {
+        int limit = Math.min(path.size(), from + SEARCH);
         for (int i = from; i < limit; i++) {
             long n = path.get(i);
             if (Pos.x(n) == bx && Pos.z(n) == bz) return i;

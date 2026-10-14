@@ -50,6 +50,10 @@ public final class PathingSession {
     private Goal goal;
     private boolean fallback;
     private long player;
+    /** When the player's reported node stopped being a node (nanoTime), or -1. */
+    private long invalidStartSince = -1;
+    /** How long a replan keeps the current path while the start isn't a node (mid-pillar, falling down a shaft). */
+    private static final long TRANSIENT_NANOS = 3_000_000_000L;
 
     public PathingSession(BlockView world, IntSupplier minY, IntSupplier maxY, Settings settings,
                           Executor worker, Consumer<String> messages) {
@@ -154,6 +158,14 @@ public final class PathingSession {
             publish(State.ARRIVED, List.of());
             messages.accept("Arrived at " + goal.describe());
             return;
+        }
+        if (!graph.isNode(player) && snapshot.state() == State.PATHING) {
+            // the block just placed under the jumping player, or mined from under them: they'll land on a node soon
+            long now = System.nanoTime();
+            if (invalidStartSince < 0) invalidStartSince = now;
+            if (now - invalidStartSince < TRANSIENT_NANOS) return;
+        } else {
+            invalidStartSince = -1;
         }
         PlanResult r = planner.plan(settings.evalHorizon.get(), MAX_EXPANSIONS, MAX_PATH_LENGTH);
         if (r.status() == PlanResult.Status.FOUND) {

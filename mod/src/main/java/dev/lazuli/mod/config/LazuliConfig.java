@@ -50,6 +50,11 @@ public final class LazuliConfig implements WalksyLibApi {
                 .group(OptionGroup.builder("Movement")
                     .option(bool(s.allowSprint, "Sprint when food allows."))
                     .option(bool(s.allowParkour, "Jump gaps, any direction, up to 7 blocks."))
+                    .option(bool(s.allowBreak, "Mine through blocks in the way, with the best tool in the hotbar."))
+                    .option(bool(s.allowPlace, "Bridge gaps and pillar up with throwaway blocks from the hotbar."))
+                    .option(Options.ofString("Throwaway blocks", s.throwawayBlocks::get, s.throwawayBlocks.defaultValue(),
+                        v -> s.throwawayBlocks.parse(v))
+                        .description(OptionDescription.ofText(() -> "Comma-separated block ids it may place.")).build())
                     .option(Options.ofNumber("Max fall height", s.maxFallHeight::get, s.maxFallHeight.defaultValue(), s.maxFallHeight::set)
                         .range(0, 20, 1)
                         .description(OptionDescription.ofText(() -> "Highest drop it takes without water, in blocks.")).build())

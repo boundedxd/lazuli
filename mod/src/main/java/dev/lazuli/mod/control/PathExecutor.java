@@ -35,11 +35,13 @@ public final class PathExecutor {
     private final PathTracker tracker = new PathTracker();
     private final BlockView world;
     private final InputDriver input = new InputDriver();
+    private final Interactor interactor;
     private boolean driving;
     private long lastBlock = NONE;
     private int offPathTicks;
 
-    public PathExecutor(PathingSession session, Settings settings, BlockView world) {
+    public PathExecutor(PathingSession session, Settings settings, BlockView world, java.util.function.Consumer<String> chat) {
+        this.interactor = new Interactor(world, settings, session, chat);
         this.session = session;
         this.settings = settings;
         this.world = world;
@@ -86,14 +88,18 @@ public final class PathExecutor {
         PlayerState state = new PlayerState(player.getX(), player.getY(), player.getZ(), player.getYRot(),
             player.getXRot(), player.onGround(), player.horizontalCollision, v.x, v.y, v.z, player.isSprinting(),
             ((LivingEntityAccessor) player).lazuli$noJumpDelay(), player.minorHorizontalCollision);
-        Controls c = null;
-        if (idx >= 0) {
+        Controls c = interactor.tick(mc, path, idx, block);
+        boolean interacting = c != null;
+        if (interacting) {
+            planner.reset();
+        } else if (idx >= 0) {
             c = planner.plan(state, path, idx, sprint, maxTurn);
             if (c == null) c = follower.tick(state, path.subList(idx, path.size()), sprint);
         }
         if (c == null) c = new Controls(false, false, false, player.getYRot(), player.getXRot());
         float yaw = InputPlanner.approach(player.getYRot(), c.targetYaw(), maxTurn);
-        float pitch = player.getXRot() + Math.max(-PITCH_SPEED, Math.min(PITCH_SPEED, c.targetPitch() - player.getXRot()));
+        float pitchSpeed = interacting ? maxTurn : PITCH_SPEED;
+        float pitch = player.getXRot() + Math.max(-pitchSpeed, Math.min(pitchSpeed, c.targetPitch() - player.getXRot()));
         input.apply(mc, c, yaw, pitch);
         driving = true;
     }
@@ -111,6 +117,7 @@ public final class PathExecutor {
     private void reset() {
         if (driving) input.release();
         driving = false;
+        interactor.reset();
         offPathTicks = 0;
         tracker.reset();
         planner.reset();

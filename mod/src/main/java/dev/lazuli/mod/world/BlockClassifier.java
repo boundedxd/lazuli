@@ -3,6 +3,8 @@ package dev.lazuli.mod.world;
 import dev.lazuli.core.world.BlockKind;
 import dev.lazuli.core.world.BlockPhysics;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.EmptyBlockGetter;
@@ -26,6 +28,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class BlockClassifier {
     private static final Map<BlockState, BlockKind> CACHE = new ConcurrentHashMap<>();
     private static final Map<BlockState, Short> PHYSICS = new ConcurrentHashMap<>();
+    /** A block state for each physics id, for the break-time formula (states sharing an id break alike). */
+    private static final Map<Short, BlockState> STATES = new ConcurrentHashMap<>();
     private static final Set<Block> DANGER = Set.of(
         Blocks.FIRE, Blocks.SOUL_FIRE, Blocks.MAGMA_BLOCK, Blocks.CACTUS, Blocks.SWEET_BERRY_BUSH,
         Blocks.COBWEB, Blocks.POWDER_SNOW, Blocks.CAMPFIRE, Blocks.SOUL_CAMPFIRE, Blocks.WITHER_ROSE, Blocks.LAVA);
@@ -41,6 +45,11 @@ public final class BlockClassifier {
     /** Palette id of the state's physics, or {@link BlockPhysics#DERIVED} when its kind already says it all. */
     public static short physicsId(BlockState state) {
         return PHYSICS.computeIfAbsent(state, BlockClassifier::computePhysics);
+    }
+
+    /** A block state with this physics id, or null for derived physics. */
+    public static BlockState state(short physicsId) {
+        return STATES.get(physicsId);
     }
 
     private static BlockKind compute(BlockState s) {
@@ -73,7 +82,12 @@ public final class BlockClassifier {
         if (b == Blocks.SLIME_BLOCK) flags |= BlockPhysics.SLIME;
         if (b instanceof BedBlock) flags |= BlockPhysics.BED;
         if (STICKY.contains(b)) flags |= BlockPhysics.STICKY;
-        BlockPhysics p = BlockPhysics.intern(boxes, b.getFriction(), b.getSpeedFactor(), b.getJumpFactor(), flags);
+        if (b instanceof FallingBlock) flags |= BlockPhysics.FALLING;
+        if (s.canBeReplaced() && aabbs.isEmpty() && s.getFluidState().isEmpty()) flags |= BlockPhysics.REPLACEABLE;
+        float hardness = s.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+        BlockPhysics p = BlockPhysics.intern(boxes, b.getFriction(), b.getSpeedFactor(), b.getJumpFactor(), flags,
+            hardness, BuiltInRegistries.BLOCK.getId(b));
+        STATES.putIfAbsent(p.id, s);
         BlockKind k = classify(s);
         return p == BlockPhysics.forKind(k) ? BlockPhysics.DERIVED : p.id;
     }

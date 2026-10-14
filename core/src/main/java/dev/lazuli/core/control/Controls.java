@@ -2,7 +2,12 @@ package dev.lazuli.core.control;
 
 /** Desired movement inputs plus the absolute view direction to turn toward (Minecraft yaw/pitch degrees). */
 public record Controls(boolean forward, boolean back, boolean jump, boolean sprint, float targetYaw, float targetPitch,
-                       int strafe) {
+                       int strafe, boolean sneak) {
+    public Controls(boolean forward, boolean back, boolean jump, boolean sprint, float targetYaw, float targetPitch,
+                    int strafe) {
+        this(forward, back, jump, sprint, targetYaw, targetPitch, strafe, false);
+    }
+
     public Controls(boolean forward, boolean back, boolean jump, boolean sprint, float targetYaw, float targetPitch) {
         this(forward, back, jump, sprint, targetYaw, targetPitch, 0);
     }
