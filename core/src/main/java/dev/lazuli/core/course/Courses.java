@@ -74,7 +74,12 @@ public final class Courses {
         out.add(course("stairs", "slab and block steps up 6 blocks", b, 0, 1, 0, 19, 7, 0, 1, false, false));
 
         b = new Course.Builder().ground(-2, 24).fill(8, -2, -2, 14, 0, 2, WATER);
-        out.add(course("water", "a 7-wide water channel", b, 0, 1, 0, 20, 1, 0, 1, false, true));
+        out.add(course("water", "a 7-wide water channel: swim across", b, 0, 1, 0, 20, 1, 0, -2, false, false));
+
+        b = new Course.Builder().ground(-2, 5).fill(5, -23, -3, 11, -23, 3, STONE).fill(5, -22, -3, 11, -20, 3, STONE)
+            .fill(6, -22, -2, 10, -20, 2, WATER).fill(11, -23, -2, 16, -20, 2, STONE);
+        out.add(course("water-drop", "a 21-block drop into a pool, swim out, climb onto the bank", b,
+            0, 1, 0, 14, -19, 0, -22, false, false));
 
         b = new Course.Builder().ground(-2, 40).fill(-2, 0, -2, 40, 0, 2, ICE).fill(18, -3, -2, 19, 0, 2, AIR);
         out.add(course("ice", "sprinting on ice, with a 2-gap on it", b, 0, 1, 0, 36, 1, 0, 1, false, false));

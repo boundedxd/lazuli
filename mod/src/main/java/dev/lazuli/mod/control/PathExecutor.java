@@ -74,15 +74,18 @@ public final class PathExecutor {
 
         BlockPos bp = player.blockPosition();
         // standing over an edge, the node is the block actually under the player, not the air beside it
-        long block = player.onGround() ? Standing.nodeUnder(world, player.getX(), player.getY(), player.getZ())
+        long swim = player.isInWater() ? Standing.swimNode(world, player.getX(), player.getY(), player.getZ()) : Long.MIN_VALUE;
+        boolean settled = player.onGround() || swim != Long.MIN_VALUE; // standing, or floating at the surface
+        long block = swim != Long.MIN_VALUE ? swim
+            : player.onGround() ? Standing.nodeUnder(world, player.getX(), player.getY(), player.getZ())
             : Pos.pack(bp.getX(), bp.getY(), bp.getZ());
         List<Long> path = snap.path();
         int idx = tracker.update(path, snap.version(), Pos.x(block), Pos.y(block), Pos.z(block));
         boolean onNode = PathTracker.onNode(path, idx, Pos.x(block), Pos.y(block), Pos.z(block));
         if (onNode) offPathTicks = 0;
-        else if (player.onGround()) offPathTicks++;
+        else if (settled) offPathTicks++;
         // Run-up blocks and corner cuts aren't path nodes: only re-plan from a node, or once clearly off the path.
-        if (player.onGround() && block != lastBlock && (onNode || offPathTicks > OFF_PATH_TICKS)) {
+        if (settled && block != lastBlock && (onNode || offPathTicks > OFF_PATH_TICKS)) {
             lastBlock = block;
             session.playerMoved(block);
         }
@@ -105,7 +108,7 @@ public final class PathExecutor {
             if (c == null && !player.onGround()) c = InputPlanner.airBrake(state);
             if (c == null) c = follower.tick(state, walkable.subList(Math.min(idx, walkable.size() - 1), walkable.size()), sprint);
         }
-        long[] failed = edgeWatch.update(path, idx, block, player.onGround(), Math.hypot(v.x, v.z), interacting);
+        long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(v.x, v.z), interacting);
         if (failed != null) session.edgeFailed(failed[0], failed[1]);
         if (c == null) c = new Controls(false, false, false, player.getYRot(), player.getXRot());
         float yaw = InputPlanner.approach(player.getYRot(), c.targetYaw(), maxTurn);

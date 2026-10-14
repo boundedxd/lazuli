@@ -138,7 +138,10 @@ public class InteractionCourseTest {
                 return new Run(false, t, hands.breaks, hands.places, lowest, maxFall, msgs + "\n" + log);
             }
             if (s.y < -40) return new Run(false, t, hands.breaks, hands.places, lowest, maxFall, "fell\n" + log);
-            long block = s.onGround ? Standing.nodeUnder(w, s.x, s.y, s.z)
+            long swim = s.inWater ? Standing.swimNode(w, s.x, s.y, s.z) : Long.MIN_VALUE;
+            boolean settled = s.onGround || swim != Long.MIN_VALUE;
+            long block = swim != Long.MIN_VALUE ? swim
+                : s.onGround ? Standing.nodeUnder(w, s.x, s.y, s.z)
                 : Pos.pack((int) Math.floor(s.x), (int) Math.floor(s.y + 1e-9), (int) Math.floor(s.z));
             List<Long> path = snap.path();
             if (snap.version() != shownVersion && log.length() < 30000) {
@@ -147,8 +150,8 @@ public class InteractionCourseTest {
             }
             int idx = tracker.update(path, snap.version(), Pos.x(block), Pos.y(block), Pos.z(block));
             boolean onNode = PathTracker.onNode(path, idx, Pos.x(block), Pos.y(block), Pos.z(block));
-            if (onNode) offPath = 0; else if (s.onGround) offPath++;
-            if (s.onGround && block != lastBlock && (onNode || offPath > 10)) {
+            if (onNode) offPath = 0; else if (settled) offPath++;
+            if (settled && block != lastBlock && (onNode || offPath > 10)) {
                 lastBlock = block;
                 session.playerMoved(block);
                 continue;
@@ -174,7 +177,7 @@ public class InteractionCourseTest {
             } else {
                 planner.reset();
             }
-            long[] failed = edgeWatch.update(path, idx, block, s.onGround, Math.hypot(s.vx, s.vz), building);
+            long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(s.vx, s.vz), building);
             if (failed != null) session.edgeFailed(failed[0], failed[1]);
             if (c == null) c = new Controls(false, false, false, yaw, pitch);
             yaw = InputPlanner.approach(yaw, c.targetYaw(), CourseTest.MAX_TURN);

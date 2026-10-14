@@ -3,6 +3,7 @@ package dev.lazuli.core.move;
 import dev.lazuli.core.world.BlockKind;
 import dev.lazuli.core.world.BlockPhysics;
 import dev.lazuli.core.world.BlockView;
+import dev.lazuli.core.world.Pos;
 
 /**
  * Where a player can stand, from real collision shapes. A node is the cell (x, y, z) containing the player's
@@ -42,6 +43,28 @@ public final class Standing {
         }
         return clear(w, x + LO, z + LO, x + HI, z + HI, support, support + BODY) ? support : Double.NaN;
     }
+
+    /** Water at the surface, where a swimmer floats: water with open air (or unloaded terrain) above. */
+    public static boolean swimmable(BlockView w, int x, int y, int z) {
+        if (w.get(x, y, z) != BlockKind.WATER) return false;
+        BlockKind above = w.get(x, y + 1, z);
+        return above == BlockKind.AIR || above == BlockKind.UNKNOWN;
+    }
+
+    /** The water surface cell a player swimming at (x, y, z) floats in, or {@link Long#MIN_VALUE} if not swimming. */
+    public static long swimNode(BlockView w, double x, double y, double z) {
+        int bx = (int) Math.floor(x), bz = (int) Math.floor(z), by = (int) Math.floor(y);
+        if (swimmable(w, bx, by - 1, bz)) return Pos.pack(bx, by - 1, bz);
+        // under the surface (sunk after a drop): the surface above, through nothing but water
+        for (int yy = by; yy <= by + SWIM_DEPTH; yy++) {
+            if (w.get(bx, yy, bz) != BlockKind.WATER) break;
+            if (swimmable(w, bx, yy, bz)) return Pos.pack(bx, yy, bz);
+        }
+        return Long.MIN_VALUE;
+    }
+
+    /** How far under the surface a swimmer still counts as at its surface node (a big drop sinks deep). */
+    public static final int SWIM_DEPTH = 6;
 
     /**
      * Whether a player can stand in column (x, z) at about level {@code y}, on anything from a slab to a full block:
@@ -103,6 +126,11 @@ public final class Standing {
      * [x0, x1] x (lo, hi) x [z0, z1].
      */
     public static boolean clear(BlockView w, double x0, double z0, double x1, double z1, double lo, double hi) {
+        return clear(w, x0, z0, x1, z1, lo, hi, false);
+    }
+
+    /** @param waterOk water in the way is fine (swimming); lava and other danger still isn't */
+    public static boolean clear(BlockView w, double x0, double z0, double x1, double z1, double lo, double hi, boolean waterOk) {
         int bx0 = (int) Math.floor(x0 + EPS), bx1 = (int) Math.floor(x1 - EPS);
         int bz0 = (int) Math.floor(z0 + EPS), bz1 = (int) Math.floor(z1 - EPS);
         int by0 = (int) Math.floor(lo + EPS) - 1, by1 = (int) Math.floor(hi - EPS);
@@ -111,7 +139,7 @@ public final class Standing {
                 for (int by = by0; by <= by1; by++) {
                     BlockKind k = w.get(bx, by, bz);
                     if (k == BlockKind.UNKNOWN || k == BlockKind.AIR) continue;
-                    if ((k == BlockKind.DANGER || k == BlockKind.WATER) && by >= (int) Math.floor(lo + EPS)) return false;
+                    if ((k == BlockKind.DANGER || k == BlockKind.WATER && !waterOk) && by >= (int) Math.floor(lo + EPS)) return false;
                     double[] b = w.physics(bx, by, bz).boxes;
                     for (int i = 0; i < b.length; i += 6) {
                         if (bx + b[i + 3] > x0 + EPS && bx + b[i] < x1 - EPS
@@ -131,7 +159,12 @@ public final class Standing {
      * {@code lo} or higher: the box spanning both footprints, from lo to lo + body height, is clear.
      */
     public static boolean passage(BlockView w, int ux, int uz, int vx, int vz, double lo, double hi) {
-        return clear(w, Math.min(ux, vx) + LO, Math.min(uz, vz) + LO, Math.max(ux, vx) + HI, Math.max(uz, vz) + HI, lo, hi);
+        return passage(w, ux, uz, vx, vz, lo, hi, false);
+    }
+
+    public static boolean passage(BlockView w, int ux, int uz, int vx, int vz, double lo, double hi, boolean waterOk) {
+        return clear(w, Math.min(ux, vx) + LO, Math.min(uz, vz) + LO, Math.max(ux, vx) + HI, Math.max(uz, vz) + HI, lo, hi,
+            waterOk);
     }
 
     /** Highest collision top among boxes overlapping the given horizontal footprint (block-local), 0 if none. */

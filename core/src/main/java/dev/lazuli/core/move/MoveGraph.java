@@ -99,7 +99,46 @@ public final class MoveGraph implements Graph {
 
     @Override
     public boolean isNode(long u) {
-        return !Double.isNaN(feet(u)) || dig.kind(Pos.x(u), Pos.y(u), Pos.z(u)) != Digging.Kind.NONE;
+        return !Double.isNaN(feet(u)) || swims(u) || dig.kind(Pos.x(u), Pos.y(u), Pos.z(u)) != Digging.Kind.NONE;
+    }
+
+    /** Deepest drop into water planned: water takes all the fall damage, but a deeper fall is just slow. */
+    static final int WATER_DROP = 32;
+    /** Ticks to swim a block at the surface (no sprint-swimming): about 0.1 blocks a tick. */
+    static final double SWIM = 10;
+    /** Pulling out of the water onto a block a level up: a jump out of the fluid. */
+    static final double CLIMB_OUT = 6;
+
+    /** Water at the surface, where a swimmer floats: water with open air above. */
+    public boolean swims(long u) {
+        return Standing.swimmable(w, Pos.x(u), Pos.y(u), Pos.z(u));
+    }
+
+    /** Swimming at the surface, getting into water (walking in or dropping from any height) and climbing out. */
+    private double waterCost(long u, long v, boolean su, boolean sv) {
+        int ux = Pos.x(u), uy = Pos.y(u), uz = Pos.z(u), vx = Pos.x(v), vy = Pos.y(v), vz = Pos.z(v);
+        boolean diag = ux != vx && uz != vz;
+        double step = diag ? Costs.SQRT2 : 1;
+        if (su && sv) {
+            if (vy != uy || !Standing.passage(w, ux, uz, vx, vz, uy + 0.1, uy + Standing.BODY, true)) return INF;
+            return SWIM * step;
+        }
+        if (sv) {
+            double fu = feet(u);
+            if (Double.isNaN(fu) || vy > uy) return INF;
+            if (!Standing.passage(w, ux, uz, vx, vz, fu, fu + Standing.BODY)) return INF;
+            if (!Standing.clear(w, vx + 0.2, vz + 0.2, vx + 0.8, vz + 0.8, vy + 1, fu + Standing.BODY)) return INF;
+            for (int y = vy + 1; y <= (int) Math.floor(fu); y++) {
+                if (w.get(vx, y, vz) == BlockKind.UNKNOWN) return INF; // no blind leaps into the unknown
+            }
+            int blocks = (int) Math.ceil(fu - (vy + 1) - 1e-6);
+            return flat * step + (blocks > 0 ? Costs.fallTicks(blocks) : 0);
+        }
+        double fv = feet(v);
+        if (Double.isNaN(fv) || fv < uy - 0.5 || fv > uy + 1 + 1e-6) return INF;
+        double lo = Math.max(uy, fv);
+        if (!Standing.passage(w, ux, uz, vx, vz, lo, lo + Standing.BODY, true)) return INF;
+        return SWIM * step + (fv > uy + 0.5 ? CLIMB_OUT : 0);
     }
 
     /**
@@ -150,6 +189,8 @@ public final class MoveGraph implements Graph {
         int dx = Pos.x(v) - ux, dz = Pos.z(v) - uz;
         if (Math.abs(dx) > 1 || Math.abs(dz) > 1) return jumpCost(u, v);
         if (dx == 0 && dz == 0) return INF;
+        boolean su = swims(u), sv = swims(v);
+        if (su || sv) return waterCost(u, v, su, sv);
         double fu = feet(u), fv = feet(v);
         if (Double.isNaN(fu) || Double.isNaN(fv)) return INF;
         int vx = ux + dx, vz = uz + dz;
@@ -396,6 +437,18 @@ public final class MoveGraph implements Graph {
                 if (isNode(v)) out.accept(v);
             }
         }
+        if (!Double.isNaN(feet(u))) {
+            // a drop too deep to survive, unless it ends in water
+            for (int[] d : DIRS) {
+                for (int dy = -maxFall - 2; dy >= -WATER_DROP; dy--) {
+                    long v = Pos.offset(u, d[0], dy, d[1]);
+                    BlockKind k = w.get(Pos.x(v), Pos.y(v), Pos.z(v));
+                    if (k == BlockKind.AIR) continue;
+                    if (swims(v)) out.accept(v);
+                    break;
+                }
+            }
+        }
         if (!parkour || Double.isNaN(feet(u)) || !nearGap(u)) return;
         for (int[] o : JUMP_OFFSETS) {
             for (int dy = -maxFall; dy <= 1; dy++) {
@@ -417,6 +470,15 @@ public final class MoveGraph implements Graph {
             for (int dy = -1; dy <= 1; dy += 2) {
                 long u = Pos.offset(v, 0, dy, 0);
                 if (isNode(u)) out.accept(u);
+            }
+        }
+        if (swims(v)) {
+            // whoever can drop into this water from high above
+            for (int[] d : DIRS) {
+                for (int dy = maxFall + 2; dy <= WATER_DROP; dy++) {
+                    long u = Pos.offset(v, d[0], dy, d[1]);
+                    if (!Double.isNaN(feet(u))) out.accept(u);
+                }
             }
         }
         if (!parkour || Double.isNaN(feet(v))) return; // only real footing takes off or lands a jump
@@ -446,6 +508,6 @@ public final class MoveGraph implements Graph {
 
     @Override
     public int verticalReach() {
-        return maxFall + 4;
+        return Math.max(maxFall, WATER_DROP) + 4;
     }
 }

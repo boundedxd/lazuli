@@ -390,7 +390,7 @@ public final class InputPlanner {
             if (!c.contains(bx, s.y, bz)) return false;
             return world.get(bx, by, bz) != BlockKind.DANGER && world.get(bx, by - 1, bz) != BlockKind.DANGER;
         }
-        if (s.inWater) return s.y >= c.minY - 1.5; // swimming floats a little below the surface block
+        if (s.inWater) return s.y >= c.minY - 1 - Standing.SWIM_DEPTH; // a drop into water sinks deep first
         return s.y >= c.minY - 0.6;
     }
 
