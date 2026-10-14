@@ -2,6 +2,6 @@
 	"required": true,
 	"package": "dev.lazuli.mod.mixin",
 	"compatibilityLevel": "JAVA_21",
-	"client": [],
+	"client": ["ClientLevelMixin"],
 	"injectors": { "defaultRequire": 1 }
 }
