@@ -50,6 +50,11 @@ public final class Digging {
         kinds.clear();
     }
 
+    /** Forgets cached kinds inside these boxes ({x0, y0, z0, x1, y1, z1} each). */
+    public void invalidate(List<int[]> boxes) {
+        kinds.keySet().removeIf(p -> MoveGraph.inAny(p, boxes));
+    }
+
     /** What standing at u takes (cached: the search asks about each cell dozens of times). */
     public Kind kind(int x, int y, int z) {
         long key = Pos.pack(x, y, z);

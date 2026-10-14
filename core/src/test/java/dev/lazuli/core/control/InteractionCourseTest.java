@@ -23,14 +23,14 @@ import static org.junit.jupiter.api.Assertions.*;
  * and a cell clear of the player), and the input planner moving only up to the next edge that still needs building.
  * The sim sneaks like the game, edge guard included.
  */
-class InteractionCourseTest {
+public class InteractionCourseTest {
     static final int BREAK_TICKS = 8;
     static final double REACH = 4.5;
     static final Interaction BOTH = new Interaction(true, true, 64, p -> Interaction.handTicks(p, false));
     static final Interaction BREAK = new Interaction(true, false, 0, p -> Interaction.handTicks(p, false));
     static final Interaction PLACE = new Interaction(false, true, 64, p -> Double.POSITIVE_INFINITY);
 
-    record Run(boolean arrived, int ticks, int breaks, int places, double lowestY, String log) {}
+    public record Run(boolean arrived, int ticks, int breaks, int places, double lowestY, String log) {}
 
     /** The game as far as building goes: blocks appear and vanish in the sim's world. */
     static final class SimHands implements Builder.Hands {
@@ -97,14 +97,19 @@ class InteractionCourseTest {
         }
     }
 
-    static Run drive(GridWorld w, Interaction in, int sx, int sy, int sz, int gx, int gy, int gz, int maxTicks) {
+    public static Run drive(GridWorld w, Interaction in, int sx, int sy, int sz, int gx, int gy, int gz, int maxTicks) {
         return drive(w, in, in.throwaways(), sx, sy, sz, gx, gy, gz, maxTicks);
     }
 
-    static Run drive(GridWorld w, Interaction in, int blocks, int sx, int sy, int sz, int gx, int gy, int gz, int maxTicks) {
+    public static Run drive(GridWorld w, Interaction in, int blocks, int sx, int sy, int sz, int gx, int gy, int gz, int maxTicks) {
+        return drive(w, in, blocks, false, sx, sy, sz, gx, gy, gz, maxTicks);
+    }
+
+    public static Run drive(GridWorld w, Interaction in, int blocks, boolean parkour, int sx, int sy, int sz, int gx, int gy, int gz,
+                     int maxTicks) {
         List<String> msgs = new ArrayList<>();
         Settings settings = new Settings();
-        settings.allowParkour.set(false);
+        settings.allowParkour.set(parkour);
         SimHands[] handsRef = new SimHands[1];
         PathingSession session = new PathingSession(w, () -> -64, () -> 319, settings, Runnable::run, msgs::add,
             () -> handsRef[0] == null ? in : new Interaction(in.allowBreak(), in.allowPlace(), handsRef[0].blocks, in.breakTime()));
@@ -117,10 +122,12 @@ class InteractionCourseTest {
         InputPlanner planner = new InputPlanner(w);
         PathFollower fallback = new PathFollower(w);
         PathTracker tracker = new PathTracker();
+        EdgeWatch edgeWatch = new EdgeWatch();
         float yaw = PathFollower.yawTo(sx, sz, gx, gz), pitch = 10f;
         long lastBlock = Long.MIN_VALUE;
         int offPath = 0;
         double lowest = s.y;
+        long shownVersion = -1;
         StringBuilder log = new StringBuilder();
         for (int t = 0; t < maxTicks; ) {
             PathingSession.Snapshot snap = session.snapshot();
@@ -130,10 +137,14 @@ class InteractionCourseTest {
             if (snap.state() != PathingSession.State.PATHING) {
                 return new Run(false, t, hands.breaks, hands.places, lowest, msgs + "\n" + log);
             }
-            if (s.y < -20) return new Run(false, t, hands.breaks, hands.places, lowest, "fell\n" + log);
+            if (s.y < -40) return new Run(false, t, hands.breaks, hands.places, lowest, "fell\n" + log);
             long block = s.onGround ? Standing.nodeUnder(w, s.x, s.y, s.z)
                 : Pos.pack((int) Math.floor(s.x), (int) Math.floor(s.y + 1e-9), (int) Math.floor(s.z));
             List<Long> path = snap.path();
+            if (snap.version() != shownVersion && log.length() < 30000) {
+                shownVersion = snap.version();
+                log.append("path v").append(shownVersion).append(' ').append(path.stream().map(Pos::toString).toList()).append(System.lineSeparator());
+            }
             int idx = tracker.update(path, snap.version(), Pos.x(block), Pos.y(block), Pos.z(block));
             boolean onNode = PathTracker.onNode(path, idx, Pos.x(block), Pos.y(block), Pos.z(block));
             if (onNode) offPath = 0; else if (s.onGround) offPath++;
@@ -154,6 +165,8 @@ class InteractionCourseTest {
             } else {
                 planner.reset();
             }
+            long[] failed = edgeWatch.update(path, idx, block, s.onGround, Math.hypot(s.vx, s.vz), building);
+            if (failed != null) session.edgeFailed(failed[0], failed[1]);
             if (c == null) c = new Controls(false, false, false, yaw, pitch);
             yaw = InputPlanner.approach(yaw, c.targetYaw(), CourseTest.MAX_TURN);
             pitch = c.targetPitch();
@@ -161,8 +174,9 @@ class InteractionCourseTest {
             lowest = Math.min(lowest, s.y);
             t++;
             if (log.length() < 30000) {
-                log.append(String.format("t=%d pos=(%.2f,%.2f,%.2f) g=%s idx=%d/%d in=%d%s%s%s%n", t, s.x, s.y, s.z, s.onGround,
-                    idx, path.size(), c.impulse(), c.jump() ? "J" : "", c.sneak() ? "S" : "", building ? " build" : ""));
+                log.append(String.format("t=%d pos=(%.2f,%.2f,%.2f) g=%s idx=%d/%d in=%d%s%s%s block=%s path0=%s%n", t, s.x, s.y, s.z,
+                    s.onGround, idx, path.size(), c.impulse(), c.jump() ? "J" : "", c.sneak() ? "S" : "", building ? " build" : "",
+                    Pos.toString(block), path.isEmpty() ? "-" : Pos.toString(path.get(0))));
             }
         }
         return new Run(false, maxTicks, hands.breaks, hands.places, lowest, "timeout\n" + log);

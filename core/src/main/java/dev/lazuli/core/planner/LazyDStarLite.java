@@ -77,20 +77,38 @@ public final class LazyDStarLite {
         start = newStart;
     }
 
+    /** The player couldn't make it along u->v: treat that edge as impassable until the blocks around it change. */
+    public void edgeFailed(long u, long v) {
+        evaluated.computeIfAbsent(u, k -> new HashMap<>()).put(v, INF);
+        recompute(u);
+    }
+
     /** Blocks inside the box changed: un-evaluate and repair every vertex whose edges may depend on them. */
     public void regionChanged(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
-        graph.invalidate();
+        regionsChanged(List.of(new int[]{minX, minY, minZ, maxX, maxY, maxZ}));
+    }
+
+    /**
+     * Blocks inside these boxes changed: un-evaluate and repair every vertex whose edges may depend on them.
+     *
+     * @return how many vertices the search had touched there (0: the current plan can't have changed)
+     */
+    public int regionsChanged(List<int[]> boxes) {
         int hr = graph.horizontalReach() + 1;
         int vr = graph.verticalReach() + 1;
-        int x0 = minX - hr, x1 = maxX + hr, y0 = minY - vr, y1 = maxY + vr, z0 = minZ - hr, z1 = maxZ + hr;
+        List<int[]> wide = new ArrayList<>();
+        for (int[] b : boxes) wide.add(new int[]{b[0] - hr, b[1] - vr, b[2] - hr, b[3] + hr, b[4] + vr, b[5] + hr});
+        graph.invalidate(wide);
         List<Long> affected = new ArrayList<>();
-        for (int cx = x0 >> 4; cx <= x1 >> 4; cx++) {
-            for (int cz = z0 >> 4; cz <= z1 >> 4; cz++) {
-                List<Long> inChunk = nodesByChunk.get(((long) cx << 32) | (cz & 0xFFFFFFFFL));
-                if (inChunk == null) continue;
-                for (long v : inChunk) {
-                    int x = Pos.x(v), y = Pos.y(v), z = Pos.z(v);
-                    if (x >= x0 && x <= x1 && y >= y0 && y <= y1 && z >= z0 && z <= z1) affected.add(v);
+        for (int[] b : wide) {
+            for (int cx = b[0] >> 4; cx <= b[3] >> 4; cx++) {
+                for (int cz = b[2] >> 4; cz <= b[5] >> 4; cz++) {
+                    List<Long> inChunk = nodesByChunk.get(((long) cx << 32) | (cz & 0xFFFFFFFFL));
+                    if (inChunk == null) continue;
+                    for (long v : inChunk) {
+                        int x = Pos.x(v), y = Pos.y(v), z = Pos.z(v);
+                        if (x >= b[0] && x <= b[3] && y >= b[1] && y <= b[4] && z >= b[2] && z <= b[5]) affected.add(v);
+                    }
                 }
             }
         }
@@ -102,6 +120,7 @@ public final class LazyDStarLite {
                 recompute(u);
             });
         }
+        return affected.size();
     }
 
     /**

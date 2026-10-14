@@ -27,6 +27,14 @@ public interface Graph {
     /** The world changed: drop anything cached about it. */
     default void invalidate() {}
 
+    /**
+     * Blocks changed inside these boxes ({x0, y0, z0, x1, y1, z1} each): drop what's cached about nodes and edges
+     * starting inside them. Callers widen the boxes by the reach of an edge first.
+     */
+    default void invalidate(java.util.List<int[]> boxes) {
+        invalidate();
+    }
+
     /** Consistent, symmetric lower bound on the cost between any two positions. */
     double heuristic(long a, long b);
 

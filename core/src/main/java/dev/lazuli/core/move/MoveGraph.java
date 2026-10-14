@@ -234,7 +234,15 @@ public final class MoveGraph implements Graph {
         if (gapLen > maxFlight(dy) + 2 * PLAYER_HALF_WIDTH) return INF;
         // the landing counts anywhere inside v, so the center travels at least d - 0.71; and it can't land before the
         // arc (or a fall, going down) gets there
-        return Math.max(Reach.minTicks(d - 0.71), airTicks(dy, dy > 0 ? 2.2 : 1.2)) + Costs.JUMP_PENALTY;
+        return Math.max(Reach.minTicks(d - 0.71), airTicks(dy, dy > 0 ? 2.2 : 1.2)) + Costs.JUMP_PENALTY + risk(d);
+    }
+
+    /** Ticks per block of jump beyond a 2-block gap: long jumps leave little margin, so a slower sure way can win. */
+    static final double RISK_PER_BLOCK = 20;
+
+    /** What a jump of center distance {@code d} costs for the chance of missing it. */
+    static double risk(double d) {
+        return RISK_PER_BLOCK * Math.max(0, d - 3);
     }
 
     /**
@@ -295,7 +303,8 @@ public final class MoveGraph implements Graph {
             ticks = JumpEvaluator.ticks(w, u, fu, v, fv, sprint);
             jumpTicks.put(e, ticks);
         }
-        return Math.max(opt, ticks + Costs.JUMP_PENALTY);
+        double d = Math.hypot(Pos.x(v) - Pos.x(u), Pos.z(v) - Pos.z(u));
+        return Math.max(opt, ticks + Costs.JUMP_PENALTY + risk(d));
     }
 
     @Override
@@ -305,6 +314,23 @@ public final class MoveGraph implements Graph {
         feetCache.clear();
         costCache.clear();
         dig.invalidate();
+    }
+
+    @Override
+    public void invalidate(java.util.List<int[]> boxes) {
+        nearGap.keySet().removeIf(p -> inAny(p, boxes));
+        feetCache.keySet().removeIf(p -> inAny(p, boxes));
+        jumpTicks.keySet().removeIf(e -> inAny(e.u(), boxes));
+        costCache.keySet().removeIf(e -> inAny(e.u(), boxes));
+        dig.invalidate(boxes);
+    }
+
+    static boolean inAny(long p, java.util.List<int[]> boxes) {
+        int x = Pos.x(p), y = Pos.y(p), z = Pos.z(p);
+        for (int[] b : boxes) {
+            if (x >= b[0] && x <= b[3] && y >= b[1] && y <= b[4] && z >= b[2] && z <= b[5]) return true;
+        }
+        return false;
     }
 
     /** Some block within jump range around u's floor level is not floor, so jumps from u could matter. */

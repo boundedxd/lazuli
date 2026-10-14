@@ -56,6 +56,8 @@ public final class PathingSession {
     private final Consumer<String> messages;
     private final Supplier<Interaction> interaction;
     private final AtomicBoolean replanQueued = new AtomicBoolean();
+    private final AtomicBoolean dirtyQueued = new AtomicBoolean();
+    private final java.util.concurrent.ConcurrentLinkedQueue<int[]> dirty = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private volatile Snapshot snapshot = new Snapshot(State.IDLE, List.of(), null, 0);
 
     // worker-confined
@@ -140,12 +142,30 @@ public final class PathingSession {
         });
     }
 
-    public void regionChanged(int minX, int minYb, int minZ, int maxX, int maxYb, int maxZ) {
+    /** The executor couldn't get along u->v (stuck, or a jump that landed elsewhere): plan around it. */
+    public void edgeFailed(long u, long v) {
         worker.execute(() -> {
             if (planner == null) return;
-            planner.regionChanged(minX, minYb, minZ, maxX, maxYb, maxZ);
+            planner.edgeFailed(u, v);
             scheduleReplan();
         });
+    }
+
+    /**
+     * Blocks changed (a chunk loaded, a block was placed...). Changes pile up and are applied together the next time
+     * the worker gets to them; only changes to blocks the search actually used cause a replan.
+     */
+    public void regionChanged(int minX, int minYb, int minZ, int maxX, int maxYb, int maxZ) {
+        dirty.add(new int[]{minX, minYb, minZ, maxX, maxYb, maxZ});
+        if (dirtyQueued.compareAndSet(false, true)) {
+            worker.execute(() -> {
+                dirtyQueued.set(false);
+                List<int[]> boxes = new ArrayList<>();
+                for (int[] b; (b = dirty.poll()) != null; ) boxes.add(b);
+                if (planner == null || boxes.isEmpty()) return;
+                if (planner.regionsChanged(boxes) > 0) scheduleReplan();
+            });
+        }
     }
 
     private void scheduleReplan() {

@@ -2,6 +2,7 @@ package dev.lazuli.mod.control;
 
 import dev.lazuli.core.control.Builder;
 import dev.lazuli.core.control.Controls;
+import dev.lazuli.core.control.EdgeWatch;
 import dev.lazuli.core.control.InputPlanner;
 import dev.lazuli.core.control.PathFollower;
 import dev.lazuli.core.control.PathTracker;
@@ -37,6 +38,7 @@ public final class PathExecutor {
     private final PathFollower follower;
     private final PathTracker tracker = new PathTracker();
     private final BlockView world;
+    private final EdgeWatch edgeWatch = new EdgeWatch();
     private final InputDriver input = new InputDriver();
     private final Interactor interactor;
     private boolean driving;
@@ -101,6 +103,8 @@ public final class PathExecutor {
             c = planner.plan(state, walkable, idx, sprint, maxTurn);
             if (c == null) c = follower.tick(state, walkable.subList(Math.min(idx, walkable.size() - 1), walkable.size()), sprint);
         }
+        long[] failed = edgeWatch.update(path, idx, block, player.onGround(), Math.hypot(v.x, v.z), interacting);
+        if (failed != null) session.edgeFailed(failed[0], failed[1]);
         if (c == null) c = new Controls(false, false, false, player.getYRot(), player.getXRot());
         float yaw = InputPlanner.approach(player.getYRot(), c.targetYaw(), maxTurn);
         float pitchSpeed = interacting ? maxTurn : PITCH_SPEED;
@@ -125,6 +129,7 @@ public final class PathExecutor {
         interactor.reset();
         offPathTicks = 0;
         tracker.reset();
+        edgeWatch.reset();
         planner.reset();
         follower.reset();
     }

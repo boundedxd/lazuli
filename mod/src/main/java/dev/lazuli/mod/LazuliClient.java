@@ -179,7 +179,7 @@ public final class LazuliClient implements ClientModInitializer {
 	public static void onBlockChanged(ClientLevel level, BlockPos pos, BlockState state) {
 		LazuliClient self = instance;
 		if (self == null || level != self.lastLevel) return;
-		self.cache.set(pos.getX(), pos.getY(), pos.getZ(), BlockClassifier.classify(state), BlockClassifier.physicsId(state));
+		if (!self.cache.set(pos.getX(), pos.getY(), pos.getZ(), BlockClassifier.classify(state), BlockClassifier.physicsId(state))) return;
 		self.session.regionChanged(pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ());
 	}
 }

@@ -191,25 +191,29 @@ public final class WorldCache implements BlockView {
         return chunks.containsKey(key(cx, cz));
     }
 
-    public void set(int x, int y, int z, BlockKind kind) {
-        set(x, y, z, kind, BlockPhysics.DERIVED);
+    public boolean set(int x, int y, int z, BlockKind kind) {
+        return set(x, y, z, kind, BlockPhysics.DERIVED);
     }
 
-    public void set(int x, int y, int z, BlockKind kind, short physicsId) {
+    /** @return whether the block's kind or physics actually changed (most block updates don't matter here) */
+    public boolean set(int x, int y, int z, BlockKind kind, short physicsId) {
         Chunk c = chunks.get(key(x >> 4, z >> 4));
         if (c == null || y < minY || y > maxY()) {
-            return;
+            return false;
         }
         int s = (y - minY) >> 4;
         Section sec = c.sections[s];
         if (sec == null) {
             if (kind == BlockKind.AIR && physicsId == BlockPhysics.DERIVED) {
-                return;
+                return false;
             }
             sec = new Section();
             c.sections[s] = sec;
         }
-        sec.set(index(x, y, z), kind, physicsId);
+        int i = index(x, y, z);
+        if (sec.kind(i) == kind && sec.physics(i) == physicsId) return false;
+        sec.set(i, kind, physicsId);
+        return true;
     }
 
     @Override
