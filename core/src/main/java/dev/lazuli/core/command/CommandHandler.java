@@ -122,6 +122,11 @@ public final class CommandHandler {
 
     private boolean knownAndUnstandable(GoalBlock b) {
         BlockView w = ctx.world();
+        // breaking and placing can make almost any spot standable; the planner decides those
+        Settings s = ctx.settings();
+        if (s.allowBreak.get() || s.allowPlace.get()) {
+            return w.get(b.x(), b.y(), b.z()) == BlockKind.DANGER || w.get(b.x(), b.y() + 1, b.z()) == BlockKind.DANGER;
+        }
         for (int dy = -1; dy <= 1; dy++) {
             if (w.get(b.x(), b.y() + dy, b.z()) == BlockKind.UNKNOWN) return false;
         }

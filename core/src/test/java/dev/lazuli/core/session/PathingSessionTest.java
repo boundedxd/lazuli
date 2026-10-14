@@ -78,4 +78,20 @@ class PathingSessionTest {
         s.playerMoved(Pos.pack(2, 1, 0));
         assertEquals(PathingSession.State.ARRIVED, s.snapshot().state());
     }
+
+    /** A far goal is planned one segment at a time; walking the segments gets there. */
+    @Test
+    void farGoalIsReachedInSegments() {
+        GridWorld w = GridWorld.flatFloor(-10, -40, 400, 40).fill(150, 1, -40, 150, 3, 10, BlockKind.SOLID);
+        PathingSession s = session(w);
+        s.start(new GoalBlock(380, 1, 5), false, Pos.pack(0, 1, 0));
+        assertEquals(PathingSession.State.PATHING, s.snapshot().state(), msgs.toString());
+        List<Long> first = s.snapshot().path();
+        assertTrue(Pos.x(first.get(first.size() - 1)) <= PathingSession.SEGMENT + 5, "first segment ends near the player");
+        for (int step = 0; step < 200 && s.snapshot().state() == PathingSession.State.PATHING; step++) {
+            List<Long> path = s.snapshot().path();
+            s.playerMoved(path.get(Math.min(path.size() - 1, 8)));
+        }
+        assertEquals(PathingSession.State.ARRIVED, s.snapshot().state(), msgs.toString());
+    }
 }

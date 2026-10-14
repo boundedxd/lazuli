@@ -2,6 +2,8 @@ package dev.lazuli.core.session;
 
 import dev.lazuli.core.goal.Goal;
 import dev.lazuli.core.goal.GoalBlock;
+import dev.lazuli.core.goal.GoalNear;
+import dev.lazuli.core.goal.GoalXZ;
 import dev.lazuli.core.move.Interaction;
 import dev.lazuli.core.move.MoveGraph;
 import dev.lazuli.core.move.SafeSpotFinder;
@@ -34,6 +36,17 @@ public final class PathingSession {
     public static final int FALLBACK_NODES = 200_000;
     /** Longest one (re)plan may search before giving up. */
     public static final long MAX_PLAN_NANOS = 8_000_000_000L;
+    /**
+     * Far goals are reached in segments: plan this far (horizontally) toward the goal, walk, and plan the next
+     * segment once the player is {@link #HANDOFF} from the segment's end. Within a segment the planner repairs
+     * incrementally as usual; only the search radius is bounded, so the first path comes fast.
+     */
+    public static final int SEGMENT = 64;
+    public static final int HANDOFF = 24;
+    /** Goals at most this far away (horizontally) are planned directly, which can also prove them unreachable. */
+    public static final int DIRECT = 96;
+    public static final long SEGMENT_NANOS = 1_500_000_000L;
+    private static final int SEGMENT_RADIUS = 4;
 
     private final BlockView world;
     private final IntSupplier minY;
@@ -50,6 +63,8 @@ public final class PathingSession {
     private LazyDStarLite planner;
     private MoveGraph graph;
     private Goal goal;
+    /** The current segment's end, or null while planning straight to {@link #goal}. */
+    private GoalNear segment;
     private boolean fallback;
     private long player;
     /** When the player's reported node stopped being a node (nanoTime), or -1. */
@@ -85,9 +100,8 @@ public final class PathingSession {
             this.fallback = fallback;
             this.player = playerPos;
             this.graph = g;
-            createPlanner();
             messages.accept("Pathing to " + goal.describe());
-            replan();
+            begin();
         });
     }
 
@@ -97,8 +111,7 @@ public final class PathingSession {
         worker.execute(() -> {
             if (planner == null) return;
             this.graph = g;
-            createPlanner();
-            replan();
+            begin();
         });
     }
 
@@ -144,7 +157,56 @@ public final class PathingSession {
         }
     }
 
+    /** Plans from the player: straight to the goal when it's near, otherwise the next segment toward it. */
+    private void begin() {
+        segment = null;
+        int[] t = goalXZ();
+        if (t != null) {
+            double dx = t[0] - Pos.x(player), dz = t[1] - Pos.z(player), d = Math.sqrt(dx * dx + dz * dz);
+            if (d > DIRECT) {
+                // straight ahead first, then fanning out, then nearer, in case the way ahead is a lake or a cliff
+                double[][] tries = {{0, SEGMENT}, {0.6, SEGMENT}, {-0.6, SEGMENT}, {1.2, SEGMENT}, {-1.2, SEGMENT}, {0, SEGMENT / 2.0}};
+                for (double[] tr : tries) {
+                    double c = Math.cos(tr[0]), sn = Math.sin(tr[0]);
+                    double ux = (dx * c - dz * sn) / d, uz = (dx * sn + dz * c) / d;
+                    int wx = (int) Math.round(Pos.x(player) + ux * tr[1]), wz = (int) Math.round(Pos.z(player) + uz * tr[1]);
+                    int wy = Pos.y(player);
+                    if (goal instanceof GoalBlock b) wy += (int) Math.round((b.y() - wy) * tr[1] / d);
+                    else if (goal instanceof GoalNear n) wy += (int) Math.round((n.y() - wy) * tr[1] / d);
+                    segment = new GoalNear(wx, surface(wx, wy, wz), wz, SEGMENT_RADIUS);
+                    createPlanner();
+                    PlanResult r = planner.plan(settings.evalHorizon.get(), MAX_EXPANSIONS, MAX_PATH_LENGTH, SEGMENT_NANOS);
+                    if (r.status() == PlanResult.Status.FOUND) {
+                        publish(State.PATHING, r.path());
+                        return;
+                    }
+                }
+                segment = null; // nothing ahead worked; search the whole way and report honestly
+            }
+        }
+        createPlanner();
+        replan();
+    }
+
+    /** The goal's horizontal target, or null for goals without one (y levels). */
+    private int[] goalXZ() {
+        if (goal instanceof GoalBlock b) return new int[]{b.x(), b.z()};
+        if (goal instanceof GoalXZ g) return new int[]{g.x(), g.z()};
+        if (goal instanceof GoalNear n) return new int[]{n.x(), n.z()};
+        return null;
+    }
+
+    /** The standable y in column (x, z) nearest {@code y}, or {@code y} if none is known nearby. */
+    private int surface(int x, int y, int z) {
+        for (int d = 0; d <= 48; d++) {
+            if (MoveGraph.isStandable(world, x, y - d, z)) return y - d;
+            if (MoveGraph.isStandable(world, x, y + d, z)) return y + d;
+        }
+        return y;
+    }
+
     private void createPlanner() {
+        Goal goal = segment != null ? segment : this.goal;
         List<Long> candidates = new ArrayList<>();
         goal.forEachCandidate(Pos.x(player), Pos.y(player), Pos.z(player), minY.getAsInt(), maxY.getAsInt(), candidates::add);
         long[] arr = new long[candidates.size()];
@@ -161,6 +223,11 @@ public final class PathingSession {
             messages.accept("Arrived at " + goal.describe());
             return;
         }
+        if (segment != null && Math.hypot(segment.x() - Pos.x(player), segment.z() - Pos.z(player)) <= HANDOFF
+            && graph.isNode(player)) {
+            begin(); // the current path stays published while the next segment is planned
+            return;
+        }
         if (!graph.isNode(player) && snapshot.state() == State.PATHING) {
             // the block just placed under the jumping player, or mined from under them: they'll land on a node soon
             long now = System.nanoTime();
@@ -172,6 +239,10 @@ public final class PathingSession {
         PlanResult r = planner.plan(settings.evalHorizon.get(), MAX_EXPANSIONS, MAX_PATH_LENGTH, MAX_PLAN_NANOS);
         if (r.status() == PlanResult.Status.FOUND) {
             publish(State.PATHING, r.path());
+            return;
+        }
+        if (segment != null) {
+            begin(); // this segment's end turned out unreachable: pick another
             return;
         }
         if (fallback) {

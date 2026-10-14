@@ -79,7 +79,8 @@ public final class LazuliRenderer {
                 Gizmos.line(new Vec3(p[i], p[i + 1] + LIFT, p[i + 2]), new Vec3(p[i + 3], p[i + 4] + LIFT, p[i + 5]), color, width);
             }
         }
-        Goal goal = snap.goal() != null ? snap.goal() : pendingGoal.get();
+        // a finished or failed trip keeps its goal in the snapshot; a newer #goal must still show
+        Goal goal = pathing && snap.goal() != null ? snap.goal() : pendingGoal.get();
         if (goal != null && LazuliConfig.renderGoal) drawGoal(mc, goal, width);
     }
 

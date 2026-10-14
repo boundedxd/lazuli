@@ -76,8 +76,17 @@ class CommandTest {
 
     @Test
     void rejectsUnstandableExactGoal() {
-        handler().handle("#goal 5 0 5");
+        CommandHandler h = handler();
+        settings.allowBreak.set(false);
+        settings.allowPlace.set(false);
+        h.handle("#goal 5 0 5");
         assertTrue(replies.get(0).startsWith("Can't stand at"));
+    }
+
+    @Test
+    void acceptsAirGoalWhenItCanBuild() {
+        handler().handle("#goal 5 4 5");
+        assertTrue(replies.get(0).startsWith("Goal set"), replies.toString());
     }
 
     @Test
