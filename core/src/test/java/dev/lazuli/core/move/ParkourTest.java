@@ -99,15 +99,16 @@ class ParkourTest {
     }
 
     @Test
-    void followerTakesOffOnlyOncePastTheEdge() {
+    void followerTakesOffOnTheLastSupportedTick() {
         GridWorld w = strip(-3, 0, 2, 5);
         PathFollower f = new PathFollower(w);
         List<Long> path = List.of(Pos.pack(0, 1, 0), Pos.pack(2, 1, 0));
-        Controls before = f.tick(new PlayerState(0.5, 1, 0.5, -90f, 0, true, false), path, true);
-        assertTrue(before.forward());
-        assertFalse(before.jump());
-        Controls atEdge = f.tick(new PlayerState(0.95, 1, 0.5, -90f, 0, true, false), path, true);
-        assertTrue(atEdge.jump());
-        assertTrue(atEdge.sprint());
+        // sprinting, but the hitbox is still over the block when next tick's vertical move happens: not yet
+        Controls early = f.tick(new PlayerState(1.2, 1, 0.5, -90f, 0, true, false, 0.153, -0.0784, 0, true), path, true);
+        assertTrue(early.forward());
+        assertFalse(early.jump());
+        // hitbox already past the edge but still flagged on ground: last chance, jump now
+        Controls late = f.tick(new PlayerState(1.45, 1, 0.5, -90f, 0, true, false, 0.153, -0.0784, 0, true), path, true);
+        assertTrue(late.jump());
     }
 }

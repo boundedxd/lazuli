@@ -1,4 +1,13 @@
 package dev.lazuli.core.control;
 
-/** Desired key states plus the absolute view direction to turn toward (Minecraft yaw/pitch degrees). */
-public record Controls(boolean forward, boolean jump, boolean sprint, float targetYaw, float targetPitch) {}
+/** Desired movement inputs plus the absolute view direction to turn toward (Minecraft yaw/pitch degrees). */
+public record Controls(boolean forward, boolean back, boolean jump, boolean sprint, float targetYaw, float targetPitch) {
+    public Controls(boolean forward, boolean jump, boolean sprint, float targetYaw, float targetPitch) {
+        this(forward, false, jump, sprint, targetYaw, targetPitch);
+    }
+
+    /** -1, 0 or 1, as vanilla's forward impulse. */
+    public int impulse() {
+        return forward == back ? 0 : forward ? 1 : -1;
+    }
+}

@@ -1,0 +1,147 @@
+package dev.lazuli.core.control;
+
+import dev.lazuli.core.goal.GoalBlock;
+import dev.lazuli.core.physics.PlayerSim;
+import dev.lazuli.core.session.PathingSession;
+import dev.lazuli.core.settings.Settings;
+import dev.lazuli.core.testutil.GridWorld;
+import dev.lazuli.core.world.BlockKind;
+import dev.lazuli.core.world.Pos;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/** Closed loop: planner + tracker + input planner driving the physics sim, the same way the mod's executor does. */
+class CourseTest {
+    static final float MAX_TURN = 45f;
+
+    record Run(boolean arrived, int ticks, String log) {}
+
+    static Run drive(GridWorld w, int sx, int sy, int sz, int gx, int gy, int gz, int maxTicks) {
+        List<String> msgs = new ArrayList<>();
+        PathingSession session = new PathingSession(w, () -> -64, () -> 319, new Settings(), Runnable::run, msgs::add);
+        session.start(new GoalBlock(gx, gy, gz), false, Pos.pack(sx, sy, sz));
+        PlayerSim s = new PlayerSim(w, sx + 0.5, sy, sz + 0.5, 0, 0, 0, true, false);
+        InputPlanner planner = new InputPlanner(w);
+        PathFollower fallback = new PathFollower(w);
+        PathTracker tracker = new PathTracker();
+        float yaw = PathFollower.yawTo(sx, sz, gx, gz);
+        long lastBlock = Long.MIN_VALUE;
+        int offPath = 0;
+        StringBuilder log = new StringBuilder();
+        long planNanos = 0, maxNanos = 0;
+        int plans = 0;
+        for (int t = 0; t < maxTicks; ) {
+            PathingSession.Snapshot snap = session.snapshot();
+            if (snap.state() == PathingSession.State.ARRIVED) {
+                System.out.printf("%s: %d ticks, plan avg %.2f ms max %.2f ms%n", Thread.currentThread().getStackTrace()[2].getMethodName(),
+                    t, planNanos / 1e6 / Math.max(1, plans), maxNanos / 1e6);
+                return new Run(true, t, log.toString());
+            }
+            if (snap.state() != PathingSession.State.PATHING) return new Run(false, t, msgs + "\n" + log);
+            if (s.y < -10) return new Run(false, t, "fell at " + t + "\n" + log);
+            int bx = (int) Math.floor(s.x), by = (int) Math.floor(s.y + 1e-9), bz = (int) Math.floor(s.z);
+            long block = Pos.pack(bx, by, bz);
+            List<Long> path = snap.path();
+            int idx = tracker.update(path, snap.version(), bx, by, bz);
+            boolean onNode = PathTracker.onNode(path, idx, bx, by, bz);
+            if (onNode) offPath = 0; else if (s.onGround) offPath++;
+            if (s.onGround && block != lastBlock && (onNode || offPath > 10)) {
+                lastBlock = block;
+                session.playerMoved(block);
+                continue; // re-read the snapshot (state may now be ARRIVED); no tick passes
+            }
+            PlayerState st = new PlayerState(s.x, s.y, s.z, yaw, 10f, s.onGround, s.horizontalCollision,
+                s.vx, s.vy, s.vz, s.sprinting);
+            long t0 = System.nanoTime();
+            Controls c = idx < 0 ? null : planner.plan(st, path, idx, true, MAX_TURN);
+            long dt = System.nanoTime() - t0;
+            planNanos += dt;
+            maxNanos = Math.max(maxNanos, dt);
+            plans++;
+            boolean planned = c != null;
+            if (c == null && idx >= 0) c = fallback.tick(st, path.subList(idx, path.size()), true);
+            if (c == null) c = new Controls(false, false, false, yaw, 10f);
+            yaw = InputPlanner.approach(yaw, c.targetYaw(), MAX_TURN);
+            s.step(c.impulse(), c.jump(), c.sprint(), yaw);
+            t++;
+            if (log.length() < 20000) {
+                log.append(String.format("t=%d pos=(%.2f,%.2f,%.2f) v=(%.3f,%.3f) g=%s idx=%d %s in=%d%s%s yaw=%.0f%n",
+                    t, s.x, s.y, s.z, s.vx, s.vz, s.onGround, idx, planned ? "P" : "F", c.impulse(), c.jump() ? "J" : "", c.sprint() ? "S" : "", yaw));
+            }
+        }
+        return new Run(false, maxTicks, "timeout\n" + log);
+    }
+
+    /** 1-wide strips along +x at y=0, z=0. */
+    static GridWorld strip(int... ranges) {
+        GridWorld w = new GridWorld(BlockKind.AIR);
+        for (int i = 0; i < ranges.length; i += 2) w.fill(ranges[i], 0, 0, ranges[i + 1], 0, 0, BlockKind.SOLID);
+        return w;
+    }
+
+    static void assertArrives(Run r, int maxTicks) {
+        assertTrue(r.arrived(), r.log());
+        assertTrue(r.ticks() <= maxTicks, "took " + r.ticks() + " ticks\n" + r.log());
+    }
+
+    @Test
+    void consecutiveOneGapsOnSingleBlocks() {
+        Run r = drive(strip(0, 2, 4, 4, 6, 6, 8, 8, 10, 13), 0, 1, 0, 13, 1, 0, 400);
+        assertArrives(r, 120);
+    }
+
+    @Test
+    void twoGapThenJumpUpThenThreeGap() {
+        GridWorld w = strip(0, 4, 7, 10).fill(12, 1, 0, 14, 1, 0, BlockKind.SOLID).fill(18, 0, 0, 22, 1, 0, BlockKind.SOLID);
+        Run r = drive(w, 0, 1, 0, 22, 2, 0, 400);
+        assertArrives(r, 150);
+    }
+
+    @Test
+    void oneGapOntoASingleBlockThenATurn() {
+        // landing block (3,0) then the path turns to +z: must not overshoot the landing
+        GridWorld w = strip(0, 1, 3, 3).fill(3, 0, 1, 3, 0, 6, BlockKind.SOLID);
+        Run r = drive(w, 0, 1, 0, 3, 1, 6, 300);
+        assertArrives(r, 100);
+    }
+
+    @Test
+    void longOneWideBridgeIsSprintedWithoutFallingOff() {
+        Run r = drive(strip(0, 60), 0, 1, 0, 60, 1, 0, 400);
+        // sprinting is 5.6 b/s (≈214 ticks for 60 blocks... at 20 tps: 60/0.28 = 214); sprint-jumping is faster
+        assertArrives(r, 185); // chained sprint-jumps: ~7 b/s
+    }
+
+    @Test
+    void openFlatIsFasterThanPlainSprinting() {
+        GridWorld w = GridWorld.flatFloor(-5, -5, 70, 70);
+        Run r = drive(w, 0, 1, 0, 60, 1, 30, 600);
+        double dist = Math.hypot(60, 30);
+        assertArrives(r, (int) (0.92 * dist / 0.2806)); // clearly beats straight-line sprinting
+    }
+
+    @Test
+    void staircaseOfAscends() {
+        GridWorld w = new GridWorld(BlockKind.AIR);
+        for (int x = 0; x <= 12; x++) w.fill(x, 0, -1, x, x / 2, 1, BlockKind.SOLID);
+        Run r = drive(w, 0, 1, 0, 12, 7, 0, 400);
+        assertArrives(r, 120);
+    }
+
+    @Test
+    void zigzagGapsWithTurns() {
+        GridWorld w = new GridWorld(BlockKind.AIR)
+            .fill(0, 0, 0, 2, 0, 0, BlockKind.SOLID)
+            .set(4, 0, 0, BlockKind.SOLID)
+            .set(4, 0, 2, BlockKind.SOLID)
+            .set(6, 0, 2, BlockKind.SOLID)
+            .set(6, 0, 4, BlockKind.SOLID)
+            .fill(8, 0, 4, 10, 0, 4, BlockKind.SOLID);
+        Run r = drive(w, 0, 1, 0, 10, 1, 4, 400);
+        assertArrives(r, 200);
+    }
+}

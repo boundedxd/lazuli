@@ -1,0 +1,369 @@
+package dev.lazuli.core.control;
+
+import dev.lazuli.core.move.MoveGraph;
+import dev.lazuli.core.physics.PlayerSim;
+import dev.lazuli.core.world.BlockKind;
+import dev.lazuli.core.world.BlockView;
+import dev.lazuli.core.world.Pos;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
+/**
+ * Local input search (model-predictive control). Each tick it beam-searches input sequences (W/none/S,
+ * jump timing, yaw) through {@link PlayerSim}, scores them by progress along the planner's path, and returns
+ * the first input of the best sequence that can still land and come to a stop safely. The path is a corridor,
+ * not a track: any block within one of a path node at the same height is fair game, so it cuts corners,
+ * sprint-jumps flats, brakes in the air and times jumps on its own.
+ */
+public final class InputPlanner {
+    private static final int[] SEGMENTS = {1, 2, 3, 4, 5, 6};
+    private static final int WINDOW = 28;
+    private static final int BEAM = 16;
+    private static final int LOOKAHEAD = 16;
+    private static final int SAFE_TICKS = 60;
+    private static final float PITCH = 10f;
+    private static final double MOMENTUM_WEIGHT = 3.0;
+    private static final double TURN_WEIGHT = 0.004;
+    private static final double LATERAL_WEIGHT = 0.6;
+
+    private final BlockView world;
+
+    public InputPlanner(BlockView world) {
+        this.world = world;
+    }
+
+    private static final class Cand {
+        final PlayerSim s;
+        float yaw;
+        Cand parent;
+        int fwd, len;
+        boolean jump;
+        float segYaw;
+        double score;
+
+        Cand(PlayerSim s, float yaw) {
+            this.s = s;
+            this.yaw = yaw;
+        }
+
+        Cand first() {
+            Cand c = this;
+            while (c.parent != null && c.parent.parent != null) c = c.parent;
+            return c;
+        }
+    }
+
+    /** The chosen input sequence, one entry per tick, kept to warm-start the next tick's search. */
+    private int[] warmFwd = new int[0];
+    private boolean[] warmJump = new boolean[0];
+    private float[] warmYaw = new float[0];
+
+    public void reset() {
+        warmFwd = new int[0];
+        warmJump = new boolean[0];
+        warmYaw = new float[0];
+    }
+
+    /** Path window as a polyline of node centers with cumulative length. */
+    private static final class Corridor {
+        final long[] nodes;
+        /** Nodes plus the run-up blocks of gap jumps: everywhere it may stand. */
+        final long[] cells;
+        final double[] cx, cz, cum;
+        final int[] y;
+        final boolean includesEnd;
+        final int minY;
+
+        Corridor(List<Long> path, int from) {
+            int start = Math.max(0, from - 2);
+            int end = Math.min(path.size(), from + WINDOW);
+            int n = end - start;
+            nodes = new long[n];
+            cx = new double[n];
+            cz = new double[n];
+            cum = new double[n];
+            y = new int[n];
+            int lo = Integer.MAX_VALUE;
+            for (int i = 0; i < n; i++) {
+                long p = path.get(start + i);
+                nodes[i] = p;
+                cx[i] = Pos.x(p) + 0.5;
+                cz[i] = Pos.z(p) + 0.5;
+                y[i] = Pos.y(p);
+                lo = Math.min(lo, y[i]);
+                if (i > 0) cum[i] = cum[i - 1] + Math.hypot(cx[i] - cx[i - 1], cz[i] - cz[i - 1]);
+            }
+            minY = lo;
+            includesEnd = end == path.size();
+            List<Long> all = new ArrayList<>();
+            for (int i = 0; i < n; i++) {
+                all.add(nodes[i]);
+                if (i + 1 < n) {
+                    int dx = Pos.x(nodes[i + 1]) - Pos.x(nodes[i]), dz = Pos.z(nodes[i + 1]) - Pos.z(nodes[i]);
+                    int span = Math.max(Math.abs(dx), Math.abs(dz));
+                    for (int k = 1; k < span; k++) {
+                        all.add(Pos.offset(nodes[i], Integer.signum(dx) * k, 0, Integer.signum(dz) * k));
+                    }
+                }
+            }
+            cells = new long[all.size()];
+            for (int i = 0; i < cells.length; i++) cells[i] = all.get(i);
+        }
+
+        boolean contains(int bx, int by, int bz) {
+            for (long n : cells) {
+                if (Pos.y(n) == by && Math.abs(Pos.x(n) - bx) <= 1 && Math.abs(Pos.z(n) - bz) <= 1) return true;
+            }
+            return false;
+        }
+    }
+
+    /**
+     * @param from    index of the player's node in {@code path}
+     * @param maxTurn yaw change per tick the executor applies (degrees)
+     * @return the input for the next tick, or null if no safe sequence was found
+     */
+    public Controls plan(PlayerState p, List<Long> path, int from, boolean allowSprint, float maxTurn) {
+        if (path.size() < 2 || from >= path.size() - 1 && atEnd(p, path)) {
+            reset();
+            return null;
+        }
+        Corridor c = new Corridor(path, from);
+        float[] yaws = yawOptions(p, path, from);
+        PlayerSim root = new PlayerSim(world, p.x(), p.y(), p.z(), p.vx(), p.vy(), p.vz(), p.onGround(), p.sprinting());
+
+        List<Cand> beam = new ArrayList<>();
+        beam.add(new Cand(root, p.yaw()));
+        List<List<Cand>> levels = new ArrayList<>();
+        for (int depth = 0; depth < SEGMENTS.length; depth++) {
+            int len = SEGMENTS[depth];
+            List<Cand> nextLevel = new ArrayList<>();
+            for (Cand parent : beam) {
+                for (int fwd = 1; fwd >= -1; fwd--) {
+                    for (int jumpI = 0; jumpI < 2; jumpI++) {
+                        boolean jump = jumpI == 1;
+                        for (float segYaw : yaws) {
+                            Cand ch = new Cand(parent.s.copy(), parent.yaw);
+                            if (!rollout(ch, fwd, jump, segYaw, len, allowSprint, maxTurn, c)) continue;
+                            ch.parent = parent;
+                            ch.fwd = fwd;
+                            ch.jump = jump;
+                            ch.segYaw = segYaw;
+                            ch.len = len;
+                            ch.score = score(ch.s, c) - turnPenalty(ch.first().segYaw, p.yaw());
+                            nextLevel.add(ch);
+                        }
+                    }
+                }
+            }
+            if (nextLevel.isEmpty()) break;
+            nextLevel.sort(Comparator.comparingDouble((Cand x) -> -x.score));
+            beam = new ArrayList<>(nextLevel.subList(0, Math.min(BEAM, nextLevel.size())));
+            levels.add(beam);
+        }
+        Cand best = null;
+        boolean full = levels.size() == SEGMENTS.length;
+        for (int lvl = levels.size() - 1; lvl >= 0 && best == null; lvl--) {
+            for (Cand cand : levels.get(lvl)) {
+                if (safe(cand, c, allowSprint)) {
+                    best = cand;
+                    break;
+                }
+                full = false;
+            }
+        }
+        // last tick's plan, shifted by one tick: if it was safe it still is, so a plan never just vanishes
+        Cand warm = warm(root, p, c, allowSprint, maxTurn);
+        if (warm != null && (best == null || !full || warm.score >= best.score - 0.1)) {
+            return remember(warm, allowSprint);
+        }
+        if (best == null) {
+            reset();
+            return null;
+        }
+        return remember(best, allowSprint);
+    }
+
+    private boolean rollout(Cand ch, int fwd, boolean jump, float segYaw, int len, boolean allowSprint, float maxTurn,
+                            Corridor c) {
+        boolean sprint = fwd > 0 && allowSprint;
+        for (int k = 0; k < len; k++) {
+            ch.yaw = approach(ch.yaw, segYaw, maxTurn);
+            ch.s.step(fwd, jump, sprint, ch.yaw); // held, like the key: re-jumps on landing
+            if (!alive(ch.s, c)) return false;
+        }
+        return true;
+    }
+
+    private static double turnPenalty(float yaw0, float yaw) {
+        return TURN_WEIGHT * Math.abs(RotationController.wrap(yaw0 - yaw));
+    }
+
+    private Cand warm(PlayerSim root, PlayerState p, Corridor c, boolean allowSprint, float maxTurn) {
+        int n = warmFwd.length;
+        if (n < 2) return null;
+        Cand prev = new Cand(root.copy(), p.yaw());
+        Cand cur = prev;
+        for (int i = 1; i <= n; i++) {
+            int k = Math.min(i, n - 1); // shift by one, repeat the last tick to keep the horizon length
+            Cand ch = new Cand(cur.s, cur.yaw);
+            if (!rollout(ch, warmFwd[k], warmJump[k], warmYaw[k], 1, allowSprint, maxTurn, c)) return null;
+            ch.parent = cur;
+            ch.fwd = warmFwd[k];
+            ch.jump = warmJump[k];
+            ch.segYaw = warmYaw[k];
+            ch.len = 1;
+            cur = ch;
+        }
+        if (!safe(cur, c, allowSprint)) return null;
+        cur.score = score(cur.s, c) - turnPenalty(cur.first().segYaw, p.yaw());
+        return cur;
+    }
+
+    private Controls remember(Cand best, boolean allowSprint) {
+        List<Cand> chain = new ArrayList<>();
+        for (Cand x = best; x.parent != null; x = x.parent) chain.add(0, x);
+        int total = 0;
+        for (Cand x : chain) total += x.len;
+        warmFwd = new int[total];
+        warmJump = new boolean[total];
+        warmYaw = new float[total];
+        int t = 0;
+        for (Cand x : chain) {
+            for (int k = 0; k < x.len; k++, t++) {
+                warmFwd[t] = x.fwd;
+                warmJump[t] = x.jump;
+                warmYaw[t] = x.segYaw;
+            }
+        }
+        Cand f = chain.get(0);
+        return new Controls(f.fwd > 0, f.fwd < 0, f.jump, f.fwd > 0 && allowSprint, f.segYaw, PITCH);
+    }
+
+    private static boolean atEnd(PlayerState p, List<Long> path) {
+        long e = path.get(path.size() - 1);
+        return Math.hypot(Pos.x(e) + 0.5 - p.x(), Pos.z(e) + 0.5 - p.z()) < 0.25 && p.onGround();
+    }
+
+    private boolean alive(PlayerSim s, Corridor c) {
+        if (s.onGround) {
+            int bx = (int) Math.floor(s.x), by = (int) Math.round(s.y), bz = (int) Math.floor(s.z);
+            if (!c.contains(bx, by, bz)) return false;
+            return world.get(bx, by, bz) != BlockKind.DANGER && world.get(bx, by - 1, bz) != BlockKind.DANGER;
+        }
+        return s.y >= c.minY - 0.6;
+    }
+
+    /** Some continuation (holding W, nothing or S) lands in the corridor and comes to rest there. */
+    private boolean safe(Cand cand, Corridor c, boolean allowSprint) {
+        for (int fwd = 0; fwd >= -1; fwd--) {
+            if (rests(cand, c, fwd, allowSprint)) return true;
+        }
+        return rests(cand, c, 1, allowSprint);
+    }
+
+    private boolean rests(Cand cand, Corridor c, int airFwd, boolean allowSprint) {
+        PlayerSim s = cand.s.copy();
+        for (int t = 0; t < SAFE_TICKS; t++) {
+            if (s.onGround && Math.hypot(s.vx, s.vz) < 0.01) return true;
+            int fwd = s.onGround ? 0 : airFwd;
+            s.step(fwd, false, fwd > 0 && allowSprint, cand.yaw);
+            if (!alive(s, c)) return false;
+        }
+        return false;
+    }
+
+    private static double score(PlayerSim s, Corridor c) {
+        double bestD = Double.POSITIVE_INFINITY, prog = 0, dirX = 0, dirZ = 0;
+        int n = c.nodes.length;
+        for (int i = 0; i + 1 < n; i++) {
+            double ax = c.cx[i], az = c.cz[i], dx = c.cx[i + 1] - ax, dz = c.cz[i + 1] - az;
+            double len2 = dx * dx + dz * dz;
+            double t = len2 < 1e-9 ? 0 : Math.max(0, Math.min(1, ((s.x - ax) * dx + (s.z - az) * dz) / len2));
+            double d = Math.hypot(s.x - (ax + dx * t), s.z - (az + dz * t));
+            if (s.y < Math.min(c.y[i], c.y[i + 1]) - 0.5) d += 3;
+            if (d < bestD) {
+                bestD = d;
+                double len = Math.sqrt(len2);
+                prog = c.cum[i] + t * len;
+                dirX = len > 0 ? dx / len : 0;
+                dirZ = len > 0 ? dz / len : 0;
+            }
+        }
+        if (c.includesEnd) {
+            double total = c.cum[n - 1];
+            double dEnd = Math.hypot(s.x - c.cx[n - 1], s.z - c.cz[n - 1]);
+            if (prog > total - 2.0) {
+                return total + 2 - 1.5 * dEnd - Math.abs(s.y - c.y[n - 1]);
+            }
+        }
+        // velocity as next tick's movement (undo this tick's drag) so ground and air speeds compare fairly
+        double drag = s.onGround ? 0.546 : 0.91;
+        return prog - LATERAL_WEIGHT * bestD + MOMENTUM_WEIGHT * (s.vx * dirX + s.vz * dirZ) / drag;
+    }
+
+    private float[] yawOptions(PlayerState p, List<Long> path, int from) {
+        List<Float> out = new ArrayList<>();
+        long aim = path.get(lookahead(p, path, from));
+        float base = PathFollower.yawTo(p.x(), p.z(), Pos.x(aim) + 0.5, Pos.z(aim) + 0.5);
+        add(out, base);
+        for (int k = 1; k <= 3 && from + k < path.size(); k++) {
+            long n = path.get(from + k);
+            add(out, PathFollower.yawTo(p.x(), p.z(), Pos.x(n) + 0.5, Pos.z(n) + 0.5));
+        }
+        add(out, base + 12f);
+        add(out, base - 12f);
+        add(out, base + 35f);
+        add(out, base - 35f);
+        float[] a = new float[out.size()];
+        for (int i = 0; i < a.length; i++) a[i] = out.get(i);
+        return a;
+    }
+
+    private static void add(List<Float> out, float yaw) {
+        for (float f : out) {
+            if (Math.abs(RotationController.wrap(f - yaw)) < 3f) return;
+        }
+        out.add(yaw);
+    }
+
+    private int lookahead(PlayerState p, List<Long> path, int from) {
+        int y = Pos.y(path.get(from));
+        int best = Math.min(from + 1, path.size() - 1);
+        for (int j = from + 1; j < Math.min(path.size(), from + LOOKAHEAD + 1); j++) {
+            long n = path.get(j), prev = path.get(j - 1);
+            if (Pos.y(n) != y) break;
+            if (Math.max(Math.abs(Pos.x(n) - Pos.x(prev)), Math.abs(Pos.z(n) - Pos.z(prev))) >= 2) break;
+            if (clearLine(p.x(), p.z(), Pos.x(n) + 0.5, Pos.z(n) + 0.5, y)) best = j;
+        }
+        return best;
+    }
+
+    private boolean clearLine(double x0, double z0, double x1, double z1, int y) {
+        double dx = x1 - x0, dz = z1 - z0;
+        double len = Math.hypot(dx, dz);
+        if (len < 1e-6) return true;
+        double ux = dx / len, uz = dz / len, px = -uz * 0.3, pz = ux * 0.3;
+        int steps = (int) Math.ceil(len / 0.25);
+        for (int i = 0; i <= steps; i++) {
+            double t = Math.min(len, i * 0.25);
+            double cx = x0 + ux * t, cz = z0 + uz * t;
+            for (int side = -1; side <= 1; side++) {
+                int bx = (int) Math.floor(cx + px * side), bz = (int) Math.floor(cz + pz * side);
+                if (!(MoveGraph.floor(world.get(bx, y - 1, bz)) && MoveGraph.passable(world.get(bx, y, bz))
+                    && MoveGraph.passable(world.get(bx, y + 1, bz)))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /** Turns {@code yaw} toward {@code target} by at most {@code maxTurn} degrees. */
+    public static float approach(float yaw, float target, float maxTurn) {
+        float d = RotationController.wrap(target - yaw);
+        return yaw + Math.max(-maxTurn, Math.min(maxTurn, d));
+    }
+}

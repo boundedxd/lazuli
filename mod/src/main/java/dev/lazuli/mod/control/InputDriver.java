@@ -7,24 +7,27 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 
-/** Drives the movement keys and mouse look using only vanilla input paths. */
+/**
+ * Baritone-style input: the next tick's movement input is overridden directly (see KeyboardInputMixin) and the
+ * view is set directly, instead of faking key presses and mouse movement.
+ */
 public final class InputDriver {
-    /** Applies key states and a rotation delta (degrees) as if it came from the mouse. */
-    public void apply(Minecraft mc, Controls c, float[] rot) {
-        Options o = mc.options;
-        o.keyUp.setDown(c.forward());
-        o.keySprint.setDown(c.sprint());
-        o.keyJump.setDown(c.jump());
-        // Entity.turn scales its arguments by 0.15, exactly like raw mouse deltas.
-        mc.player.turn(rot[0] / 0.15, rot[1] / 0.15);
+    private static volatile Controls current;
+
+    /** The input the player's next movement tick uses, or null to read the keyboard. */
+    public static Controls current() {
+        return current;
     }
 
-    /** Returns each driven key to whatever the physical keyboard says. */
-    public void release(Minecraft mc) {
-        Options o = mc.options;
-        restore(mc, o.keyUp);
-        restore(mc, o.keySprint);
-        restore(mc, o.keyJump);
+    /** Sets next tick's input and turns to {@code yaw}/{@code pitch} now. */
+    public void apply(Minecraft mc, Controls c, float yaw, float pitch) {
+        current = c;
+        mc.player.setYRot(yaw);
+        mc.player.setXRot(pitch);
+    }
+
+    public void release() {
+        current = null;
     }
 
     /** True if the user is physically pressing a movement key. */
@@ -32,10 +35,6 @@ public final class InputDriver {
         Options o = mc.options;
         return physical(mc, o.keyUp) || physical(mc, o.keyDown) || physical(mc, o.keyLeft)
             || physical(mc, o.keyRight) || physical(mc, o.keyJump);
-    }
-
-    private static void restore(Minecraft mc, KeyMapping k) {
-        k.setDown(physical(mc, k));
     }
 
     private static boolean physical(Minecraft mc, KeyMapping k) {

@@ -21,8 +21,8 @@ public final class RotationController {
 
     private float axis(float err, boolean isYaw, float maxSpeed) {
         float vel = isYaw ? yawVel : pitchVel;
-        float desired = clamp(err * 0.45f, maxSpeed);
-        vel += clamp(desired - vel, maxSpeed / 3f);
+        float desired = clamp(err * 0.6f, maxSpeed);
+        vel += clamp(desired - vel, maxSpeed * 0.6f);
         vel = clamp(vel, maxSpeed);
         float out = vel;
         if (Math.abs(err) < 0.05f && Math.abs(vel) < 0.5f) {
