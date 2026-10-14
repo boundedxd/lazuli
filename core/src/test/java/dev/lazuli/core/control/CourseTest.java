@@ -67,7 +67,7 @@ class CourseTest {
                 continue; // re-read the snapshot (state may now be ARRIVED); no tick passes
             }
             PlayerState st = new PlayerState(s.x, s.y, s.z, yaw, 10f, s.onGround, s.horizontalCollision,
-                s.vx, s.vy, s.vz, s.sprinting);
+                s.vx, s.vy, s.vz, s.sprinting, s.noJumpDelay, s.minorHorizontalCollision);
             long t0 = System.nanoTime();
             Controls c = idx < 0 ? null : planner.plan(st, path, idx, true, MAX_TURN);
             long dt = System.nanoTime() - t0;
@@ -196,6 +196,19 @@ class CourseTest {
         GridWorld w = new GridWorld(BlockKind.AIR).fill(-2, 0, 0, 0, 0, 0, BlockKind.SOLID);
         for (int i = 1; i <= 6; i++) w.fill(3 * i, 0, 0, 3 * i, 0, 4, BlockKind.SOLID);
         assertArrives(drive(w, 0, 1, 0, 18, 1, 2, 400), 110);
+    }
+
+    @Test
+    void jumpUpABlockThenJumpOffItSideways() {
+        // run, jump up onto a 1x1 block, then a gap jump off to the side: it must not turn for the second jump
+        // before it is up
+        for (int side = 1; side <= 3; side++) {
+            GridWorld w = new GridWorld(BlockKind.AIR).fill(-3, 0, 0, 2, 0, 0, BlockKind.SOLID)
+                .fill(3, 0, 0, 3, 1, 0, BlockKind.SOLID).fill(5, 0, side, 5, 1, side, BlockKind.SOLID)
+                .fill(5, 0, side + 1, 9, 1, side + 1, BlockKind.SOLID);
+            Run r = drive(w, -3, 1, 0, 9, 2, side + 1, 300);
+            assertArrives(r, 90);
+        }
     }
 
     @Test

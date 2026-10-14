@@ -10,6 +10,7 @@ import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.world.BlockView;
 import dev.lazuli.core.world.Pos;
+import dev.lazuli.mod.mixin.LivingEntityAccessor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -83,7 +84,8 @@ public final class PathExecutor {
         float maxTurn = settings.rotationSpeed.get().floatValue();
         Vec3 v = player.getDeltaMovement();
         PlayerState state = new PlayerState(player.getX(), player.getY(), player.getZ(), player.getYRot(),
-            player.getXRot(), player.onGround(), player.horizontalCollision, v.x, v.y, v.z, player.isSprinting());
+            player.getXRot(), player.onGround(), player.horizontalCollision, v.x, v.y, v.z, player.isSprinting(),
+            ((LivingEntityAccessor) player).lazuli$noJumpDelay(), player.minorHorizontalCollision);
         Controls c = null;
         if (idx >= 0) {
             c = planner.plan(state, path, idx, sprint, maxTurn);

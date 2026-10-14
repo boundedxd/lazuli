@@ -25,6 +25,10 @@ public final class PlayerSim {
 
     public double x, y, z, vx, vy, vz;
     public boolean onGround, sprinting, horizontalCollision, inWater;
+    /** The last horizontal collision only grazed (movement within 8 degrees of the input): sprinting survives it. */
+    public boolean minorHorizontalCollision;
+    /** This tick's input direction in world space, for {@link #minorHorizontalCollision}. */
+    private double inputX, inputZ;
     public int noJumpDelay;
     private final BlockView world;
 
@@ -54,6 +58,7 @@ public final class PlayerSim {
         s.vy = vy;
         s.noJumpDelay = noJumpDelay;
         s.horizontalCollision = horizontalCollision;
+        s.minorHorizontalCollision = minorHorizontalCollision;
         s.inWater = inWater;
         return s;
     }
@@ -84,6 +89,8 @@ public final class PlayerSim {
         // sprint state (LocalPlayer.aiStep): needs forward impulse; held W keeps it, releasing W stops it
         if (forward <= 0 || inWater) sprinting = false;
         else if (sprintKey) sprinting = true;
+        // LocalPlayer.shouldStopRunSprinting: last tick's head-on collision ends the sprint
+        if (sprinting && horizontalCollision && !minorHorizontalCollision) sprinting = false;
 
         if (noJumpDelay > 0) noJumpDelay--;
         if (Math.abs(vx) < 0.003) vx = 0;
@@ -119,6 +126,8 @@ public final class PlayerSim {
             mz *= scale;
         }
         double ix = mx * cos - mz * sin, iz = mz * cos + mx * sin;
+        inputX = ix;
+        inputZ = iz;
         if (inWater) {
             travelInWater(ix, iz);
         } else {
@@ -181,6 +190,13 @@ public final class PlayerSim {
 
     // ---- Entity.move ----
 
+    /** LocalPlayer.isHorizontalCollisionMinor: the actual movement is within about 8 degrees of the input. */
+    private boolean minorCollision(double mx, double mz) {
+        double i = inputX * inputX + inputZ * inputZ, j = mx * mx + mz * mz;
+        if (i < 1.0E-5F || j < 1.0E-5F) return false;
+        return Math.acos((inputX * mx + inputZ * mz) / Math.sqrt(i * j)) < 0.13962634F;
+    }
+
     private void move(double dx, double dy, double dz) {
         double[] r = collide(dx, dy, dz);
         x += r[0];
@@ -188,6 +204,7 @@ public final class PlayerSim {
         z += r[2];
         boolean hitX = Math.abs(dx - r[0]) > 1e-5, hitZ = Math.abs(dz - r[2]) > 1e-5;
         horizontalCollision = hitX || hitZ;
+        minorHorizontalCollision = horizontalCollision && minorCollision(r[0], r[2]);
         boolean vertical = dy != r[1];
         onGround = vertical && dy < 0;
         if (hitX) vx = 0;

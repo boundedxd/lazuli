@@ -29,6 +29,38 @@ class PlayerSimTest {
     }
 
     @Test
+    void runningIntoAWallStopsSprintingButGrazingOneDoesNot() {
+        GridWorld w = GridWorld.flatFloor(-20, -20, 20, 20).fill(5, 1, -20, 5, 2, 20, BlockKind.SOLID);
+        PlayerSim headOn = at(w, 0.5, 0.5), grazing = at(w, 4.5, -15.5);
+        for (int t = 0; t < 40; t++) {
+            headOn.step(1, false, true, -90f); // straight into the wall
+            grazing.step(1, false, true, -5f); // along the wall, 5 degrees into it: within vanilla's 8 degrees
+        }
+        assertTrue(headOn.horizontalCollision);
+        assertFalse(headOn.sprinting, "a head-on collision stops the sprint");
+        assertTrue(grazing.horizontalCollision && grazing.minorHorizontalCollision);
+        assertTrue(grazing.sprinting, "a minor collision keeps it");
+    }
+
+    @Test
+    void heldJumpWaitsForTheJumpCooldownAfterAQuickLanding() {
+        // jumping up one block lands after a few ticks, before the 10-tick cooldown runs out
+        GridWorld w = GridWorld.flatFloor(-20, -20, 20, 20).fill(1, 1, -20, 20, 1, 20, BlockKind.SOLID);
+        PlayerSim s = at(w, 0.5, 0.5);
+        int jumps = 0, landed = -1;
+        boolean wasGround = true;
+        for (int t = 0; t < 14; t++) {
+            double vy0 = s.vy;
+            s.step(1, true, true, -90f);
+            if (s.vy > 0.3 && vy0 <= 0) jumps++;
+            if (s.onGround && !wasGround && landed < 0) landed = t;
+            wasGround = s.onGround;
+        }
+        assertTrue(landed > 0 && landed < 9, "landed on the block at tick " + landed);
+        assertEquals(2, jumps, "jumps again only once the cooldown ends");
+    }
+
+    @Test
     void jumpPeaksAtVanillaHeightAndLandsAfterTwelveTicks() {
         PlayerSim s = at(FLAT, 0.5, 0.5);
         double peak = 0;

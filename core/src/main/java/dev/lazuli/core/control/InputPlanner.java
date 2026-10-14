@@ -149,7 +149,7 @@ public final class InputPlanner {
         Corridor c = new Corridor(path, from);
         float[] yaws = yawOptions(p, path, from);
         int aimed = aimedCount;
-        PlayerSim root = new PlayerSim(world, p.x(), p.y(), p.z(), p.vx(), p.vy(), p.vz(), p.onGround(), p.sprinting());
+        PlayerSim root = p.sim(world);
 
         List<Cand> beam = new ArrayList<>();
         beam.add(new Cand(root, p.yaw()));
@@ -213,8 +213,9 @@ public final class InputPlanner {
         boolean sprint = fwd > 0 && allowSprint;
         for (int k = 0; k < len; k++) {
             ch.yaw = approach(ch.yaw, segYaw, maxTurn);
+            boolean air = !ch.s.onGround;
             ch.s.step(fwd, strafe, jump, sprint, ch.yaw); // held, like the key: re-jumps on landing
-            if (!alive(ch.s, c)) return false;
+            if (!alive(ch.s, c, air)) return false;
         }
         return true;
     }
@@ -315,13 +316,39 @@ public final class InputPlanner {
         return Math.hypot(Pos.x(e) + 0.5 - p.x(), Pos.z(e) + 0.5 - p.z()) < 0.25 && p.onGround();
     }
 
-    private boolean alive(PlayerSim s, Corridor c) {
+    /** How far inside a block's edge a landing must be: real-game error of a few hundredths can't turn it into a miss. */
+    private static final double LANDING_MARGIN = 0.06;
+
+    /**
+     * Still on track: standing in the corridor away from danger, or in the air above its lowest level. A landing
+     * (this tick, after being in the air) must be firm: supported even with the hitbox shrunk by
+     * {@link #LANDING_MARGIN}.
+     */
+    private boolean alive(PlayerSim s, Corridor c, boolean wasInAir) {
+        if (s.onGround && wasInAir && !firm(s)) return false;
         if (s.onGround) {
             int bx = (int) Math.floor(s.x), by = (int) Math.floor(s.y + 1e-6), bz = (int) Math.floor(s.z);
             if (!c.contains(bx, by, bz)) return false;
             return world.get(bx, by, bz) != BlockKind.DANGER && world.get(bx, by - 1, bz) != BlockKind.DANGER;
         }
         return s.y >= c.minY - 0.6;
+    }
+
+    private boolean firm(PlayerSim s) {
+        double hw = 0.3 - LANDING_MARGIN;
+        int by = (int) Math.floor(s.y - 1e-3);
+        for (int bx = (int) Math.floor(s.x - hw); bx <= (int) Math.floor(s.x + hw); bx++) {
+            for (int bz = (int) Math.floor(s.z - hw); bz <= (int) Math.floor(s.z + hw); bz++) {
+                double[] b = world.physics(bx, by, bz).boxes;
+                for (int i = 0; i < b.length; i += 6) {
+                    if (Math.abs(by + b[i + 4] - s.y) < 1e-3 && bx + b[i + 3] > s.x - hw && bx + b[i] < s.x + hw
+                        && bz + b[i + 5] > s.z - hw && bz + b[i + 2] < s.z + hw) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private static final int UNSAFE = Integer.MIN_VALUE;
@@ -349,8 +376,9 @@ public final class InputPlanner {
         double total = c.cum[c.nodes.length - 1];
         for (int t = 0; t < SAFE_TICKS; t++) {
             yaw = approach(yaw, pursuitYaw(s, c), maxTurn);
+            boolean air = !s.onGround;
             s.step(1, 0, true, true, yaw);
-            if (!alive(s, c)) return false;
+            if (!alive(s, c, air)) return false;
             if (s.onGround && !c.includesEnd && progress(s, c) >= total - 1.5) return true;
         }
         return true;
@@ -391,8 +419,9 @@ public final class InputPlanner {
         for (int t = 0; t < SAFE_TICKS; t++) {
             if (s.onGround && Math.hypot(s.vx, s.vz) < 0.01) return true;
             int fwd = s.onGround ? 0 : airFwd;
+            boolean air = !s.onGround;
             s.step(fwd, false, fwd > 0 && allowSprint, cand.yaw);
-            if (!alive(s, c)) return false;
+            if (!alive(s, c, air)) return false;
         }
         return false;
     }

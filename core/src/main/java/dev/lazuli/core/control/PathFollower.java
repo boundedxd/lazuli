@@ -210,7 +210,7 @@ public final class PathFollower {
     }
 
     private PlayerSim sim(PlayerState p) {
-        return new PlayerSim(world, p.x(), p.y(), p.z(), p.vx(), p.vy(), p.vz(), p.onGround(), p.sprinting());
+        return p.sim(world);
     }
 
     /** Index of the farthest path node on a clear flat straight line from the player; 1 if none beyond the next. */
