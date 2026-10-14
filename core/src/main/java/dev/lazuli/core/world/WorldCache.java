@@ -29,12 +29,45 @@ public final class WorldCache implements BlockView {
             return l != null ? l[i] & 0xFFFF : small[i] & 0xFF;
         }
 
+        // readers don't lock: an index may briefly run ahead of the palette array it reads (the change notification
+        // that follows every write repairs whatever was planned from it)
         BlockKind kind(int i) {
-            return BlockKind.byId(kinds[entry(i)]);
+            int e = entry(i);
+            byte[] k = kinds;
+            return e < k.length ? BlockKind.byId(k[e]) : BlockKind.UNKNOWN;
         }
 
         short physics(int i) {
-            return phys[entry(i)];
+            int e = entry(i);
+            short[] p = phys;
+            return e < p.length ? p[e] : BlockPhysics.DERIVED;
+        }
+
+        /** A section from whole arrays, mapping each distinct (kind, physics) pair once. */
+        static Section of(byte[] k, short[] p) {
+            Section sec = new Section();
+            java.util.HashMap<Integer, Integer> entries = new java.util.HashMap<>();
+            int air = BlockKind.AIR.ordinal() << 16;
+            entries.put(air, 0);
+            int lastKey = air, lastEntry = 0;
+            for (int i = 0; i < 4096; i++) {
+                int key = (k[i] & 0xFF) << 16 | (p == null ? 0 : p[i] & 0xFFFF);
+                if (key != lastKey) {
+                    Integer e = entries.get(key);
+                    if (e == null) {
+                        sec.set(i, BlockKind.byId(k[i]), p == null ? BlockPhysics.DERIVED : p[i]);
+                        entries.put(key, sec.entry(i));
+                        lastKey = key;
+                        lastEntry = sec.entry(i);
+                        continue;
+                    }
+                    lastKey = key;
+                    lastEntry = e;
+                }
+                if (sec.large != null) sec.large[i] = (short) lastEntry;
+                else sec.small[i] = (byte) lastEntry;
+            }
+            return sec;
         }
 
         synchronized void set(int i, BlockKind kind, short physicsId) {
@@ -144,17 +177,8 @@ public final class WorldCache implements BlockView {
             throw new IllegalArgumentException("expected " + sectionCount() + " sections, got " + kinds.length);
         }
         Section[] out = new Section[kinds.length];
-        byte air = (byte) BlockKind.AIR.ordinal();
         for (int s = 0; s < kinds.length; s++) {
-            if (kinds[s] == null) continue;
-            Section sec = new Section();
-            byte[] k = kinds[s];
-            short[] p = physics[s];
-            for (int i = 0; i < 4096; i++) {
-                short id = p == null ? BlockPhysics.DERIVED : p[i];
-                if (k[i] != air || id != BlockPhysics.DERIVED) sec.set(i, BlockKind.byId(k[i]), id);
-            }
-            out[s] = sec;
+            if (kinds[s] != null) out[s] = Section.of(kinds[s], physics[s]);
         }
         chunks.put(key(cx, cz), new Chunk(out));
     }

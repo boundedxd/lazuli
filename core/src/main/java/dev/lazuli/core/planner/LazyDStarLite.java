@@ -49,6 +49,8 @@ public final class LazyDStarLite {
     private long start;
     private double km;
     private long expansions;
+    /** System.nanoTime() after which the current plan() gives up. */
+    private long deadline = Long.MAX_VALUE;
 
     public LazyDStarLite(Graph graph, LongPredicate isGoal, long[] goalCandidates, long start) {
         this.graph = graph;
@@ -107,6 +109,13 @@ public final class LazyDStarLite {
      * repairs if any changed, and repeats until those edges are exact.
      */
     public PlanResult plan(int evalHorizon, long maxExpansions, int maxPathLength) {
+        return plan(evalHorizon, maxExpansions, maxPathLength, Long.MAX_VALUE);
+    }
+
+    /** @param maxNanos wall-clock budget; past it the search stops as if out of expansions */
+    public PlanResult plan(int evalHorizon, long maxExpansions, int maxPathLength, long maxNanos) {
+        long now = System.nanoTime();
+        deadline = maxNanos > Long.MAX_VALUE - now ? Long.MAX_VALUE : now + maxNanos;
         expansions = 0;
         while (true) {
             List<Long> path;
@@ -156,7 +165,7 @@ public final class LazyDStarLite {
             Key top = open.first();
             Node s = node(target);
             if (top.compareKeys(key(target, s)) >= 0 && s.rhs == s.g) return true;
-            if (expansions++ >= maxExpansions) return false;
+            if (expansions++ >= maxExpansions || (expansions & 255) == 0 && System.nanoTime() > deadline) return false;
             long u = top.id();
             Node n = nodes.get(u);
             Key fresh = key(u, n);

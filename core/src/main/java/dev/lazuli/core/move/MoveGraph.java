@@ -38,6 +38,7 @@ public final class MoveGraph implements Graph {
 
     private final java.util.Map<Long, Boolean> nearGap = new java.util.HashMap<>();
     private final java.util.Map<Edge, Double> jumpTicks = new java.util.HashMap<>();
+    private final java.util.Map<Long, Double> feetCache = new java.util.HashMap<>();
 
     private record Edge(long u, long v) {}
 
@@ -85,13 +86,19 @@ public final class MoveGraph implements Graph {
         return w.physics(x, y, z).empty();
     }
 
+    /** Feet height at u (NaN if not standable), cached: the search asks about the same cells hundreds of times. */
     private double feet(long u) {
-        return Standing.feet(w, Pos.x(u), Pos.y(u), Pos.z(u));
+        Double f = feetCache.get(u);
+        if (f == null) {
+            f = Standing.feet(w, Pos.x(u), Pos.y(u), Pos.z(u));
+            feetCache.put(u, f);
+        }
+        return f;
     }
 
     @Override
     public boolean isNode(long u) {
-        return dig.kind(Pos.x(u), Pos.y(u), Pos.z(u)) != Digging.Kind.NONE;
+        return !Double.isNaN(feet(u)) || dig.kind(Pos.x(u), Pos.y(u), Pos.z(u)) != Digging.Kind.NONE;
     }
 
     /**
@@ -154,7 +161,7 @@ public final class MoveGraph implements Graph {
                     return INF;
                 }
             }
-            return Reach.minTicks(Costs.SQRT2 - 0.71) + Costs.JUMP_PENALTY;
+            return Math.max(Reach.minTicks(Costs.SQRT2 - 0.71), airTicks(dh, Math.max(0, dh) + 0.5)) + Costs.JUMP_PENALTY;
         }
         if (dh > 0) {
             // jump up: room to rise in place, then to move over onto v
@@ -179,7 +186,7 @@ public final class MoveGraph implements Graph {
         if (dy > 1 || dy < -maxFall) return INF;
         double dx = vx - ux, dz = vz - uz, d = Math.hypot(dx, dz);
         if (d > JUMP_RANGE + 1e-9) return INF;
-        if (!Standing.standable(w, ux, uy, uz) || !Standing.standable(w, vx, vy, vz)) return INF;
+        if (Double.isNaN(feet(u)) || Double.isNaN(feet(v))) return INF;
         int top = Math.max(uy, vy) + 2;
         // walk the straight line between the centers: the arc needs room, and there must be a real gap
         double ux0 = ux + 0.5, uz0 = uz + 0.5, nx = dx / d, nz = dz / d, px = -nz * 0.3, pz = nx * 0.3;
@@ -190,7 +197,7 @@ public final class MoveGraph implements Graph {
             double t = i * 0.25, cx = ux0 + nx * t, cz = uz0 + nz * t;
             int bx = (int) Math.floor(cx), bz = (int) Math.floor(cz);
             boolean ends = (bx == ux && bz == uz) || (bx == vx && bz == vz);
-            boolean gap = !Standing.hasSupport(w, bx, uy, bz);
+            boolean gap = gapColumn(bx, Math.min(uy, vy), bz);
             if (gap && !ends) {
                 if (firstGap < 0) firstGap = t;
                 lastGap = t;
@@ -214,8 +221,41 @@ public final class MoveGraph implements Graph {
         if (firstGap < 0) return INF; // nothing to jump over: walking edges cover it
         double gapLen = lastGap - firstGap + 0.25;
         if (gapLen > maxFlight(dy) + 2 * PLAYER_HALF_WIDTH) return INF;
-        // the landing counts anywhere inside v, so the center travels at least d - 0.71
-        return Reach.minTicks(d - 0.71) + Costs.JUMP_PENALTY;
+        // the landing counts anywhere inside v, so the center travels at least d - 0.71; and it can't land before the
+        // arc (or a fall, going down) gets there
+        return Math.max(Reach.minTicks(d - 0.71), airTicks(dy, dy > 0 ? 2.2 : 1.2)) + Costs.JUMP_PENALTY;
+    }
+
+    /**
+     * Fewest ticks from leaving the ground to landing {@code dh} higher, minus one for safety. Landing needs a downward
+     * collision, so going up it comes after the jump's apex; going down, walking off and falling may be sooner. A
+     * ceiling may cut the jump short at {@code ceiling} above the start.
+     */
+    static double airTicks(double dh, double ceiling) {
+        int best = Integer.MAX_VALUE;
+        if (dh <= 0) {
+            double y = 0, vy = 0;
+            int t = 0;
+            while (y > dh && t < 400) {
+                vy = (vy - 0.08) * 0.98;
+                y += vy;
+                t++;
+            }
+            // walking off first: the body leaves its block only once the center is 0.8 past the middle
+            best = t + Reach.minTicks(0.8);
+        }
+        double y = 0, vy = 0.42;
+        for (int t = 1; t < 400; t++) {
+            double ny = Math.min(y + vy, ceiling);
+            if (ny <= dh && vy < 0) {
+                best = Math.min(best, t);
+                break;
+            }
+            vy = ny == ceiling && vy > 0 ? 0 : vy;
+            y = ny;
+            vy = (vy - 0.08) * 0.98;
+        }
+        return Math.max(0, best - 1);
     }
 
     /** Generous bound on horizontal flight distance for a jump landing {@code dy} higher. */
@@ -251,6 +291,7 @@ public final class MoveGraph implements Graph {
     public void invalidate() {
         nearGap.clear();
         jumpTicks.clear();
+        feetCache.clear();
     }
 
     /** Some block within jump range around u's floor level is not floor, so jumps from u could matter. */
@@ -260,13 +301,29 @@ public final class MoveGraph implements Graph {
         int x = Pos.x(u), y = Pos.y(u) - 1, z = Pos.z(u);
         boolean found = false;
         for (int[] o : JUMP_OFFSETS) {
-            if (!Standing.hasSupport(w, x + o[0], y + 1, z + o[1])) {
+            if (gapColumn(x + o[0], y + 1, z + o[1])) {
                 found = true;
                 break;
             }
         }
         nearGap.put(u, found);
         return found;
+    }
+
+    /**
+     * A column a jump at this level has to clear: nothing to stand on at it or one below. Shallower dips are walked
+     * (down and back up), and the input planner hops them on its own when that's faster, so they need no jump edges;
+     * without this, hills would sprout thousands of jump edges the physics then has to reject.
+     */
+    private boolean gapColumn(int x, int y, int z) {
+        if (Standing.hasSupport(w, x, y, z)) return false;
+        return !Standing.hasSupport(w, x, y - 1, z) || hazard(x, y - 1, z) || hazard(x, y - 2, z);
+    }
+
+    /** Lava, fire, water...: a dip holding one is never walked through. */
+    private boolean hazard(int x, int y, int z) {
+        BlockKind k = w.get(x, y, z);
+        return k == BlockKind.DANGER || k == BlockKind.WATER;
     }
 
     private static int[][] jumpOffsets() {
@@ -292,9 +349,12 @@ public final class MoveGraph implements Graph {
             out.accept(Pos.offset(u, 0, 1, 0));
             out.accept(Pos.offset(u, 0, -1, 0));
         }
-        if (!parkour || !nearGap(u)) return;
+        if (!parkour || Double.isNaN(feet(u)) || !nearGap(u)) return;
         for (int[] o : JUMP_OFFSETS) {
-            for (int dy = -maxFall; dy <= 1; dy++) out.accept(Pos.offset(u, o[0], dy, o[1]));
+            for (int dy = -maxFall; dy <= 1; dy++) {
+                long v = Pos.offset(u, o[0], dy, o[1]);
+                if (!Double.isNaN(feet(v))) out.accept(v);
+            }
         }
     }
 
@@ -307,7 +367,7 @@ public final class MoveGraph implements Graph {
             out.accept(Pos.offset(v, 0, 1, 0));
             out.accept(Pos.offset(v, 0, -1, 0));
         }
-        if (!parkour) return;
+        if (!parkour || Double.isNaN(feet(v))) return; // only real footing takes off or lands a jump
         for (int[] o : JUMP_OFFSETS) {
             for (int dy = -1; dy <= maxFall; dy++) {
                 long u = Pos.offset(v, -o[0], dy, -o[1]);

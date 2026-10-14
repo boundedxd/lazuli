@@ -32,6 +32,8 @@ public final class PathingSession {
     public static final long MAX_EXPANSIONS = 1_000_000;
     public static final int MAX_PATH_LENGTH = 512;
     public static final int FALLBACK_NODES = 200_000;
+    /** Longest one (re)plan may search before giving up. */
+    public static final long MAX_PLAN_NANOS = 8_000_000_000L;
 
     private final BlockView world;
     private final IntSupplier minY;
@@ -167,7 +169,7 @@ public final class PathingSession {
         } else {
             invalidStartSince = -1;
         }
-        PlanResult r = planner.plan(settings.evalHorizon.get(), MAX_EXPANSIONS, MAX_PATH_LENGTH);
+        PlanResult r = planner.plan(settings.evalHorizon.get(), MAX_EXPANSIONS, MAX_PATH_LENGTH, MAX_PLAN_NANOS);
         if (r.status() == PlanResult.Status.FOUND) {
             publish(State.PATHING, r.path());
             return;

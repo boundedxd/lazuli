@@ -77,6 +77,8 @@ public final class Interactor {
             settings.allowParkour.get()).actions(u, v);
         if (acts.isEmpty()) return null;
         Digging.Action a = acts.get(0);
+        // only what the settings allow and the game can do; otherwise leave it to the planner's next repair
+        if (a.place() ? !settings.allowPlace.get() : !settings.allowBreak.get() || !breakable(mc, a.pos())) return null;
         boolean vertical = Pos.x(u) == Pos.x(v) && Pos.z(u) == Pos.z(v);
         double cx = Pos.x(u) + 0.5, cz = Pos.z(u) + 0.5;
         if (vertical && Math.hypot(p.getX() - cx, p.getZ() - cz) > CENTER) {
@@ -90,7 +92,7 @@ public final class Interactor {
             pillar = a.pos();
             pillarTicks = 0;
             pillarLeftGround = false;
-            return new Controls(false, false, true, false, p.getYRot(), 90f, 0, false);
+            return new Controls(false, false, true, false, p.getYRot(), 90f, 0, true);
         }
         return place(mc, p, a.pos(), a.against());
     }
@@ -111,7 +113,8 @@ public final class Interactor {
         Direction face = Direction.getApproximateNearest(Pos.x(pos) - Pos.x(against), Pos.y(pos) - Pos.y(against),
             Pos.z(pos) - Pos.z(against));
         Vec3 hit = Vec3.atCenterOf(ap).add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
-        if (placeCooldown == 0) {
+        // sneaking, so placing against a chest, door or crafting table doesn't open it
+        if (placeCooldown == 0 && p.isShiftKeyDown()) {
             placeCooldown = PLACE_COOLDOWN;
             if (mc.gameMode.useItemOn(p, InteractionHand.MAIN_HAND, new BlockHitResult(hit, face, ap, false)).consumesAction()) {
                 p.swing(InteractionHand.MAIN_HAND);
@@ -131,7 +134,13 @@ public final class Interactor {
             return null;
         }
         if (!placed && !p.onGround() && p.getY() > y + 1 + 0.02) place(mc, p, pillar, Pos.pack(x, y - 1, z));
-        return new Controls(false, false, p.onGround() && !pillarLeftGround, false, p.getYRot(), 90f, 0, false);
+        return new Controls(false, false, p.onGround() && !pillarLeftGround, false, p.getYRot(), 90f, 0, true);
+    }
+
+    private static boolean breakable(Minecraft mc, long pos) {
+        BlockPos bp = new BlockPos(Pos.x(pos), Pos.y(pos), Pos.z(pos));
+        var state = mc.level.getBlockState(bp);
+        return state.getFluidState().isEmpty() && state.getDestroySpeed(mc.level, bp) >= 0;
     }
 
     private int selectThrowaway(LocalPlayer p) {

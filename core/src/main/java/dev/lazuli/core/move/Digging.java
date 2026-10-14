@@ -117,6 +117,9 @@ public final class Digging {
         int ux = Pos.x(u), uy = Pos.y(u), uz = Pos.z(u);
         int vx = Pos.x(v), vy = Pos.y(v), vz = Pos.z(v);
         int dx = vx - ux, dy = vy - uy, dz = vz - uz;
+        // shape first: the planner asks about hundreds of jump-range neighbours per node
+        boolean vertical = dx == 0 && dz == 0 && Math.abs(dy) == 1;
+        if (!vertical && (Math.abs(dx) + Math.abs(dz) != 1 || dy > 1 || -dy > maxFall)) return INF;
         Kind ku = kind(ux, uy, uz);
         if (!flatFloor(ux, uy, uz, ku)) return INF;
         if (dx == 0 && dz == 0) {
