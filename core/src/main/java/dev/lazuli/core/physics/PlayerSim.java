@@ -22,9 +22,13 @@ public final class PlayerSim {
     private static final double SPRINT_JUMP_BOOST = 0.2;
     private static final double WATER_HEIGHT = 8.0 / 9.0;
     private static final double EPS = 1e-7;
+    /** Attributes.SNEAKING_SPEED default. */
+    private static final double SNEAK_SPEED = 0.3;
 
     public double x, y, z, vx, vy, vz;
     public boolean onGround, sprinting, horizontalCollision, inWater;
+    /** Shift held this tick. */
+    public boolean sneaking;
     /** The last horizontal collision only grazed (movement within 8 degrees of the input): sprinting survives it. */
     public boolean minorHorizontalCollision;
     /** This tick's input direction in world space, for {@link #minorHorizontalCollision}. */
@@ -60,6 +64,7 @@ public final class PlayerSim {
         s.horizontalCollision = horizontalCollision;
         s.minorHorizontalCollision = minorHorizontalCollision;
         s.inWater = inWater;
+        s.sneaking = sneaking;
         return s;
     }
 
@@ -86,8 +91,19 @@ public final class PlayerSim {
      * @param yaw     Minecraft degrees (0 faces +Z, -90 faces +X)
      */
     public void step(int forward, int strafe, boolean jump, boolean sprintKey, float yaw) {
+        step(forward, strafe, jump, sprintKey, false, yaw);
+    }
+
+    /**
+     * Advances one tick.
+     *
+     * @param sneak shift held: input scaled by the sneaking speed (0.3), no sprinting, and on the ground the player
+     *              won't walk off an edge higher than a step ({@code Player.maybeBackOffFromEdge})
+     */
+    public void step(int forward, int strafe, boolean jump, boolean sprintKey, boolean sneak, float yaw) {
+        sneaking = sneak;
         // sprint state (LocalPlayer.aiStep): needs forward impulse; held W keeps it, releasing W stops it
-        if (forward <= 0 || inWater) sprinting = false;
+        if (forward <= 0 || inWater || sneak) sprinting = false;
         else if (sprintKey) sprinting = true;
         // LocalPlayer.shouldStopRunSprinting: last tick's head-on collision ends the sprint
         if (sprinting && horizontalCollision && !minorHorizontalCollision) sprinting = false;
@@ -121,7 +137,7 @@ public final class PlayerSim {
             mz /= len;
             double ax = Math.abs(mx), az = Math.abs(mz);
             double ratio = az > ax ? ax / az : az / ax;
-            double scale = Math.min(0.98 * Math.sqrt(1 + ratio * ratio), 1.0);
+            double scale = Math.min(0.98 * (sneak ? SNEAK_SPEED : 1) * Math.sqrt(1 + ratio * ratio), 1.0);
             mx *= scale;
             mz *= scale;
         }
@@ -198,6 +214,22 @@ public final class PlayerSim {
     }
 
     private void move(double dx, double dy, double dz) {
+        if (sneaking && onGround && dy <= 0) {
+            // Player.maybeBackOffFromEdge: shorten the step on each axis until there's ground within a step below
+            double sx = Math.signum(dx) * 0.05, sz = Math.signum(dz) * 0.05;
+            while (dx != 0 && canFall(dx, 0)) {
+                if (Math.abs(dx) <= 0.05) { dx = 0; break; }
+                dx -= sx;
+            }
+            while (dz != 0 && canFall(0, dz)) {
+                if (Math.abs(dz) <= 0.05) { dz = 0; break; }
+                dz -= sz;
+            }
+            while (dx != 0 && dz != 0 && canFall(dx, dz)) {
+                dx = Math.abs(dx) <= 0.05 ? 0 : dx - sx;
+                dz = Math.abs(dz) <= 0.05 ? 0 : dz - sz;
+            }
+        }
         double[] r = collide(dx, dy, dz);
         x += r[0];
         y += r[1];
@@ -429,6 +461,27 @@ public final class PlayerSim {
     }
 
     /** Box moved by (dx, dy, dz) overlaps no collision box and no liquid (Entity.isFree). */
+    /** Player.canFallAtLeast: nothing to collide with in the step-high slab under the box moved by (dx, dz). */
+    private boolean canFall(double dx, double dz) {
+        double x0 = x - HALF_WIDTH + 1e-7 + dx, x1 = x + HALF_WIDTH - 1e-7 + dx;
+        double z0 = z - HALF_WIDTH + 1e-7 + dz, z1 = z + HALF_WIDTH - 1e-7 + dz;
+        double y0 = y - STEP_HEIGHT - 1e-7, y1 = y;
+        for (int bx = fx(x0); bx <= fx(x1); bx++) {
+            for (int by = fx(y0) - 1; by <= fx(y1); by++) {
+                for (int bz = fx(z0); bz <= fx(z1); bz++) {
+                    double[] b = world.physics(bx, by, bz).boxes;
+                    for (int i = 0; i < b.length; i += 6) {
+                        if (bx + b[i + 3] > x0 && bx + b[i] < x1 && by + b[i + 4] > y0 && by + b[i + 1] < y1
+                            && bz + b[i + 5] > z0 && bz + b[i + 2] < z1) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     private boolean free(double dx, double dy, double dz) {
         double x0 = x - HALF_WIDTH + dx, y0 = y + dy, z0 = z - HALF_WIDTH + dz;
         double x1 = x0 + 2 * HALF_WIDTH, y1 = y0 + HEIGHT, z1 = z0 + 2 * HALF_WIDTH;

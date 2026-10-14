@@ -1,5 +1,6 @@
 package dev.lazuli.mod.control;
 
+import dev.lazuli.core.control.Builder;
 import dev.lazuli.core.control.Controls;
 import dev.lazuli.core.control.InputPlanner;
 import dev.lazuli.core.control.PathFollower;
@@ -26,6 +27,8 @@ import java.util.List;
 public final class PathExecutor {
     private static final long NONE = Long.MIN_VALUE + 1;
     private static final int OFF_PATH_TICKS = 10;
+    /** How far ahead to look for the next block to break or place. */
+    private static final int WALK_HORIZON = 64;
     private static final float PITCH_SPEED = 6f;
 
     private final PathingSession session;
@@ -88,13 +91,15 @@ public final class PathExecutor {
         PlayerState state = new PlayerState(player.getX(), player.getY(), player.getZ(), player.getYRot(),
             player.getXRot(), player.onGround(), player.horizontalCollision, v.x, v.y, v.z, player.isSprinting(),
             ((LivingEntityAccessor) player).lazuli$noJumpDelay(), player.minorHorizontalCollision);
-        Controls c = interactor.tick(mc, path, idx, block);
+        Controls c = interactor.tick(mc, state, path, idx, block);
         boolean interacting = c != null;
         if (interacting) {
             planner.reset();
         } else if (idx >= 0) {
-            c = planner.plan(state, path, idx, sprint, maxTurn);
-            if (c == null) c = follower.tick(state, path.subList(idx, path.size()), sprint);
+            // move only as far as the world allows: up to the next block to break or place, never into the gap after it
+            List<Long> walkable = path.subList(0, Builder.walkableEnd(world, path, idx, WALK_HORIZON) + 1);
+            c = planner.plan(state, walkable, idx, sprint, maxTurn);
+            if (c == null) c = follower.tick(state, walkable.subList(Math.min(idx, walkable.size() - 1), walkable.size()), sprint);
         }
         if (c == null) c = new Controls(false, false, false, player.getYRot(), player.getXRot());
         float yaw = InputPlanner.approach(player.getYRot(), c.targetYaw(), maxTurn);
