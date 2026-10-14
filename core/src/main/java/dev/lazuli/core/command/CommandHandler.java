@@ -28,6 +28,20 @@ public final class CommandHandler {
         void reply(String msg);
 
         void settingsChanged();
+
+        /** Starts recording a golden trace; the reply says where it will be saved. */
+        default void recordStart(String name) {
+            reply("Recording isn't available here");
+        }
+
+        default void recordStop() {
+            reply("Recording isn't available here");
+        }
+
+        /** Opens the settings screen. */
+        default void openConfig() {
+            reply("No config screen here; use set <name> <value>");
+        }
     }
 
     private final Context ctx;
@@ -70,8 +84,21 @@ public final class CommandHandler {
             case "settings" -> {
                 for (Setting<?> s : ctx.settings().all()) ctx.reply(s.name() + " = " + s.format());
             }
-            case "help" -> ctx.reply("Commands: goal [x y z | x z | y | clear] [true|false], path, goto <goal>, stop, set <name> [value], settings");
+            case "record" -> record(args);
+            case "config" -> ctx.openConfig();
+            case "help" -> ctx.reply("Commands: goal [x y z | x z | y | clear] [true|false], path, goto <goal>, stop, "
+                + "set <name> [value], settings, config, record start <name> | stop");
             default -> ctx.reply("Unknown command: " + cmd + ". Try " + prefix + "help");
+        }
+    }
+
+    private void record(String[] args) {
+        if (args.length >= 1 && args[0].equalsIgnoreCase("stop")) {
+            ctx.recordStop();
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("start") && args[1].matches("[A-Za-z0-9_-]+")) {
+            ctx.recordStart(args[1]);
+        } else {
+            ctx.reply("Usage: record start <name> | record stop  (name: letters, digits, _ and -)");
         }
     }
 

@@ -5,7 +5,25 @@
 	"name": "Lazuli",
 	"description": "Lazy D* Lite pathfinding that moves like a real player.",
 	"environment": "client",
-	"entrypoints": { "client": ["dev.lazuli.mod.LazuliClient"] },
-	"mixins": [{ "config": "lazuli.mixins.json", "environment": "client" }],
-	"depends": { "fabricloader": ">=0.19.5", "minecraft": "~1.21.11", "java": ">=21", "fabric-api": "*" }
+	"entrypoints": {
+		"client": [
+			"dev.lazuli.mod.LazuliClient"
+		],
+		"walksylib": [
+			"dev.lazuli.mod.config.LazuliConfig"
+		]
+	},
+	"mixins": [
+		{
+			"config": "lazuli.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*",
+		"walksylib": ">=2.0.2"
+	}
 }

@@ -73,6 +73,7 @@ public final class InputPlanner {
         warmStrafe = new int[0];
         warmJump = new boolean[0];
         warmYaw = new float[0];
+        predicted = new double[0];
     }
 
     /** Path window as a polyline of node centers with cumulative length. */
@@ -197,15 +198,14 @@ public final class InputPlanner {
         }
         // last tick's plan, shifted by one tick: if it was safe it still is, so a plan never just vanishes
         Cand warm = warm(root, p, c, allowSprint, maxTurn);
-        this.maxTurn = maxTurn;
         if (warm != null && (best == null || warm.score >= best.score - 0.1)) {
-            return remember(warm, allowSprint);
+            return remember(warm, root, p.yaw(), c, allowSprint);
         }
         if (best == null) {
             reset();
             return null;
         }
-        return remember(best, allowSprint);
+        return remember(best, root, p.yaw(), c, allowSprint);
     }
 
     private boolean rollout(Cand ch, int fwd, int strafe, boolean jump, float segYaw, int len, boolean allowSprint,
@@ -245,7 +245,6 @@ public final class InputPlanner {
             ch.len = 1;
             cur = ch;
         }
-        this.maxTurn = maxTurn;
         int cont = safe(cur, c, allowSprint);
         if (cont == UNSAFE) return null;
         cur.cont = cont;
@@ -253,7 +252,15 @@ public final class InputPlanner {
         return cur;
     }
 
-    private Controls remember(Cand best, boolean allowSprint) {
+    /** Where the chosen plan takes the player, as x, y, z triples (for rendering); empty when there is none. */
+    private volatile double[] predicted = new double[0];
+    private static final int PREDICT_CONTINUATION = 20;
+
+    public double[] predicted() {
+        return predicted;
+    }
+
+    private Controls remember(Cand best, PlayerSim root, float yaw0, Corridor c, boolean allowSprint) {
         List<Cand> chain = new ArrayList<>();
         for (Cand x = best; x.parent != null; x = x.parent) chain.add(0, x);
         int total = 0;
@@ -272,8 +279,35 @@ public final class InputPlanner {
                 warmYaw[t] = x.segYaw;
             }
         }
+        predict(root, yaw0, c, allowSprint);
         Cand f = chain.get(0);
         return new Controls(f.fwd > 0, f.fwd < 0, f.jump, f.fwd > 0 && allowSprint, f.segYaw, PITCH, f.strafe);
+    }
+
+    private void predict(PlayerSim root, float yaw0, Corridor c, boolean allowSprint) {
+        PlayerSim s = root.copy();
+        float yaw = yaw0;
+        int n = warmFwd.length;
+        double[] out = new double[(n + PREDICT_CONTINUATION + 1) * 3];
+        out[0] = s.x;
+        out[1] = s.y;
+        out[2] = s.z;
+        for (int t = 0; t < n + PREDICT_CONTINUATION; t++) {
+            if (t < n) {
+                yaw = approach(yaw, warmYaw[t], maxTurn);
+                s.step(warmFwd[t], warmStrafe[t], warmJump[t], warmFwd[t] > 0 && allowSprint, yaw);
+            } else if (warmCont == PURSUE) {
+                yaw = approach(yaw, pursuitYaw(s, c), maxTurn);
+                s.step(1, 0, true, true, yaw);
+            } else {
+                int fwd = s.onGround ? 0 : warmCont;
+                s.step(fwd, 0, false, fwd > 0 && allowSprint, yaw);
+            }
+            out[(t + 1) * 3] = s.x;
+            out[(t + 1) * 3 + 1] = s.y;
+            out[(t + 1) * 3 + 2] = s.z;
+        }
+        predicted = out;
     }
 
     private static boolean atEnd(PlayerState p, List<Long> path) {

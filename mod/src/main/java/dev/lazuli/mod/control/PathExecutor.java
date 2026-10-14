@@ -13,7 +13,6 @@ import dev.lazuli.core.world.Pos;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
@@ -95,13 +94,11 @@ public final class PathExecutor {
         float pitch = player.getXRot() + Math.max(-PITCH_SPEED, Math.min(PITCH_SPEED, c.targetPitch() - player.getXRot()));
         input.apply(mc, c, yaw, pitch);
         driving = true;
+    }
 
-        if (settings.renderPath.get() && player.tickCount % 10 == 0) {
-            for (int i = 0; i < Math.min(64, path.size()); i++) {
-                long n = path.get(i);
-                mc.level.addParticle(ParticleTypes.HAPPY_VILLAGER, Pos.x(n) + 0.5, Pos.y(n) + 0.1, Pos.z(n) + 0.5, 0, 0, 0);
-            }
-        }
+    /** The input planner's predicted motion (x, y, z triples), empty when not driving. */
+    public double[] predicted() {
+        return driving ? planner.predicted() : new double[0];
     }
 
     public void release(Minecraft mc) {

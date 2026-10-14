@@ -5,7 +5,13 @@ import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.world.BlockView;
 import dev.lazuli.core.world.WorldCache;
+import dev.lazuli.mod.config.LazuliConfig;
 import dev.lazuli.mod.control.PathExecutor;
+import dev.lazuli.mod.control.TraceRecorder;
+import dev.lazuli.mod.render.LazuliRenderer;
+import main.walksy.lib.core.gui.WalksyLibPanelScreen;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.minecraft.resources.Identifier;
 import dev.lazuli.mod.world.BlockClassifier;
 import dev.lazuli.mod.world.ChunkScanner;
 import net.fabricmc.api.ClientModInitializer;
@@ -21,7 +27,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 
-import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -29,13 +34,15 @@ public final class LazuliClient implements ClientModInitializer {
 	private static LazuliClient instance;
 
 	private final WorldCache cache = new WorldCache(-64, 384);
-	private final Settings settings = new Settings();
+	private final Settings settings = LazuliConfig.SETTINGS;
 	private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
 		Thread t = new Thread(r, "lazuli-planner");
 		t.setDaemon(true);
 		return t;
 	});
-	private Path configFile;
+	private TraceRecorder recorder;
+	private LazuliRenderer renderer;
+	private boolean openConfigNextTick;
 	private PathingSession session;
 	private CommandHandler commands;
 	private PathExecutor executor;
@@ -44,8 +51,8 @@ public final class LazuliClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		instance = this;
-		configFile = FabricLoader.getInstance().getConfigDir().resolve("lazuli.json");
-		SettingsStore.load(configFile, settings);
+		LazuliConfig.stopAction = () -> session.stop();
+		recorder = new TraceRecorder(FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("traces"), this::chat);
 
 		session = new PathingSession(cache, cache::minY, cache::maxY, settings, worker, this::chat);
 		executor = new PathExecutor(session, settings, cache);
@@ -78,9 +85,25 @@ public final class LazuliClient implements ClientModInitializer {
 
 			@Override
 			public void settingsChanged() {
-				SettingsStore.save(configFile, settings);
+				LazuliConfig.save();
+			}
+
+			@Override
+			public void recordStart(String name) {
+				recorder.start(name);
+			}
+
+			@Override
+			public void recordStop() {
+				recorder.stop(Minecraft.getInstance());
+			}
+
+			@Override
+			public void openConfig() {
+				openConfigNextTick = true; // the chat screen is still closing
 			}
 		});
+		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal);
 
 		ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
 			if (Minecraft.getInstance().player == null) return true;
@@ -93,12 +116,30 @@ public final class LazuliClient implements ClientModInitializer {
 		});
 		ClientChunkEvents.CHUNK_LOAD.register(this::onChunkLoad);
 		ClientChunkEvents.CHUNK_UNLOAD.register(this::onChunkUnload);
+		// order matters: the recorder logs this tick's movement before the executor turns the view for the next one
+		ClientTickEvents.END_CLIENT_TICK.register(recorder::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(executor::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("lazuli", "status"), renderer::renderHud);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, mc) -> {
 			lastLevel = null;
 			session.stop();
 			executor.release(mc);
 		});
+	}
+
+	private void onTick(Minecraft mc) {
+		renderer.tick(mc);
+		while (LazuliConfig.STOP.consumeClick()) {
+			if (session.snapshot().state() == PathingSession.State.PATHING) {
+				session.stop();
+				chat("Stopped");
+			}
+		}
+		boolean open = openConfigNextTick;
+		openConfigNextTick = false;
+		while (LazuliConfig.OPEN_CONFIG.consumeClick()) open = mc.screen == null;
+		if (open) mc.setScreen(new WalksyLibPanelScreen(mc.screen, LazuliConfig.ID));
 	}
 
 	private void chat(String msg) {
