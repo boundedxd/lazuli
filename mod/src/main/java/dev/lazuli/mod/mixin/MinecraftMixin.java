@@ -1,5 +1,6 @@
 package dev.lazuli.mod.mixin;
 
+import dev.lazuli.mod.control.ClickGoal;
 import dev.lazuli.mod.control.Interactor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -13,16 +14,26 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** While Lazuli mines, it holds "attack" on its target instead of vanilla stopping the break every tick. */
+/** #click takes the left-click; while Lazuli mines, it holds "attack" on its target instead of vanilla stopping the break every tick. */
 @Mixin(Minecraft.class)
 public abstract class MinecraftMixin {
     @Shadow public MultiPlayerGameMode gameMode;
     @Shadow public LocalPlayer player;
     @Shadow public ClientLevel level;
 
+    @Inject(method = "startAttack", at = @At("HEAD"), cancellable = true)
+    private void lazuli$click(CallbackInfoReturnable<Boolean> cir) {
+        if (ClickGoal.click((Minecraft) (Object) this)) cir.setReturnValue(false);
+    }
+
     @Inject(method = "continueAttack", at = @At("HEAD"), cancellable = true)
     private void lazuli$mine(boolean attacking, CallbackInfo ci) {
+        if (ClickGoal.swallowHeld(attacking)) {
+            ci.cancel();
+            return;
+        }
         BlockPos pos = Interactor.mining();
         if (pos == null || gameMode == null || player == null || level == null) return;
         ci.cancel();

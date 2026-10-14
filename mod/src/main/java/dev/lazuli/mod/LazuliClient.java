@@ -6,6 +6,7 @@ import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.world.BlockView;
 import dev.lazuli.core.world.WorldCache;
 import dev.lazuli.mod.config.LazuliConfig;
+import dev.lazuli.mod.control.ClickGoal;
 import dev.lazuli.mod.control.PathExecutor;
 import dev.lazuli.mod.control.Tools;
 import dev.lazuli.mod.control.TraceRecorder;
@@ -101,10 +102,16 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public void startClick() {
+				ClickGoal.arm();
+			}
+
+			@Override
 			public void openConfig() {
 				openConfigNextTick = true; // the chat screen is still closing
 			}
 		});
+		ClickGoal.init(g -> commands.setGoal(g), this::chat);
 		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal, cache);
 
 		ClientSendMessageEvents.ALLOW_CHAT.register(message -> {

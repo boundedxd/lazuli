@@ -38,6 +38,11 @@ public final class CommandHandler {
             reply("Recording isn't available here");
         }
 
+        /** Arms #click: the next left-click on a block sets the goal (see {@link CommandHandler#setGoal(Goal)}). */
+        default void startClick() {
+            reply("Clicking isn't available here");
+        }
+
         /** Opens the settings screen. */
         default void openConfig() {
             reply("No config screen here; use set <name> <value>");
@@ -86,8 +91,9 @@ public final class CommandHandler {
             }
             case "record" -> record(args);
             case "config" -> ctx.openConfig();
+            case "click" -> ctx.startClick();
             case "help" -> ctx.reply("Commands: goal [x y z | x z | y | clear] [true|false], path, goto <goal>, stop, "
-                + "set <name> [value], settings, config, record start <name> | stop");
+                + "click, set <name> [value], settings, config, record start <name> | stop");
             default -> ctx.reply("Unknown command: " + cmd + ". Try " + prefix + "help");
         }
     }
@@ -100,6 +106,13 @@ public final class CommandHandler {
         } else {
             ctx.reply("Usage: record start <name> | record stop  (name: letters, digits, _ and -)");
         }
+    }
+
+    /** Sets the goal directly (from #click). */
+    public void setGoal(Goal g) {
+        goal = g;
+        fallback = false;
+        ctx.reply("Goal set: " + goal.describe());
     }
 
     private boolean setGoal(String[] args) {

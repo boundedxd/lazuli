@@ -109,4 +109,15 @@ class CommandTest {
         assertTrue(h.handle("!stop"));
         assertFalse(h.handle("#stop"));
     }
+
+    @Test
+    void clickSetsTheGoalFromTheGame() {
+        CommandHandler h = handler();
+        assertTrue(h.handle("#click"));
+        assertEquals("Clicking isn't available here", replies.get(0));
+        h.setGoal(new GoalBlock(3, 1, 4));
+        assertEquals(new GoalBlock(3, 1, 4), h.goal());
+        assertTrue(h.handle("#path"));
+        assertEquals(PathingSession.State.PATHING, session.snapshot().state());
+    }
 }
