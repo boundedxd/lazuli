@@ -1,0 +1,22 @@
+plugins { id 'net.fabricmc.fabric-loom-remap' }
+base { archivesName = 'lazuli' }
+configurations { shade }
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	implementation project(':core')
+	shade project(':core')
+}
+processResources {
+	def version = project.version
+	inputs.property 'version', version
+	filesMatching('fabric.mod.json') { expand 'version': version }
+}
+tasks.withType(JavaCompile).configureEach { it.options.release = 21 }
+java { sourceCompatibility = JavaVersion.VERSION_21; targetCompatibility = JavaVersion.VERSION_21 }
+jar {
+	dependsOn configurations.shade
+	from { configurations.shade.collect { it.isDirectory() ? it : zipTree(it) } }
+}

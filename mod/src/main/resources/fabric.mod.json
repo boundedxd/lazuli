@@ -1,0 +1,11 @@
+{
+	"schemaVersion": 1,
+	"id": "lazuli",
+	"version": "${version}",
+	"name": "Lazuli",
+	"description": "Lazy D* Lite pathfinding that moves like a real player.",
+	"environment": "client",
+	"entrypoints": { "client": ["dev.lazuli.mod.LazuliClient"] },
+	"mixins": [{ "config": "lazuli.mixins.json", "environment": "client" }],
+	"depends": { "fabricloader": ">=0.19.5", "minecraft": "~1.21.11", "java": ">=21", "fabric-api": "*" }
+}
