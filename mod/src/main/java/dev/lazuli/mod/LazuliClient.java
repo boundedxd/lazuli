@@ -8,6 +8,7 @@ import dev.lazuli.core.world.WorldCache;
 import dev.lazuli.mod.config.LazuliConfig;
 import dev.lazuli.core.chat.Chat;
 import dev.lazuli.mod.control.ClickGoal;
+import dev.lazuli.mod.control.FreeCam;
 import dev.lazuli.mod.control.MineProcess;
 import dev.lazuli.mod.process.ExploreProcess;
 import dev.lazuli.mod.process.FarmProcess;
@@ -166,6 +167,16 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public int[] cameraFeet() {
+				return FreeCam.active() ? FreeCam.feet() : playerFeet();
+			}
+
+			@Override
+			public void toggleFreecam() {
+				LazuliClient.this.toggleFreecam(Minecraft.getInstance());
+			}
+
+			@Override
 			public void startClick() {
 				ClickGoal.arm();
 			}
@@ -175,7 +186,10 @@ public final class LazuliClient implements ClientModInitializer {
 				openConfigNextTick = true; // the chat screen is still closing
 			}
 		});
-		ClickGoal.init(g -> commands.setGoal(g), this::chat);
+		ClickGoal.init(g -> commands.setGoal(g), g -> {
+			stopProcesses(false);
+			commands.goTo(g, true);
+		}, this::chat);
 		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal, cache);
 
 		ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
@@ -203,6 +217,7 @@ public final class LazuliClient implements ClientModInitializer {
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("lazuli", "status"), renderer::renderHud);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, mc) -> {
 			lastLevel = null;
+			FreeCam.off();
 			stopProcesses(false);
 			session.stop();
 			executor.release(mc);
@@ -222,6 +237,9 @@ public final class LazuliClient implements ClientModInitializer {
 
 	private void onTick(Minecraft mc) {
 		renderer.tick(mc);
+		FreeCam.tick(mc);
+		while (LazuliConfig.FREECAM.consumeClick()) toggleFreecam(mc);
+		if (mc.player == null) FreeCam.off();
 		// the view (or, with free look, the server-side rotation) is Lazuli's for the whole trip, not just while keys are held
 		if (!busy()) RotationDriver.end();
 		while (LazuliConfig.STOP.consumeClick()) {
@@ -232,6 +250,12 @@ public final class LazuliClient implements ClientModInitializer {
 		openConfigNextTick = false;
 		while (LazuliConfig.OPEN_CONFIG.consumeClick()) open = mc.screen == null;
 		if (open) mc.setScreen(new WalksyLibPanelScreen(mc.screen, LazuliConfig.ID));
+	}
+
+	private void toggleFreecam(Minecraft mc) {
+		FreeCam.toggle(mc);
+		chat(FreeCam.active() ? Chat.ok("Freecam on: fly with WASD, space, shift (sprint: faster); left-click a block to go there")
+			: Chat.warn("Freecam off"));
 	}
 
 	private void chat(String msg) {

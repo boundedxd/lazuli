@@ -17,6 +17,12 @@ public abstract class KeyboardInputMixin extends ClientInput {
     @Inject(method = "tick", at = @At("TAIL"))
     private void lazuli$override(CallbackInfo ci) {
         Controls c = InputDriver.current();
+        if (c == null && dev.lazuli.mod.control.FreeCam.active()) {
+            // the keys fly the camera; the player stands still unless Lazuli drives it
+            this.keyPresses = Input.EMPTY;
+            this.moveVector = Vec2.ZERO;
+            return;
+        }
         if (c == null) return;
         this.keyPresses = new Input(c.forward(), c.back(), c.left(), c.right(), c.jump(), c.sneak(), c.sprint());
         this.moveVector = new Vec2(c.strafe(), c.impulse()).normalized();

@@ -29,6 +29,15 @@ public final class InputPlanner {
     private static final double LATERAL_WEIGHT = 0.6;
     /** Per segment spent looking off the aim lines: corrections come from strafing, like a player would. */
     private static final double OFF_AIM_PENALTY = 0.03;
+    /**
+     * Closer than this (blocks) to the end of the walkable stretch, with nothing ahead to jump up or across, it walks:
+     * a speed hop there just has to be braked out of (mining the next block, say).
+     */
+    private static final double NO_HOP_DIST = 4.0;
+    /** Nor does it hop when one of the next this many edges drops: a hop down a staircase only adds to the fall. */
+    private static final int DOWN_EDGES = 2;
+    /** Recovering mid-air: per degree turned, in blocks of progress. Turning round to brake is worse than overshooting. */
+    private static final double RECOVER_TURN_WEIGHT = 0.02;
     /** {forward, strafe} combinations searched. */
     private static final int[][] ACTIONS = {{1, 0}, {1, 1}, {1, -1}, {0, 0}, {-1, 0}};
 
@@ -171,6 +180,8 @@ public final class InputPlanner {
         float[] yaws = yawOptions(p, path, from);
         int aimed = aimedCount;
         PlayerSim root = p.sim(world);
+        boolean hops = !(c.includesEnd && c.cum[c.nodes.length - 1] - progress(root, c) < NO_HOP_DIST && !jumpAhead(path, from, path.size()))
+            && !(goesDown(path, from, from + DOWN_EDGES) && !jumpAhead(path, from, from + DOWN_EDGES + 1));
 
         List<Cand> beam = new ArrayList<>();
         beam.add(new Cand(root, p.yaw()));
@@ -181,7 +192,7 @@ public final class InputPlanner {
             for (Cand parent : beam) {
                 for (int[] a : ACTIONS) {
                     int fwd = a[0], strafe = a[1];
-                    for (int jumpI = 0; jumpI < 2; jumpI++) {
+                    for (int jumpI = 0; jumpI < (hops ? 2 : 1); jumpI++) {
                         boolean jump = jumpI == 1;
                         for (int yi = 0; yi < yaws.length; yi++) {
                             float segYaw = yaws[yi];
@@ -218,7 +229,7 @@ public final class InputPlanner {
             }
         }
         // last tick's plan, shifted by one tick: if it was safe it still is, so a plan never just vanishes
-        Cand warm = warm(root, p, c, allowSprint, maxTurn);
+        Cand warm = hops || !warmJumps() ? warm(root, p, c, allowSprint, maxTurn) : null;
         if (warm != null && (best == null || warm.score >= best.score - 0.1)) {
             return remember(warm, root, p.yaw(), c, allowSprint);
         }
@@ -257,7 +268,7 @@ public final class InputPlanner {
                     }
                 }
                 if (!ok) continue;
-                double sc = score(s, c);
+                double sc = score(s, c) - RECOVER_TURN_WEIGHT * Math.abs(RotationController.wrap(yaw - p.yaw()));
                 if (sc > bestScore) {
                     bestScore = sc;
                     bestC = new Controls(fwd > 0, fwd < 0, false, fwd > 0 && allowSprint, yaw, PITCH);
@@ -265,6 +276,28 @@ public final class InputPlanner {
             }
         }
         return bestC != null ? bestC : airBrake(p);
+    }
+
+    /** Whether any edge between nodes {@code from} and {@code to} climbs or crosses a gap, so needs a jump. */
+    private static boolean jumpAhead(List<Long> path, int from, int to) {
+        for (int i = Math.max(0, from); i + 1 < Math.min(path.size(), to + 1); i++) {
+            long a = path.get(i), b = path.get(i + 1);
+            if (Pos.y(b) > Pos.y(a) || Math.max(Math.abs(Pos.x(b) - Pos.x(a)), Math.abs(Pos.z(b) - Pos.z(a))) >= 2) return true;
+        }
+        return false;
+    }
+
+    /** Whether any edge between nodes {@code from} and {@code to} goes down. */
+    private static boolean goesDown(List<Long> path, int from, int to) {
+        for (int i = Math.max(0, from); i + 1 < Math.min(path.size(), to + 1); i++) {
+            if (Pos.y(path.get(i + 1)) < Pos.y(path.get(i))) return true;
+        }
+        return false;
+    }
+
+    private boolean warmJumps() {
+        for (boolean j : warmJump) if (j) return true;
+        return false;
     }
 
     private boolean rollout(Cand ch, int fwd, int strafe, boolean jump, float segYaw, int len, boolean allowSprint,

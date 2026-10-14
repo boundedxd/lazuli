@@ -8,6 +8,7 @@ import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.testutil.GridWorld;
 import dev.lazuli.core.world.BlockView;
+import dev.lazuli.core.world.Pos;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -48,7 +49,19 @@ class CommandTest {
             public void farm(int range) {
                 mined.add("farm " + range);
             }
+            public int[] cameraFeet() { return new int[]{12, 1, 7}; }
+            public void toggleFreecam() { mined.add("freecam"); }
         });
+    }
+
+    @Test
+    void comeGoesToTheCameraAndFreecamToggles() {
+        CommandHandler h = handler();
+        h.handle("#come");
+        assertEquals(PathingSession.State.PATHING, session.snapshot().state(), replies.toString());
+        assertEquals(Pos.pack(12, 1, 7), session.snapshot().path().get(session.snapshot().path().size() - 1));
+        h.handle("#freecam");
+        assertEquals(List.of("freecam"), mined);
     }
 
     @Test

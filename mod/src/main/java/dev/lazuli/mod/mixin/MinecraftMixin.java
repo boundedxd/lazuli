@@ -1,6 +1,7 @@
 package dev.lazuli.mod.mixin;
 
 import dev.lazuli.mod.control.ClickGoal;
+import dev.lazuli.mod.control.FreeCam;
 import dev.lazuli.mod.control.Interactor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -28,6 +29,11 @@ public abstract class MinecraftMixin {
         if (ClickGoal.click((Minecraft) (Object) this)) cir.setReturnValue(false);
     }
 
+    @Inject(method = "startUseItem", at = @At("HEAD"), cancellable = true)
+    private void lazuli$noUseInFreecam(CallbackInfo ci) {
+        if (FreeCam.active()) ci.cancel();
+    }
+
     @Inject(method = "continueAttack", at = @At("HEAD"), cancellable = true)
     private void lazuli$mine(boolean attacking, CallbackInfo ci) {
         if (ClickGoal.swallowHeld(attacking)) {
@@ -35,6 +41,10 @@ public abstract class MinecraftMixin {
             return;
         }
         BlockPos pos = Interactor.mining();
+        if (pos == null && FreeCam.active()) {
+            ci.cancel(); // the crosshair is the camera's, far from the player: never break what it's on
+            return;
+        }
         if (pos == null || gameMode == null || player == null || level == null) return;
         ci.cancel();
         Direction face = Interactor.miningFace();

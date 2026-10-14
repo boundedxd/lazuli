@@ -33,12 +33,13 @@ public final class InputDriver {
 
     /** True if the user is physically pressing a movement key. */
     public boolean userInterfering(Minecraft mc) {
+        if (FreeCam.active()) return false; // the keys fly the camera
         Options o = mc.options;
         return physical(mc, o.keyUp) || physical(mc, o.keyDown) || physical(mc, o.keyLeft)
             || physical(mc, o.keyRight) || physical(mc, o.keyJump);
     }
 
-    private static boolean physical(Minecraft mc, KeyMapping k) {
+    public static boolean physical(Minecraft mc, KeyMapping k) {
         InputConstants.Key key = KeyBindingHelper.getBoundKeyOf(k);
         return key.getType() == InputConstants.Type.KEYSYM && InputConstants.isKeyDown(mc.getWindow(), key.getValue());
     }

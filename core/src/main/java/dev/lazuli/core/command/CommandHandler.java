@@ -85,6 +85,16 @@ public final class CommandHandler {
         default void farm(int range) {
             reply(Chat.err("Farming isn't available here"));
         }
+
+        /** The block the camera is in {x, y, z}: the freecam's when it's on, otherwise the player's feet. */
+        default int[] cameraFeet() {
+            return playerFeet();
+        }
+
+        /** Detaches the camera to fly around (or puts it back). */
+        default void toggleFreecam() {
+            reply(Chat.err("Freecam isn't available here"));
+        }
     }
 
     private final Context ctx;
@@ -134,6 +144,12 @@ public final class CommandHandler {
             case "record" -> record(args);
             case "config" -> ctx.openConfig();
             case "click" -> ctx.startClick();
+            case "come" -> {
+                int[] c = ctx.cameraFeet();
+                ctx.stopProcesses();
+                goTo(new GoalBlock(c[0], c[1], c[2]), true);
+            }
+            case "freecam" -> ctx.toggleFreecam();
             case "mine" -> mine(args);
             case "follow" -> follow(args);
             case "explore" -> {
@@ -165,6 +181,8 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "path", "go to the goal"));
         ctx.reply(Chat.usage(p + "goto <goal>", "set the goal and go"));
         ctx.reply(Chat.usage(p + "click", "left-click a block to make it the goal"));
+        ctx.reply(Chat.usage(p + "come", "come to the camera (in freecam: wherever it is)"));
+        ctx.reply(Chat.usage(p + "freecam", "fly the camera around; left-click a block to go there"));
         ctx.reply(Chat.usage(p + "mine [quantity] <block> [block...]", "find and mine blocks, e.g. " + p + "mine 16 diamond_ore"));
         ctx.reply(Chat.usage(p + "follow players | entities | player <name...> | entity <type...>", "keep close to someone"));
         ctx.reply(Chat.usage(p + "explore [x z]", "walk into chunks never loaded, spiralling out"));
@@ -228,6 +246,14 @@ public final class CommandHandler {
         } else {
             ctx.reply(Chat.err("Usage: record start <name> | record stop  (name: letters, digits, _ and -)"));
         }
+    }
+
+    /** Sets the goal and goes (freecam clicks, #come); {@code fallback}: the nearest safe spot will do. */
+    public void goTo(Goal g, boolean fallback) {
+        goal = g;
+        this.fallback = fallback;
+        ctx.reply(Chat.ok("Going to {}", goal.describe()));
+        startPath();
     }
 
     /** Sets the goal directly (from #click). */

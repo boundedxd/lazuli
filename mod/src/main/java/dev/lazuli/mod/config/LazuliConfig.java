@@ -25,6 +25,7 @@ public final class LazuliConfig implements WalksyLibApi {
 
     public static final WLKeyMapping OPEN_CONFIG = WLKeyMapping.create("Open config", GLFW.GLFW_KEY_RIGHT_SHIFT, "Lazuli");
     public static final WLKeyMapping STOP = WLKeyMapping.create("Stop pathing", InputConstants.UNKNOWN.getValue(), "Lazuli");
+    public static final WLKeyMapping FREECAM = WLKeyMapping.create("Freecam", GLFW.GLFW_KEY_F6, "Lazuli");
 
     private static final WLColor DEFAULT_PATH = new WLColor(80, 160, 255, 255);
     private static final WLColor DEFAULT_PREDICTION = new WLColor(255, 200, 40, 255);
@@ -82,6 +83,7 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(Options.ofButton("Stop pathing", () -> stopAction.run()).build())
                     .option(Options.ofKeybind("Stop pathing key", STOP).build())
                     .option(Options.ofKeybind("Open config key", OPEN_CONFIG).build())
+                    .option(Options.ofKeybind("Freecam key", FREECAM).build())
                     .build())
                 .build())
             .category(Category.builder("Planner")

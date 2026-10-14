@@ -45,6 +45,16 @@ public final class RotationDriver {
         return active && freeLook ? pitch : p.getXRot();
     }
 
+    /** Driving with free look: the server's rotation isn't the camera's. */
+    public static boolean freeLooking() {
+        return active && freeLook;
+    }
+
+    /** The pitch to draw the player's head with, between last tick's and the coming one. */
+    public static float renderPitch(float partial) {
+        return fromPitch + (pitch - fromPitch) * Math.max(0, Math.min(1, partial));
+    }
+
     /** Next tick's rotation. */
     public static void set(LocalPlayer p, float newYaw, float newPitch) {
         fromYaw = yaw(p);

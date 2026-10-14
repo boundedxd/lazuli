@@ -19,12 +19,15 @@ public final class ClickGoal {
     /** The button is still held from the click that set the goal. */
     private static volatile boolean swallowing;
     private static Consumer<GoalBlock> onGoal = g -> {};
+    private static Consumer<GoalBlock> go = g -> {};
     private static Consumer<String> chat = m -> {};
 
     private ClickGoal() {}
 
-    public static void init(Consumer<GoalBlock> goalSetter, Consumer<String> messages) {
+    /** @param goer sets the goal and starts going (freecam clicks) */
+    public static void init(Consumer<GoalBlock> goalSetter, Consumer<GoalBlock> goer, Consumer<String> messages) {
         onGoal = goalSetter;
+        go = goer;
         chat = messages;
     }
 
@@ -35,6 +38,19 @@ public final class ClickGoal {
 
     /** Called instead of vanilla's attack; true if the click was used here. */
     public static boolean click(Minecraft mc) {
+        if (FreeCam.active()) {
+            // in freecam every left-click picks a block to go to
+            swallowing = true;
+            BlockHitResult bh = FreeCam.clicked(mc);
+            if (bh == null) {
+                chat.accept(Chat.warn("No block there"));
+                return true;
+            }
+            armed = false;
+            BlockPos p = bh.getBlockPos().above();
+            go.accept(new GoalBlock(p.getX(), p.getY(), p.getZ()));
+            return true;
+        }
         if (!armed) return false;
         Entity cam = mc.getCameraEntity();
         if (cam == null) return false;
