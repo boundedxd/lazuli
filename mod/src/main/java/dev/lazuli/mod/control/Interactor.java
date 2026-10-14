@@ -118,7 +118,7 @@ public final class Interactor implements Builder.Hands {
         BlockPos bp = new BlockPos(Pos.x(pos), Pos.y(pos), Pos.z(pos));
         BlockHitResult hit = crosshair();
         if (hit == null || !hit.getBlockPos().equals(bp)) return;
-        player.getInventory().setSelectedSlot(Tools.bestTool(player, player.level().getBlockState(bp)));
+        Tools.equipBestTool(mc, player, player.level().getBlockState(bp), settings);
         mining = bp;
         miningFace = hit.getDirection();
     }

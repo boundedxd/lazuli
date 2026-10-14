@@ -62,6 +62,29 @@ public final class CommandHandler {
 
         /** Stops whatever process (mining...) is running on top of pathing. */
         default void stopProcesses() {}
+
+        /**
+         * Follows entities: {@code mode} is players, entities, player (names in {@code args}) or entity (type ids in
+         * {@code args}).
+         */
+        default void follow(String mode, List<String> args) {
+            reply(Chat.err("Following isn't available here"));
+        }
+
+        /** Explores outwards from {x, z}, or from the player when null. */
+        default void explore(int[] origin) {
+            reply(Chat.err("Exploring isn't available here"));
+        }
+
+        /** Digs a straight tunnel the way the player faces; depth 0 means no end. */
+        default void tunnel(int height, int width, int depth) {
+            reply(Chat.err("Tunnelling isn't available here"));
+        }
+
+        /** Farms around the player; range 0 means the farmRange setting. */
+        default void farm(int range) {
+            reply(Chat.err("Farming isn't available here"));
+        }
     }
 
     private final Context ctx;
@@ -112,6 +135,25 @@ public final class CommandHandler {
             case "config" -> ctx.openConfig();
             case "click" -> ctx.startClick();
             case "mine" -> mine(args);
+            case "follow" -> follow(args);
+            case "explore" -> {
+                if (args.length == 0) ctx.explore(null);
+                else if (args.length == 2) ctx.explore(new int[]{integer(args[0]), integer(args[1])});
+                else ctx.reply(Chat.err("Usage: explore [x z]"));
+            }
+            case "tunnel" -> {
+                if (args.length == 0) ctx.tunnel(2, 1, 0);
+                else if (args.length == 3) {
+                    int h = integer(args[0]), w = integer(args[1]), d = integer(args[2]);
+                    if (h < 1 || w < 1 || d < 0 || h > 8 || w > 9) ctx.reply(Chat.err("Height 1-8, width 1-9, depth 0 or more"));
+                    else ctx.tunnel(h, w, d);
+                } else ctx.reply(Chat.err("Usage: tunnel [height width depth]"));
+            }
+            case "farm" -> {
+                if (args.length == 0) ctx.farm(0);
+                else if (args.length == 1) ctx.farm(Math.max(1, integer(args[0])));
+                else ctx.reply(Chat.err("Usage: farm [range]"));
+            }
             case "help" -> help(prefix);
             default -> ctx.reply(Chat.err("Unknown command: {}. Try {}help", cmd, prefix));
         }
@@ -124,11 +166,41 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "goto <goal>", "set the goal and go"));
         ctx.reply(Chat.usage(p + "click", "left-click a block to make it the goal"));
         ctx.reply(Chat.usage(p + "mine [quantity] <block> [block...]", "find and mine blocks, e.g. " + p + "mine 16 diamond_ore"));
-        ctx.reply(Chat.usage(p + "stop", "stop pathing and mining"));
+        ctx.reply(Chat.usage(p + "follow players | entities | player <name...> | entity <type...>", "keep close to someone"));
+        ctx.reply(Chat.usage(p + "explore [x z]", "walk into chunks never loaded, spiralling out"));
+        ctx.reply(Chat.usage(p + "tunnel [height width depth]", "dig straight ahead (default 2x1, no end)"));
+        ctx.reply(Chat.usage(p + "farm [range]", "harvest and replant crops around here"));
+        ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
         ctx.reply(Chat.usage(p + "set <name> [value]", "show or change a setting"));
         ctx.reply(Chat.usage(p + "settings", "list every setting"));
         ctx.reply(Chat.usage(p + "config", "open the settings screen"));
         ctx.reply(Chat.usage(p + "record start <name> | stop", "record a movement trace"));
+    }
+
+    /** follow players | entities | player <name...> | entity <type...>; a bare name means that player. */
+    private void follow(String[] args) {
+        if (args.length == 0) {
+            ctx.reply(Chat.err("Usage: follow players | entities | player <name...> | entity <type...>"));
+            return;
+        }
+        String m = args[0].toLowerCase(Locale.ROOT);
+        List<String> rest = List.of(Arrays.copyOfRange(args, 1, args.length));
+        switch (m) {
+            case "players", "entities" -> ctx.follow(m, List.of());
+            case "player", "entity" -> {
+                if (rest.isEmpty()) ctx.reply(Chat.err("Usage: follow {} <{}...>", m, m.equals("player") ? "name" : "type"));
+                else ctx.follow(m, rest.stream().map(s -> s.toLowerCase(Locale.ROOT)).toList());
+            }
+            default -> ctx.follow("player", List.of(args)); // follow Steve
+        }
+    }
+
+    private static int integer(String s) {
+        try {
+            return Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Not a number: " + s);
+        }
     }
 
     /** Baritone's form: mine [quantity] <block> [block...]. */

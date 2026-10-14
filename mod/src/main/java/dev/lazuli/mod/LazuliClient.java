@@ -9,6 +9,12 @@ import dev.lazuli.mod.config.LazuliConfig;
 import dev.lazuli.core.chat.Chat;
 import dev.lazuli.mod.control.ClickGoal;
 import dev.lazuli.mod.control.MineProcess;
+import dev.lazuli.mod.process.ExploreProcess;
+import dev.lazuli.mod.process.FarmProcess;
+import dev.lazuli.mod.process.FollowProcess;
+import dev.lazuli.mod.process.Process;
+import dev.lazuli.mod.process.TunnelProcess;
+import dev.lazuli.mod.process.Upkeep;
 import dev.lazuli.mod.control.PathExecutor;
 import dev.lazuli.mod.control.RotationDriver;
 import dev.lazuli.mod.control.Tools;
@@ -52,6 +58,13 @@ public final class LazuliClient implements ClientModInitializer {
 	private CommandHandler commands;
 	private PathExecutor executor;
 	private MineProcess mine;
+	private FollowProcess follow;
+	private ExploreProcess explore;
+	private TunnelProcess tunnel;
+	private FarmProcess farm;
+	private Upkeep upkeep;
+	/** Every process; at most one runs at a time. */
+	private java.util.List<Process> processes;
 	/** "[Lazuli] " in blue. */
 	private static final String PREFIX = Chat.fmt(Chat.DARK_GRAY, "[") + "\u00a79Lazuli" + Chat.DARK_GRAY + "] " + Chat.GRAY;
 	private ClientLevel lastLevel;
@@ -60,7 +73,7 @@ public final class LazuliClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		instance = this;
 		LazuliConfig.stopAction = () -> {
-			mine.stop(false);
+			stopProcesses(false);
 			session.stop();
 		};
 		recorder = new TraceRecorder(FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("traces"), this::chat);
@@ -69,6 +82,12 @@ public final class LazuliClient implements ClientModInitializer {
 			() -> Tools.snapshot(Minecraft.getInstance().player, settings));
 		executor = new PathExecutor(session, settings, cache, this::chat);
 		mine = new MineProcess(session, settings, cache, this::chat);
+		follow = new FollowProcess(session, settings, this::chat);
+		explore = new ExploreProcess(session, this::chat);
+		tunnel = new TunnelProcess(session, settings, this::chat);
+		farm = new FarmProcess(session, settings, this::chat);
+		upkeep = new Upkeep(settings, this::chat);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -113,12 +132,37 @@ public final class LazuliClient implements ClientModInitializer {
 
 			@Override
 			public void mine(int quantity, java.util.List<String> blocks) {
+				LazuliClient.this.stopProcesses(false);
 				mine.start(Minecraft.getInstance(), quantity, blocks);
 			}
 
 			@Override
 			public void stopProcesses() {
-				mine.stop(true);
+				LazuliClient.this.stopProcesses(true);
+			}
+
+			@Override
+			public void follow(String mode, java.util.List<String> args) {
+				LazuliClient.this.stopProcesses(false);
+				follow.start(FollowProcess.Mode.valueOf(mode.toUpperCase(java.util.Locale.ROOT)), args);
+			}
+
+			@Override
+			public void explore(int[] origin) {
+				LazuliClient.this.stopProcesses(false);
+				explore.start(Minecraft.getInstance(), origin);
+			}
+
+			@Override
+			public void tunnel(int height, int width, int depth) {
+				LazuliClient.this.stopProcesses(false);
+				tunnel.start(Minecraft.getInstance(), height, width, depth);
+			}
+
+			@Override
+			public void farm(int range) {
+				LazuliClient.this.stopProcesses(false);
+				farm.start(Minecraft.getInstance(), range);
 			}
 
 			@Override
@@ -148,23 +192,40 @@ public final class LazuliClient implements ClientModInitializer {
 		// order matters: the recorder logs this tick's movement before the executor turns the view for the next one
 		ClientTickEvents.END_CLIENT_TICK.register(recorder::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(executor::tick);
-		ClientTickEvents.END_CLIENT_TICK.register(mc -> mine.tick(mc)); // after the executor, which clears the mining target
+		// after the executor, which clears the mining target; nothing moves while eating
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+			if (mc.player == null || mc.level == null) return;
+			upkeep.tick(mc, busy());
+			if (Upkeep.eating()) return;
+			for (Process p : processes) p.tick(mc);
+		});
 		ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("lazuli", "status"), renderer::renderHud);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, mc) -> {
 			lastLevel = null;
-			mine.stop(false);
+			stopProcesses(false);
 			session.stop();
 			executor.release(mc);
 		});
 	}
 
+	private void stopProcesses(boolean announce) {
+		for (Process p : processes) p.stop(announce);
+	}
+
+	/** Pathing, or a process running. */
+	private boolean busy() {
+		if (session.snapshot().state() == PathingSession.State.PATHING) return true;
+		for (Process p : processes) if (p.active()) return true;
+		return false;
+	}
+
 	private void onTick(Minecraft mc) {
 		renderer.tick(mc);
 		// the view (or, with free look, the server-side rotation) is Lazuli's for the whole trip, not just while keys are held
-		if (!mine.active() && session.snapshot().state() != PathingSession.State.PATHING) RotationDriver.end();
+		if (!busy()) RotationDriver.end();
 		while (LazuliConfig.STOP.consumeClick()) {
-			if (mine.active()) mine.stop(true);
+			stopProcesses(true);
 			if (session.snapshot().state() == PathingSession.State.PATHING) session.stop();
 		}
 		boolean open = openConfigNextTick;
@@ -189,6 +250,7 @@ public final class LazuliClient implements ClientModInitializer {
 		cache.putChunk(cx, cz, scan.kinds(), scan.physics());
 		session.regionChanged(cx * 16, cache.minY(), cz * 16, cx * 16 + 15, cache.maxY(), cz * 16 + 15);
 		mine.onChunkLoad(chunk);
+		explore.onChunkLoad(chunk);
 	}
 
 	private void onChunkUnload(ClientLevel level, LevelChunk chunk) {

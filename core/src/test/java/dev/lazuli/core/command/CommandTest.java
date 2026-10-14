@@ -36,6 +36,18 @@ class CommandTest {
             public void mine(int quantity, List<String> blocks) {
                 mined.add(quantity + " " + blocks);
             }
+            public void follow(String mode, List<String> args) {
+                mined.add("follow " + mode + " " + args);
+            }
+            public void explore(int[] origin) {
+                mined.add("explore " + (origin == null ? "here" : origin[0] + " " + origin[1]));
+            }
+            public void tunnel(int h, int w, int d) {
+                mined.add("tunnel " + h + " " + w + " " + d);
+            }
+            public void farm(int range) {
+                mined.add("farm " + range);
+            }
         });
     }
 
@@ -47,6 +59,19 @@ class CommandTest {
         h.handle("#mine 5");
         assertEquals(List.of("0 [diamond_ore]", "64 [iron_ore, minecraft:coal_ore]"), mined);
         assertTrue(replies.get(0).startsWith("Usage: mine"), replies.toString());
+    }
+
+    @Test
+    void processCommandsTakeBaritonesArguments() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#follow players", "#follow entities", "#follow player Steve Alex", "#follow entity Zombie",
+            "#follow Notch", "#explore", "#explore 100 -200", "#tunnel", "#tunnel 3 3 50", "#farm", "#farm 16"}) h.handle(c);
+        assertEquals(List.of("follow players []", "follow entities []", "follow player [steve, alex]", "follow entity [zombie]",
+            "follow player [Notch]", "explore here", "explore 100 -200", "tunnel 2 1 0", "tunnel 3 3 50", "farm 0", "farm 16"), mined);
+        h.handle("#tunnel 0 1 5");
+        h.handle("#follow player");
+        h.handle("#explore x 1");
+        assertEquals(3, replies.size(), replies.toString());
     }
 
     @Test

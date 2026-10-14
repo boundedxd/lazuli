@@ -24,6 +24,19 @@ public final class Settings {
     public final Setting<Boolean> freeLook = bool("freeLook", false);
     /** #mine walks over to the drops of each block it breaks. */
     public final Setting<Boolean> minePickup = bool("minePickup", true);
+    /** #follow stops this many blocks from whoever it follows. */
+    public final Setting<Integer> followRadius = integer("followRadius", 3, 1, 32);
+    /** #farm works this far (blocks, horizontally) around where it started. */
+    public final Setting<Integer> farmRange = integer("farmRange", 32, 4, 128);
+    /** Eat from the hotbar while Lazuli is busy and hunger drops to {@link #autoEatHunger}. */
+    public final Setting<Boolean> autoEat = bool("autoEat", true);
+    public final Setting<Integer> autoEatHunger = integer("autoEatHunger", 14, 1, 19);
+    /** Put on better armor from the inventory. */
+    public final Setting<Boolean> autoArmor = bool("autoArmor", true);
+    /** Move the best tool from the inventory into the hotbar when mining. */
+    public final Setting<Boolean> allowInventory = bool("allowInventory", true);
+    /** Never use a tool's last few points of durability. */
+    public final Setting<Boolean> saveTools = bool("saveTools", true);
     public final Setting<Integer> evalHorizon = integer("evalHorizon", 32, 1, 4096);
     public final Setting<Double> heuristicWeight = decimal("heuristicWeight", 1.2, 1.0, 10.0);
     public final Setting<Boolean> renderPath = bool("renderPath", true);

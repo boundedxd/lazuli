@@ -42,7 +42,7 @@ import java.util.function.Consumer;
  * breaks them with the crosshair actually on them, and optionally walks over the drops. Runs on top of the
  * {@link PathingSession}: it starts quiet trips and takes over the controls only to aim and break.
  */
-public final class MineProcess {
+public final class MineProcess implements dev.lazuli.mod.process.Process {
     /** How many of the nearest targets one trip may head for. */
     private static final int TRIP_TARGETS = 12;
     /** Targets this close to the eye are tried straight away, without a trip. */
@@ -89,6 +89,7 @@ public final class MineProcess {
         this.chat = chat;
     }
 
+    @Override
     public boolean active() {
         return phase != Phase.IDLE;
     }
@@ -314,7 +315,7 @@ public final class MineProcess {
         float yaw0 = RotationDriver.yaw(player), pitch0 = RotationDriver.pitch(player);
         BlockHitResult hit = crosshair(mc, player, eye, yaw0, pitch0);
         if (hit != null && hit.getBlockPos().equals(breaking)) {
-            player.getInventory().setSelectedSlot(Tools.bestTool(player, mc.level.getBlockState(breaking)));
+            Tools.equipBestTool(mc, player, mc.level.getBlockState(breaking), settings);
             Interactor.mineAt(breaking, hit.getDirection());
         }
         float yaw = InputPlanner.approach(yaw0, aim[0], maxTurn);

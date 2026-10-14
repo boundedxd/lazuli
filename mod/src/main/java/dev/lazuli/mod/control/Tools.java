@@ -49,7 +49,8 @@ public final class Tools {
             BlockState s = BlockClassifier.state(phys.id);
             if (s == null) return Interaction.handTicks(phys, false);
             double best = INF;
-            for (ItemStack stack : hotbar) best = Math.min(best, ticks(stack, s, efficiency, haste));
+            for (ItemStack stack : hotbar) best = Math.min(best, wornOut(stack) ? INF : ticks(stack, s, efficiency, haste));
+            best = Math.min(best, ticks(ItemStack.EMPTY, s, efficiency, haste));
             return best;
         });
         return new Interaction(true, true, throwaways, time);
@@ -73,19 +74,61 @@ public final class Tools {
 
     /** Hotbar slot that breaks {@code s} fastest; the selected slot on ties. */
     public static int bestTool(Player p, BlockState s) {
+        return best(p, s, 9);
+    }
+
+    /** Durability left before a tool counts as worn out ({@code saveTools}). */
+    private static final int SPARE_DURABILITY = 3;
+    /** Set from the settings each tick: whether worn-out tools are off limits. */
+    public static volatile boolean saveTools = true;
+
+    /** A tool about to break, kept back so it can be repaired. */
+    public static boolean wornOut(ItemStack s) {
+        return saveTools && s.isDamageableItem() && s.getMaxDamage() - s.getDamageValue() <= SPARE_DURABILITY;
+    }
+
+    /** Ticks to break {@code s} with {@code stack}, never with a worn-out tool. */
+    private static double usableTicks(ItemStack stack, BlockState s, Holder<Enchantment> eff, float haste) {
+        return wornOut(stack) ? INF : ticks(stack, s, eff, haste);
+    }
+
+    /** Slot among the first {@code slots} inventory slots that breaks {@code s} fastest (the selected one on ties). */
+    private static int best(Player p, BlockState s, int slots) {
         Holder<Enchantment> eff = efficiency(p);
         float haste = haste(p);
         int sel = p.getInventory().getSelectedSlot();
         int best = sel;
-        double bestTicks = ticks(p.getInventory().getItem(sel), s, eff, haste);
-        for (int i = 0; i < 9; i++) {
-            double t = ticks(p.getInventory().getItem(i), s, eff, haste);
+        double bestTicks = usableTicks(p.getInventory().getItem(sel), s, eff, haste);
+        if (wornOut(p.getInventory().getItem(sel))) bestTicks = ticks(ItemStack.EMPTY, s, eff, haste) + 0.5;
+        for (int i = 0; i < slots; i++) {
+            double t = usableTicks(p.getInventory().getItem(i), s, eff, haste);
             if (t < bestTicks) {
                 bestTicks = t;
                 best = i;
             }
         }
+        // only a worn-out tool in hand and nothing better: an empty slot is the bare hand
+        if (wornOut(p.getInventory().getItem(best))) {
+            for (int i = 0; i < 9; i++) if (p.getInventory().getItem(i).isEmpty()) return i;
+        }
         return best;
+    }
+
+    /**
+     * Selects the fastest tool for {@code s}, first moving it into the hotbar from the rest of the inventory when it's
+     * there (allowInventory, and only with no screen open).
+     */
+    public static void equipBestTool(net.minecraft.client.Minecraft mc, Player p, BlockState s, Settings settings) {
+        saveTools = settings.saveTools.get();
+        int slot = best(p, s, settings.allowInventory.get() && mc.screen == null ? 36 : 9);
+        if (slot >= 9) {
+            // swap it into the selected hotbar slot (menu slots: 9-35 are the main inventory)
+            int sel = p.getInventory().getSelectedSlot();
+            mc.gameMode.handleInventoryMouseClick(p.inventoryMenu.containerId, slot, sel,
+                net.minecraft.world.inventory.ClickType.SWAP, p);
+            slot = sel;
+        }
+        p.getInventory().setSelectedSlot(slot);
     }
 
     /**

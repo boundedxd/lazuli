@@ -27,6 +27,8 @@ import java.util.List;
  */
 public final class PathExecutor {
     private static final long NONE = Long.MIN_VALUE + 1;
+    /** No jumping except up onto higher blocks, and no sprinting: set while farming, so farmland isn't trampled. */
+    public static volatile boolean gentle;
     private static final int OFF_PATH_TICKS = 10;
     /** How far ahead to look for the next block to break or place. */
     private static final int WALK_HORIZON = 64;
@@ -97,7 +99,11 @@ public final class PathExecutor {
         PlayerState state = new PlayerState(player.getX(), player.getY(), player.getZ(), curYaw,
             curPitch, player.onGround(), player.horizontalCollision, v.x, v.y, v.z, player.isSprinting(),
             ((LivingEntityAccessor) player).lazuli$noJumpDelay(), player.minorHorizontalCollision, player.fallDistance);
-        Controls c = interactor.tick(mc, state, path, idx, block);
+        boolean eating = dev.lazuli.mod.process.Upkeep.eating();
+        if (gentle) sprint = false;
+        Controls c = eating ? null : interactor.tick(mc, state, path, idx, block);
+        // eating: stand still meanwhile (counts as building, so standing still isn't taken as being stuck)
+        if (eating) c = new Controls(false, false, false, false, curYaw, curPitch, 0, false);
         boolean interacting = c != null;
         if (interacting) {
             planner.reset();
@@ -108,6 +114,14 @@ public final class PathExecutor {
             c = planner.plan(state, walkable, idx, sprint, maxTurn);
             if (c == null && !player.onGround()) c = InputPlanner.airBrake(state);
             if (c == null) c = follower.tick(state, walkable.subList(Math.min(idx, walkable.size() - 1), walkable.size()), sprint);
+            if (gentle && c != null && c.jump() && player.onGround() && idx + 1 < path.size()) {
+                // walk, don't hop, onto anything not higher up (gaps still need their jump)
+                long u = path.get(idx), w = path.get(idx + 1);
+                boolean step = Math.max(Math.abs(Pos.x(w) - Pos.x(u)), Math.abs(Pos.z(w) - Pos.z(u))) <= 1;
+                if (step && Pos.y(w) <= Pos.y(u)) {
+                    c = new Controls(c.forward(), c.back(), false, false, c.targetYaw(), c.targetPitch(), c.strafe(), c.sneak());
+                }
+            }
         }
         long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(v.x, v.z), interacting);
         if (failed != null) session.edgeFailed(failed[0], failed[1]);
