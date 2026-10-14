@@ -61,6 +61,7 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(Options.ofNumber("Rotation speed", s.rotationSpeed::get, s.rotationSpeed.defaultValue(), s.rotationSpeed::set)
                         .range(5.0, 180.0, 5.0)
                         .description(OptionDescription.ofText(() -> "Most the view turns per tick, in degrees.")).build())
+                    .option(bool(s.freeLook, "Turn only for the server: your camera stays where you point it."))
                     .build())
                 .group(OptionGroup.builder("Behaviour")
                     .option(bool(s.cancelOnUserInput, "Stop pathing when you press a movement key."))

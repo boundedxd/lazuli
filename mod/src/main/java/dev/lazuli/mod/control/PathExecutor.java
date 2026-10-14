@@ -93,8 +93,9 @@ public final class PathExecutor {
         boolean sprint = settings.allowSprint.get() && player.getFoodData().getFoodLevel() > 6;
         float maxTurn = settings.rotationSpeed.get().floatValue();
         Vec3 v = player.getDeltaMovement();
-        PlayerState state = new PlayerState(player.getX(), player.getY(), player.getZ(), player.getYRot(),
-            player.getXRot(), player.onGround(), player.horizontalCollision, v.x, v.y, v.z, player.isSprinting(),
+        float curYaw = RotationDriver.yaw(player), curPitch = RotationDriver.pitch(player);
+        PlayerState state = new PlayerState(player.getX(), player.getY(), player.getZ(), curYaw,
+            curPitch, player.onGround(), player.horizontalCollision, v.x, v.y, v.z, player.isSprinting(),
             ((LivingEntityAccessor) player).lazuli$noJumpDelay(), player.minorHorizontalCollision, player.fallDistance);
         Controls c = interactor.tick(mc, state, path, idx, block);
         boolean interacting = c != null;
@@ -110,11 +111,11 @@ public final class PathExecutor {
         }
         long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(v.x, v.z), interacting);
         if (failed != null) session.edgeFailed(failed[0], failed[1]);
-        if (c == null) c = new Controls(false, false, false, player.getYRot(), player.getXRot());
-        float yaw = InputPlanner.approach(player.getYRot(), c.targetYaw(), maxTurn);
+        if (c == null) c = new Controls(false, false, false, curYaw, curPitch);
+        float yaw = InputPlanner.approach(curYaw, c.targetYaw(), maxTurn);
         float pitchSpeed = interacting ? maxTurn : PITCH_SPEED;
-        float pitch = player.getXRot() + Math.max(-pitchSpeed, Math.min(pitchSpeed, c.targetPitch() - player.getXRot()));
-        input.apply(mc, c, yaw, pitch);
+        float pitch = curPitch + Math.max(-pitchSpeed, Math.min(pitchSpeed, c.targetPitch() - curPitch));
+        input.apply(mc, c, yaw, pitch, settings.freeLook.get());
         driving = true;
     }
 

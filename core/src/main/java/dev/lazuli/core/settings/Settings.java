@@ -20,6 +20,8 @@ public final class Settings {
         s -> s.replace(" ", "")));
     public final Setting<Boolean> cancelOnUserInput = bool("cancelOnUserInput", true);
     public final Setting<Double> rotationSpeed = decimal("rotationSpeed", 45.0, 1.0, 180.0);
+    /** Turn only server-side, leaving the camera to the mouse (Baritone's freeLook). */
+    public final Setting<Boolean> freeLook = bool("freeLook", false);
     public final Setting<Integer> evalHorizon = integer("evalHorizon", 32, 1, 4096);
     public final Setting<Double> heuristicWeight = decimal("heuristicWeight", 1.2, 1.0, 10.0);
     public final Setting<Boolean> renderPath = bool("renderPath", true);

@@ -2,6 +2,6 @@
 	"required": true,
 	"package": "dev.lazuli.mod.mixin",
 	"compatibilityLevel": "JAVA_21",
-	"client": ["ClientLevelMixin", "KeyboardInputMixin", "LivingEntityAccessor", "MinecraftMixin"],
+	"client": ["ClientLevelMixin", "GameRendererMixin", "LocalPlayerMixin", "KeyboardInputMixin", "LivingEntityAccessor", "MinecraftMixin"],
 	"injectors": { "defaultRequire": 1 }
 }

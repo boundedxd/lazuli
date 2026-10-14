@@ -15,7 +15,9 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.LeverBlock;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
@@ -86,9 +88,11 @@ public final class Interactor implements Builder.Hands {
         if (!player.isShiftKeyDown() && usable(ap)) return;
         Direction face = Direction.getApproximateNearest(Pos.x(pos) - Pos.x(against), Pos.y(pos) - Pos.y(against),
             Pos.z(pos) - Pos.z(against));
-        Vec3 hit = Vec3.atCenterOf(ap).add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+        // only what the crosshair is really on, as the game itself sees it
+        BlockHitResult hit = crosshair();
+        if (hit == null || !hit.getBlockPos().equals(ap) || hit.getDirection() != face) return;
         placeCooldown = PLACE_COOLDOWN;
-        if (mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, new BlockHitResult(hit, face, ap, false)).consumesAction()) {
+        if (mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit).consumesAction()) {
             player.swing(InteractionHand.MAIN_HAND);
             placeCooldown = 1; // it worked: the next block can go right away
         }
@@ -105,9 +109,30 @@ public final class Interactor implements Builder.Hands {
     @Override
     public void mine(long pos) {
         BlockPos bp = new BlockPos(Pos.x(pos), Pos.y(pos), Pos.z(pos));
+        BlockHitResult hit = crosshair();
+        if (hit == null || !hit.getBlockPos().equals(bp)) return;
         player.getInventory().setSelectedSlot(Tools.bestTool(player, player.level().getBlockState(bp)));
         mining = bp;
-        miningFace = Direction.getApproximateNearest(player.getEyePosition().subtract(Vec3.atCenterOf(bp)));
+        miningFace = hit.getDirection();
+    }
+
+    /** The block the player's (server-side) rotation points at within reach, or null. */
+    private BlockHitResult crosshair() {
+        Vec3 eye = player.getEyePosition();
+        Vec3 dir = Vec3.directionFromRotation(RotationDriver.pitch(player), RotationDriver.yaw(player));
+        HitResult h = mc.level.clip(new ClipContext(eye, eye.add(dir.scale(player.blockInteractionRange())),
+            ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        return h instanceof BlockHitResult b && b.getType() == HitResult.Type.BLOCK ? b : null;
+    }
+
+    @Override
+    public double eyeHeight() {
+        return player.getEyeHeight();
+    }
+
+    @Override
+    public void stuck(long u, long v) {
+        session.edgeFailed(u, v);
     }
 
     @Override

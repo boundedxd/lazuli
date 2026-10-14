@@ -19,15 +19,16 @@ public final class InputDriver {
         return current;
     }
 
-    /** Sets next tick's input and turns to {@code yaw}/{@code pitch} now. */
-    public void apply(Minecraft mc, Controls c, float yaw, float pitch) {
+    /** Sets next tick's input and rotation (see {@link RotationDriver}). */
+    public void apply(Minecraft mc, Controls c, float yaw, float pitch, boolean freeLook) {
         current = c;
-        mc.player.setYRot(yaw);
-        mc.player.setXRot(pitch);
+        RotationDriver.begin(mc.player, freeLook);
+        RotationDriver.set(mc.player, yaw, pitch);
     }
 
     public void release() {
         current = null;
+        RotationDriver.end();
     }
 
     /** True if the user is physically pressing a movement key. */

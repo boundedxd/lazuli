@@ -30,7 +30,7 @@ public class InteractionCourseTest {
     static final Interaction BREAK = new Interaction(true, false, 0, p -> Interaction.handTicks(p, false));
     static final Interaction PLACE = new Interaction(false, true, 64, p -> Double.POSITIVE_INFINITY);
 
-    public record Run(boolean arrived, int ticks, int breaks, int places, double lowestY, double maxFall, String log) {}
+    public record Run(boolean arrived, int ticks, int breaks, int places, double lowestY, double maxFall, String log, double turned) {}
 
     /** The game as far as building goes: blocks appear and vanish in the sim's world. */
     static final class SimHands implements Builder.Hands {
@@ -92,6 +92,14 @@ public class InteractionCourseTest {
             if (rebuilds++ == 0) session.rebuild();
         }
 
+        public double eyeHeight() {
+            return s.sneaking ? Builder.SNEAK_EYE : Builder.EYE;
+        }
+
+        public void stuck(long u, long v) {
+            session.edgeFailed(u, v);
+        }
+
         private static double sq(double d) {
             return d * d;
         }
@@ -126,18 +134,18 @@ public class InteractionCourseTest {
         float yaw = PathFollower.yawTo(sx, sz, gx, gz), pitch = 10f;
         long lastBlock = Long.MIN_VALUE;
         int offPath = 0;
-        double lowest = s.y, maxFall = 0;
+        double lowest = s.y, maxFall = 0, turned = 0;
         long shownVersion = -1;
         StringBuilder log = new StringBuilder();
         for (int t = 0; t < maxTicks; ) {
             PathingSession.Snapshot snap = session.snapshot();
             if (snap.state() == PathingSession.State.ARRIVED) {
-                return new Run(true, t, hands.breaks, hands.places, lowest, maxFall, log.toString());
+                return new Run(true, t, hands.breaks, hands.places, lowest, maxFall, log.toString(), turned);
             }
             if (snap.state() != PathingSession.State.PATHING) {
-                return new Run(false, t, hands.breaks, hands.places, lowest, maxFall, msgs + "\n" + log);
+                return new Run(false, t, hands.breaks, hands.places, lowest, maxFall, msgs + "\n" + log, turned);
             }
-            if (s.y < -40) return new Run(false, t, hands.breaks, hands.places, lowest, maxFall, "fell\n" + log);
+            if (s.y < -40) return new Run(false, t, hands.breaks, hands.places, lowest, maxFall, "fell\n" + log, turned);
             long swim = s.inWater ? Standing.swimNode(w, s.x, s.y, s.z) : Long.MIN_VALUE;
             boolean settled = s.onGround || swim != Long.MIN_VALUE;
             long block = swim != Long.MIN_VALUE ? swim
@@ -180,7 +188,9 @@ public class InteractionCourseTest {
             long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(s.vx, s.vz), building);
             if (failed != null) session.edgeFailed(failed[0], failed[1]);
             if (c == null) c = new Controls(false, false, false, yaw, pitch);
+            float before = yaw;
             yaw = InputPlanner.approach(yaw, c.targetYaw(), CourseTest.MAX_TURN);
+            turned += Math.abs(yaw - before);
             pitch = c.targetPitch();
             s.step(c.impulse(), c.strafe(), c.jump(), c.sprint(), c.sneak(), yaw);
             lowest = Math.min(lowest, s.y);
@@ -192,7 +202,7 @@ public class InteractionCourseTest {
                     Pos.toString(block), path.isEmpty() ? "-" : Pos.toString(path.get(0)), who));
             }
         }
-        return new Run(false, maxTicks, hands.breaks, hands.places, lowest, maxFall, "timeout\n" + log);
+        return new Run(false, maxTicks, hands.breaks, hands.places, lowest, maxFall, "timeout\n" + log, turned);
     }
 
     // ---- breaking ----
@@ -262,6 +272,8 @@ public class InteractionCourseTest {
         Run r = drive(w, PLACE, 0, 1, 0, 17, 1, 0, 2500);
         assertTrue(r.arrived(), r.log());
         assertTrue(r.lowestY() >= 0.99, r.log());
+        // ninja bridging: one turn round at the start and one at the end, never a turn per block
+        assertTrue(r.turned() < 500, "turned " + r.turned() + " degrees" + System.lineSeparator() + r.log());
     }
 
     @Test
