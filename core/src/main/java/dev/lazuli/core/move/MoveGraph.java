@@ -67,60 +67,87 @@ public final class MoveGraph implements Graph {
     }
 
     public static boolean isStandable(BlockView w, int x, int y, int z) {
-        return floor(w.get(x, y - 1, z)) && passable(w.get(x, y, z)) && passable(w.get(x, y + 1, z));
+        return Standing.standable(w, x, y, z);
     }
 
-    private boolean open2(int x, int y, int z) {
-        return passable(w.get(x, y, z)) && passable(w.get(x, y + 1, z));
+    /** A cell the jump arc can pass through: no collision, no liquid (unknown counts as open). */
+    private boolean openCell(int x, int y, int z) {
+        BlockKind k = w.get(x, y, z);
+        if (k == BlockKind.UNKNOWN) return true;
+        if (k == BlockKind.WATER) return false;
+        return w.physics(x, y, z).empty();
+    }
+
+    private double feet(long u) {
+        return Standing.feet(w, Pos.x(u), Pos.y(u), Pos.z(u));
     }
 
     @Override
     public boolean isNode(long u) {
-        return isStandable(w, Pos.x(u), Pos.y(u), Pos.z(u));
+        return !Double.isNaN(feet(u));
     }
 
-    /** True for an edge that is a jump rather than a walk/ascend/descend step. */
-    public static boolean isJump(long u, long v) {
+    /** True for an edge whose feasibility the physics decides: a gap jump, or a diagonal jump up or drop. */
+    public boolean isJump(long u, long v) {
         int dx = Math.abs(Pos.x(v) - Pos.x(u)), dz = Math.abs(Pos.z(v) - Pos.z(u));
-        return Math.max(dx, dz) >= 2 || (dx == 1 && dz == 1 && Pos.y(v) != Pos.y(u));
+        if (Math.max(dx, dz) >= 2) return true;
+        if (dx == 1 && dz == 1) {
+            double fu = feet(u), fv = feet(v);
+            return Math.abs(fv - fu) > STEP;
+        }
+        return false;
     }
+
+    /** Vanilla step height: rises up to this are walked, not jumped. */
+    private static final double STEP = 0.6 + 1e-6;
+    /** Highest rise a standing jump clears. */
+    private static final double JUMP_RISE = 1.25;
 
     @Override
     public double optimisticCost(long u, long v) {
         int ux = Pos.x(u), uy = Pos.y(u), uz = Pos.z(u);
-        int dx = Pos.x(v) - ux, dy = Pos.y(v) - uy, dz = Pos.z(v) - uz;
+        int dx = Pos.x(v) - ux, dz = Pos.z(v) - uz;
         if (Math.abs(dx) > 1 || Math.abs(dz) > 1) return jumpCost(u, v);
         if (dx == 0 && dz == 0) return INF;
-        if (!isNode(u) || !isNode(v)) return INF;
+        double fu = feet(u), fv = feet(v);
+        if (Double.isNaN(fu) || Double.isNaN(fv)) return INF;
+        int vx = ux + dx, vz = uz + dz;
         boolean diag = dx != 0 && dz != 0;
-        if (dy == 0) {
-            if (diag && !(open2(ux + dx, uy, uz) && open2(ux, uy, uz + dz))) return INF;
+        double dh = fv - fu;
+        if (Math.abs(dh) <= STEP) {
+            // walk, stepping up or down at most a slab
+            double lo = Math.max(fu, fv);
+            if (!Standing.passage(w, ux, uz, vx, vz, lo, lo + Standing.BODY)) return INF;
             return diag ? flat * Costs.SQRT2 : flat;
         }
         if (diag) {
-            // diagonal step up or down: plausible if the arc has room above u; the physics decides
-            if (!parkour || dy > 1 || dy < -maxFall) return INF;
-            if (dy == 1 && !passable(w.get(ux, uy + 2, uz))) return INF;
+            // diagonal jump up or drop: plausible if there is room above u; the physics decides
+            if (!parkour || dh > JUMP_RISE || -dh > maxFall + STEP) return INF;
+            if (!Standing.clear(w, ux + 0.2, uz + 0.2, ux + 0.8, uz + 0.8, fu, Math.max(fu, fv) + Standing.BODY + 0.5)) {
+                return INF;
+            }
             // only over loaded terrain: the sim can't judge unknown blocks
-            int vy = Pos.y(v);
-            for (int y = Math.min(uy, vy) - 1; y <= Math.max(uy, vy) + 1; y++) {
-                if (w.get(ux + dx, y, uz) == BlockKind.UNKNOWN || w.get(ux, y, uz + dz) == BlockKind.UNKNOWN
-                    || w.get(ux + dx, y, uz + dz) == BlockKind.UNKNOWN) {
+            for (int y = (int) Math.floor(Math.min(fu, fv)) - 1; y <= (int) Math.floor(Math.max(fu, fv)) + 2; y++) {
+                if (w.get(vx, y, uz) == BlockKind.UNKNOWN || w.get(ux, y, vz) == BlockKind.UNKNOWN
+                    || w.get(vx, y, vz) == BlockKind.UNKNOWN) {
                     return INF;
                 }
             }
             return Reach.minTicks(Costs.SQRT2 - 0.71) + Costs.JUMP_PENALTY;
         }
-        if (dy == 1) {
-            return passable(w.get(ux, uy + 2, uz)) ? flat + Costs.JUMP_PENALTY : INF;
+        if (dh > 0) {
+            // jump up: room to rise in place, then to move over onto v
+            if (dh > JUMP_RISE) return INF;
+            if (!Standing.clear(w, ux + 0.2, uz + 0.2, ux + 0.8, uz + 0.8, fu, fv + Standing.BODY)) return INF;
+            if (!Standing.passage(w, ux, uz, vx, vz, fv, fv + Standing.BODY)) return INF;
+            return flat + Costs.JUMP_PENALTY;
         }
-        if (dy < 0 && -dy <= maxFall) {
-            for (int y = Pos.y(v) + 2; y <= uy + 1; y++) {
-                if (!passable(w.get(ux + dx, y, uz + dz))) return INF;
-            }
-            return flat + Costs.fallTicks(-dy);
-        }
-        return INF;
+        // drop: move over at u's height, then fall down v's column
+        int blocks = (int) Math.ceil(-dh - 1e-6);
+        if (blocks > maxFall) return INF;
+        if (!Standing.passage(w, ux, uz, vx, vz, fu, fu + Standing.BODY)) return INF;
+        if (!Standing.clear(w, vx + 0.2, vz + 0.2, vx + 0.8, vz + 0.8, fv, fu + Standing.BODY)) return INF;
+        return flat + Costs.fallTicks(blocks);
     }
 
     private double jumpCost(long u, long v) {
@@ -142,7 +169,7 @@ public final class MoveGraph implements Graph {
             double t = i * 0.25, cx = ux0 + nx * t, cz = uz0 + nz * t;
             int bx = (int) Math.floor(cx), bz = (int) Math.floor(cz);
             boolean ends = (bx == ux && bz == uz) || (bx == vx && bz == vz);
-            boolean gap = !floor(w.get(bx, uy - 1, bz));
+            boolean gap = !Standing.hasSupport(w, bx, uy, bz);
             if (gap && !ends) {
                 if (firstGap < 0) firstGap = t;
                 lastGap = t;
@@ -151,7 +178,7 @@ public final class MoveGraph implements Graph {
             if (!ends && cell != prevCell) {
                 int low = gap ? Math.min(uy, vy) : uy;
                 for (int y = low; y <= top; y++) {
-                    if (!passable(w.get(bx, y, bz))) return INF;
+                    if (!openCell(bx, y, bz)) return INF;
                 }
             }
             prevCell = cell;
@@ -159,7 +186,7 @@ public final class MoveGraph implements Graph {
                 int sx = (int) Math.floor(cx + px * side), sz = (int) Math.floor(cz + pz * side);
                 if ((sx == ux && sz == uz) || (sx == vx && sz == vz)) continue;
                 for (int y = uy; y <= top - 1; y++) {
-                    if (!passable(w.get(sx, y, sz))) return INF;
+                    if (!openCell(sx, y, sz)) return INF;
                 }
             }
         }
@@ -189,10 +216,11 @@ public final class MoveGraph implements Graph {
     public double evaluate(long u, long v) {
         double opt = optimisticCost(u, v);
         if (opt == INF || !isJump(u, v)) return opt;
+        double fu = feet(u), fv = feet(v);
         Edge e = new Edge(u, v);
         Double ticks = jumpTicks.get(e);
         if (ticks == null) {
-            ticks = JumpEvaluator.ticks(w, u, v, sprint);
+            ticks = JumpEvaluator.ticks(w, u, fu, v, fv, sprint);
             jumpTicks.put(e, ticks);
         }
         return Math.max(opt, ticks + Costs.JUMP_PENALTY);
@@ -211,7 +239,7 @@ public final class MoveGraph implements Graph {
         int x = Pos.x(u), y = Pos.y(u) - 1, z = Pos.z(u);
         boolean found = false;
         for (int[] o : JUMP_OFFSETS) {
-            if (!floor(w.get(x + o[0], y, z + o[1]))) {
+            if (!Standing.hasSupport(w, x + o[0], y + 1, z + o[1])) {
                 found = true;
                 break;
             }
@@ -237,7 +265,7 @@ public final class MoveGraph implements Graph {
     @Override
     public void successors(long u, LongConsumer out) {
         for (int[] d : DIRS) {
-            for (int dy = -maxFall; dy <= 1; dy++) out.accept(Pos.offset(u, d[0], dy, d[1]));
+            for (int dy = -maxFall - 1; dy <= 2; dy++) out.accept(Pos.offset(u, d[0], dy, d[1]));
         }
         if (!parkour || !nearGap(u)) return;
         for (int[] o : JUMP_OFFSETS) {
@@ -248,7 +276,7 @@ public final class MoveGraph implements Graph {
     @Override
     public void predecessors(long v, LongConsumer out) {
         for (int[] d : DIRS) {
-            for (int dy = -1; dy <= maxFall; dy++) out.accept(Pos.offset(v, d[0], dy, d[1]));
+            for (int dy = -2; dy <= maxFall + 1; dy++) out.accept(Pos.offset(v, d[0], dy, d[1]));
         }
         if (!parkour) return;
         for (int[] o : JUMP_OFFSETS) {
@@ -272,6 +300,6 @@ public final class MoveGraph implements Graph {
 
     @Override
     public int verticalReach() {
-        return maxFall + 3;
+        return maxFall + 4;
     }
 }

@@ -28,10 +28,10 @@ public final class InputPlanner {
     private static final double TURN_WEIGHT = 0.004;
     private static final double LATERAL_WEIGHT = 0.6;
 
-    private final BlockView world;
+    private final dev.lazuli.core.world.LocalCache world;
 
     public InputPlanner(BlockView world) {
-        this.world = world;
+        this.world = new dev.lazuli.core.world.LocalCache(world);
     }
 
     private static final class Cand {
@@ -42,6 +42,7 @@ public final class InputPlanner {
         boolean jump;
         float segYaw;
         double score;
+        int cont;
 
         Cand(PlayerSim s, float yaw) {
             this.s = s;
@@ -59,6 +60,7 @@ public final class InputPlanner {
     private int[] warmFwd = new int[0];
     private boolean[] warmJump = new boolean[0];
     private float[] warmYaw = new float[0];
+    private int warmCont;
 
     public void reset() {
         warmFwd = new int[0];
@@ -135,6 +137,7 @@ public final class InputPlanner {
             reset();
             return null;
         }
+        world.recenter((int) Math.floor(p.x()), (int) Math.floor(p.y()), (int) Math.floor(p.z()));
         Corridor c = new Corridor(path, from);
         float[] yaws = yawOptions(p, path, from);
         PlayerSim root = new PlayerSim(world, p.x(), p.y(), p.z(), p.vx(), p.vy(), p.vz(), p.onGround(), p.sprinting());
@@ -172,7 +175,9 @@ public final class InputPlanner {
         boolean full = levels.size() == SEGMENTS.length;
         for (int lvl = levels.size() - 1; lvl >= 0 && best == null; lvl--) {
             for (Cand cand : levels.get(lvl)) {
-                if (safe(cand, c, allowSprint)) {
+                int cont = safe(cand, c, allowSprint);
+                if (cont != UNSAFE) {
+                    cand.cont = cont;
                     best = cand;
                     break;
                 }
@@ -209,20 +214,25 @@ public final class InputPlanner {
     private Cand warm(PlayerSim root, PlayerState p, Corridor c, boolean allowSprint, float maxTurn) {
         int n = warmFwd.length;
         if (n < 2) return null;
-        Cand prev = new Cand(root.copy(), p.yaw());
-        Cand cur = prev;
+        Cand cur = new Cand(root.copy(), p.yaw());
         for (int i = 1; i <= n; i++) {
-            int k = Math.min(i, n - 1); // shift by one, repeat the last tick to keep the horizon length
+            // shift by one; the new last tick follows the continuation that proved the old plan safe
+            boolean extra = i == n;
+            int fwd = extra ? (cur.s.onGround ? 0 : warmCont) : warmFwd[i];
+            boolean jump = !extra && warmJump[i];
+            float yaw = extra ? cur.yaw : warmYaw[i];
             Cand ch = new Cand(cur.s, cur.yaw);
-            if (!rollout(ch, warmFwd[k], warmJump[k], warmYaw[k], 1, allowSprint, maxTurn, c)) return null;
+            if (!rollout(ch, fwd, jump, yaw, 1, allowSprint, maxTurn, c)) return null;
             ch.parent = cur;
-            ch.fwd = warmFwd[k];
-            ch.jump = warmJump[k];
-            ch.segYaw = warmYaw[k];
+            ch.fwd = fwd;
+            ch.jump = jump;
+            ch.segYaw = yaw;
             ch.len = 1;
             cur = ch;
         }
-        if (!safe(cur, c, allowSprint)) return null;
+        int cont = safe(cur, c, allowSprint);
+        if (cont == UNSAFE) return null;
+        cur.cont = cont;
         cur.score = score(cur.s, c) - turnPenalty(cur.first().segYaw, p.yaw());
         return cur;
     }
@@ -235,6 +245,7 @@ public final class InputPlanner {
         warmFwd = new int[total];
         warmJump = new boolean[total];
         warmYaw = new float[total];
+        warmCont = best.cont;
         int t = 0;
         for (Cand x : chain) {
             for (int k = 0; k < x.len; k++, t++) {
@@ -254,19 +265,24 @@ public final class InputPlanner {
 
     private boolean alive(PlayerSim s, Corridor c) {
         if (s.onGround) {
-            int bx = (int) Math.floor(s.x), by = (int) Math.round(s.y), bz = (int) Math.floor(s.z);
+            int bx = (int) Math.floor(s.x), by = (int) Math.floor(s.y + 1e-6), bz = (int) Math.floor(s.z);
             if (!c.contains(bx, by, bz)) return false;
             return world.get(bx, by, bz) != BlockKind.DANGER && world.get(bx, by - 1, bz) != BlockKind.DANGER;
         }
         return s.y >= c.minY - 0.6;
     }
 
-    /** Some continuation (holding W, nothing or S) lands in the corridor and comes to rest there. */
-    private boolean safe(Cand cand, Corridor c, boolean allowSprint) {
-        for (int fwd = 0; fwd >= -1; fwd--) {
-            if (rests(cand, c, fwd, allowSprint)) return true;
+    private static final int UNSAFE = Integer.MIN_VALUE;
+
+    /**
+     * The continuation (holding nothing, S or W in the air, nothing on the ground) that lands in the corridor and
+     * comes to rest there, or {@link #UNSAFE}.
+     */
+    private int safe(Cand cand, Corridor c, boolean allowSprint) {
+        for (int fwd : new int[]{0, -1, 1}) {
+            if (rests(cand, c, fwd, allowSprint)) return fwd;
         }
-        return rests(cand, c, 1, allowSprint);
+        return UNSAFE;
     }
 
     private boolean rests(Cand cand, Corridor c, int airFwd, boolean allowSprint) {

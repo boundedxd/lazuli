@@ -23,6 +23,12 @@ public final class JumpEvaluator {
 
     /** Ticks from standing at u to landing on v, or {@link #INF} if no robust input sequence works. */
     public static double ticks(BlockView w, long u, long v, boolean sprint) {
+        return ticks(w, u, Standing.feet(w, Pos.x(u), Pos.y(u), Pos.z(u)), v, Standing.feet(w, Pos.x(v), Pos.y(v), Pos.z(v)), sprint);
+    }
+
+    /** As {@link #ticks(BlockView, long, long, boolean)} with the feet heights at u and v already known. */
+    public static double ticks(BlockView w, long u, double feetU, long v, double feetV, boolean sprint) {
+        if (Double.isNaN(feetU) || Double.isNaN(feetV)) return INF;
         double sx = Pos.x(u) + 0.5, sz = Pos.z(u) + 0.5;
         double tx = Pos.x(v) + 0.5, tz = Pos.z(v) + 0.5;
         float yaw = (float) (Math.toDegrees(Math.atan2(tz - sz, tx - sx)) - 90.0);
@@ -31,7 +37,7 @@ public final class JumpEvaluator {
         for (int jumpTick = -1; jumpTick < MAX_RUN_TICKS; jumpTick++) {
             for (int brakeAt : BRAKE_AT) {
                 for (int after = 0; after >= (brakeAt == NO_BRAKE ? 0 : -1); after--) {
-                    int t = run(w, u, v, sprint, yaw, jumpTick, brakeAt, after);
+                    int t = run(w, u, feetU, v, feetV, sprint, yaw, jumpTick, brakeAt, after);
                     if (t < 0) {
                         if (t == RUN_LOST) return best; // a later take-off tick can't exist
                         continue;
@@ -39,7 +45,7 @@ public final class JumpEvaluator {
                     if (t >= best) continue;
                     boolean robust = true;
                     for (float e : AIM_ERRORS) {
-                        if (run(w, u, v, sprint, yaw + e, jumpTick, brakeAt, after) < 0) {
+                        if (run(w, u, feetU, v, feetV, sprint, yaw + e, jumpTick, brakeAt, after) < 0) {
                             robust = false;
                             break;
                         }
@@ -58,16 +64,17 @@ public final class JumpEvaluator {
      * @return landing tick count, {@link #MISSED}, or {@link #RUN_LOST} if the player left the ground before
      *         {@code jumpTick} (so no later take-off is possible either)
      */
-    private static int run(BlockView w, long u, long v, boolean sprint, float yaw, int jumpTick, int brakeAt, int after) {
-        PlayerSim s = new PlayerSim(w, Pos.x(u) + 0.5, Pos.y(u), Pos.z(u) + 0.5, 0, 0, 0, true, false);
-        int vy = Pos.y(v);
+    private static int run(BlockView w, long u, double feetU, long v, double feetV, boolean sprint, float yaw,
+                           int jumpTick, int brakeAt, int after) {
+        PlayerSim s = new PlayerSim(w, Pos.x(u) + 0.5, feetU, Pos.z(u) + 0.5, 0, 0, 0, true, false);
+        double vy = feetV;
         int t0 = 0;
         if (jumpTick < 0) {
             while (s.onGround) {
                 if (++t0 > MAX_RUN_TICKS || s.horizontalCollision) return MISSED;
                 s.step(1, false, sprint, yaw);
             }
-            if (vy >= Pos.y(u)) return MISSED;
+            if (vy >= feetU) return MISSED;
         } else {
             for (int t = 0; t < jumpTick; t++) {
                 s.step(1, false, sprint, yaw);

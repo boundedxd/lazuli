@@ -126,9 +126,9 @@ class ParkourTest {
 
     @Test
     void followerTakesOffOnTheLastSupportedTick() {
-        GridWorld w = strip(-3, 0, 2, 5);
+        GridWorld w = strip(-3, 0, 3, 6); // a 2-gap: 1-gaps can be sprinted across without jumping
         PathFollower f = new PathFollower(w);
-        List<Long> path = List.of(Pos.pack(0, 1, 0), Pos.pack(2, 1, 0));
+        List<Long> path = List.of(Pos.pack(0, 1, 0), Pos.pack(3, 1, 0));
         // sprinting, but the hitbox is still over the block when next tick's vertical move happens: not yet
         Controls early = f.tick(new PlayerState(1.2, 1, 0.5, -90f, 0, true, false, 0.153, -0.0784, 0, true), path, true);
         assertTrue(early.forward());

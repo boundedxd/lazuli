@@ -1,11 +1,18 @@
 plugins { id 'net.fabricmc.fabric-loom-remap' }
 base { archivesName = 'lazuli' }
 configurations { shade }
+repositories {
+	exclusiveContent {
+		forRepository { maven { name = 'Modrinth'; url = 'https://api.modrinth.com/maven' } }
+		filter { includeGroup 'maven.modrinth' }
+	}
+}
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	mappings loom.officialMojangMappings()
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	modImplementation "maven.modrinth:walksylib:${project.walksylib_version}"
 	implementation project(':core')
 	shade project(':core')
 }

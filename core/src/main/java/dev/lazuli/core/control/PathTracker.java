@@ -19,7 +19,7 @@ public final class PathTracker {
         lastIdx = -1;
     }
 
-    /** Node index for the player's block, or -1 if lost (new path version and not on any of its first nodes). */
+    /** Node index for the player's block (or the nearest node within ~2 blocks), or -1 if lost. */
     public int update(List<Long> path, long pathVersion, int bx, int by, int bz) {
         if (pathVersion != version) {
             version = pathVersion;
@@ -32,7 +32,20 @@ public final class PathTracker {
             lastIdx = idx;
             return idx;
         }
-        return lastIdx >= 0 && lastIdx < path.size() - 1 ? lastIdx : -1;
+        if (lastIdx >= 0) return lastIdx;
+        // lost (e.g. a fresh path while standing beside it): take the nearest of its first nodes
+        int best = -1;
+        long bestD = Long.MAX_VALUE;
+        for (int i = 0; i < Math.min(path.size(), SEARCH); i++) {
+            long n = path.get(i);
+            long dx = Pos.x(n) - bx, dy = Pos.y(n) - by, dz = Pos.z(n) - bz;
+            long d = dx * dx + 4 * dy * dy + dz * dz;
+            if (d < bestD) {
+                bestD = d;
+                best = i;
+            }
+        }
+        return bestD <= 8 ? best : -1;
     }
 
     /** True if the player's block is exactly a path node (the planner may be told about it). */
