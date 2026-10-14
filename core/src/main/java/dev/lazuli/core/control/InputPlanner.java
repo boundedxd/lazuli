@@ -11,8 +11,8 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Local input search (model-predictive control). Each tick it beam-searches input sequences (W/none/S,
- * jump timing, yaw) through {@link PlayerSim}, scores them by progress along the planner's path, and returns
+ * Local input search (model-predictive control). Each tick it beam-searches input sequences (W, W+A, W+D,
+ * none, S, jump timing, yaw) through {@link PlayerSim}, scores them by progress along the planner's path, and returns
  * the first input of the best sequence that can still land and come to a stop safely. The path is a corridor,
  * not a track: any block within one of a path node at the same height is fair game, so it cuts corners,
  * sprint-jumps flats, brakes in the air and times jumps on its own.
@@ -27,6 +27,10 @@ public final class InputPlanner {
     private static final double MOMENTUM_WEIGHT = 3.0;
     private static final double TURN_WEIGHT = 0.004;
     private static final double LATERAL_WEIGHT = 0.6;
+    /** Per segment spent looking off the aim lines: corrections come from strafing, like a player would. */
+    private static final double OFF_AIM_PENALTY = 0.03;
+    /** {forward, strafe} combinations searched. */
+    private static final int[][] ACTIONS = {{1, 0}, {1, 1}, {1, -1}, {0, 0}, {-1, 0}};
 
     private final dev.lazuli.core.world.LocalCache world;
 
@@ -38,8 +42,9 @@ public final class InputPlanner {
         final PlayerSim s;
         float yaw;
         Cand parent;
-        int fwd, len;
+        int fwd, strafe, len;
         boolean jump;
+        double offAim;
         float segYaw;
         double score;
         int cont;
@@ -58,12 +63,14 @@ public final class InputPlanner {
 
     /** The chosen input sequence, one entry per tick, kept to warm-start the next tick's search. */
     private int[] warmFwd = new int[0];
+    private int[] warmStrafe = new int[0];
     private boolean[] warmJump = new boolean[0];
     private float[] warmYaw = new float[0];
     private int warmCont;
 
     public void reset() {
         warmFwd = new int[0];
+        warmStrafe = new int[0];
         warmJump = new boolean[0];
         warmYaw = new float[0];
     }
@@ -140,6 +147,7 @@ public final class InputPlanner {
         world.recenter((int) Math.floor(p.x()), (int) Math.floor(p.y()), (int) Math.floor(p.z()));
         Corridor c = new Corridor(path, from);
         float[] yaws = yawOptions(p, path, from);
+        int aimed = aimedCount;
         PlayerSim root = new PlayerSim(world, p.x(), p.y(), p.z(), p.vx(), p.vy(), p.vz(), p.onGround(), p.sprinting());
 
         List<Cand> beam = new ArrayList<>();
@@ -149,18 +157,22 @@ public final class InputPlanner {
             int len = SEGMENTS[depth];
             List<Cand> nextLevel = new ArrayList<>();
             for (Cand parent : beam) {
-                for (int fwd = 1; fwd >= -1; fwd--) {
+                for (int[] a : ACTIONS) {
+                    int fwd = a[0], strafe = a[1];
                     for (int jumpI = 0; jumpI < 2; jumpI++) {
                         boolean jump = jumpI == 1;
-                        for (float segYaw : yaws) {
+                        for (int yi = 0; yi < yaws.length; yi++) {
+                            float segYaw = yaws[yi];
                             Cand ch = new Cand(parent.s.copy(), parent.yaw);
-                            if (!rollout(ch, fwd, jump, segYaw, len, allowSprint, maxTurn, c)) continue;
+                            if (!rollout(ch, fwd, strafe, jump, segYaw, len, allowSprint, maxTurn, c)) continue;
                             ch.parent = parent;
                             ch.fwd = fwd;
+                            ch.strafe = strafe;
                             ch.jump = jump;
                             ch.segYaw = segYaw;
                             ch.len = len;
-                            ch.score = score(ch.s, c) - turnPenalty(ch.first().segYaw, p.yaw());
+                            ch.offAim = parent.offAim + (yi < aimed ? 0 : OFF_AIM_PENALTY);
+                            ch.score = score(ch.s, c) - turnPenalty(ch.first().segYaw, p.yaw()) - ch.offAim;
                             nextLevel.add(ch);
                         }
                     }
@@ -172,7 +184,7 @@ public final class InputPlanner {
             levels.add(beam);
         }
         Cand best = null;
-        boolean full = levels.size() == SEGMENTS.length;
+        this.maxTurn = maxTurn;
         for (int lvl = levels.size() - 1; lvl >= 0 && best == null; lvl--) {
             for (Cand cand : levels.get(lvl)) {
                 int cont = safe(cand, c, allowSprint);
@@ -181,12 +193,12 @@ public final class InputPlanner {
                     best = cand;
                     break;
                 }
-                full = false;
             }
         }
         // last tick's plan, shifted by one tick: if it was safe it still is, so a plan never just vanishes
         Cand warm = warm(root, p, c, allowSprint, maxTurn);
-        if (warm != null && (best == null || !full || warm.score >= best.score - 0.1)) {
+        this.maxTurn = maxTurn;
+        if (warm != null && (best == null || warm.score >= best.score - 0.1)) {
             return remember(warm, allowSprint);
         }
         if (best == null) {
@@ -196,12 +208,12 @@ public final class InputPlanner {
         return remember(best, allowSprint);
     }
 
-    private boolean rollout(Cand ch, int fwd, boolean jump, float segYaw, int len, boolean allowSprint, float maxTurn,
-                            Corridor c) {
+    private boolean rollout(Cand ch, int fwd, int strafe, boolean jump, float segYaw, int len, boolean allowSprint,
+                            float maxTurn, Corridor c) {
         boolean sprint = fwd > 0 && allowSprint;
         for (int k = 0; k < len; k++) {
             ch.yaw = approach(ch.yaw, segYaw, maxTurn);
-            ch.s.step(fwd, jump, sprint, ch.yaw); // held, like the key: re-jumps on landing
+            ch.s.step(fwd, strafe, jump, sprint, ch.yaw); // held, like the key: re-jumps on landing
             if (!alive(ch.s, c)) return false;
         }
         return true;
@@ -218,18 +230,22 @@ public final class InputPlanner {
         for (int i = 1; i <= n; i++) {
             // shift by one; the new last tick follows the continuation that proved the old plan safe
             boolean extra = i == n;
-            int fwd = extra ? (cur.s.onGround ? 0 : warmCont) : warmFwd[i];
-            boolean jump = !extra && warmJump[i];
-            float yaw = extra ? cur.yaw : warmYaw[i];
+            boolean pursue = extra && warmCont == PURSUE;
+            int fwd = pursue ? 1 : extra ? (cur.s.onGround ? 0 : warmCont) : warmFwd[i];
+            int strafe = extra ? 0 : warmStrafe[i];
+            boolean jump = pursue || !extra && warmJump[i];
+            float yaw = pursue ? pursuitYaw(cur.s, c) : extra ? cur.yaw : warmYaw[i];
             Cand ch = new Cand(cur.s, cur.yaw);
-            if (!rollout(ch, fwd, jump, yaw, 1, allowSprint, maxTurn, c)) return null;
+            if (!rollout(ch, fwd, strafe, jump, yaw, 1, allowSprint, maxTurn, c)) return null;
             ch.parent = cur;
             ch.fwd = fwd;
+            ch.strafe = strafe;
             ch.jump = jump;
             ch.segYaw = yaw;
             ch.len = 1;
             cur = ch;
         }
+        this.maxTurn = maxTurn;
         int cont = safe(cur, c, allowSprint);
         if (cont == UNSAFE) return null;
         cur.cont = cont;
@@ -243,6 +259,7 @@ public final class InputPlanner {
         int total = 0;
         for (Cand x : chain) total += x.len;
         warmFwd = new int[total];
+        warmStrafe = new int[total];
         warmJump = new boolean[total];
         warmYaw = new float[total];
         warmCont = best.cont;
@@ -250,12 +267,13 @@ public final class InputPlanner {
         for (Cand x : chain) {
             for (int k = 0; k < x.len; k++, t++) {
                 warmFwd[t] = x.fwd;
+                warmStrafe[t] = x.strafe;
                 warmJump[t] = x.jump;
                 warmYaw[t] = x.segYaw;
             }
         }
         Cand f = chain.get(0);
-        return new Controls(f.fwd > 0, f.fwd < 0, f.jump, f.fwd > 0 && allowSprint, f.segYaw, PITCH);
+        return new Controls(f.fwd > 0, f.fwd < 0, f.jump, f.fwd > 0 && allowSprint, f.segYaw, PITCH, f.strafe);
     }
 
     private static boolean atEnd(PlayerState p, List<Long> path) {
@@ -273,16 +291,65 @@ public final class InputPlanner {
     }
 
     private static final int UNSAFE = Integer.MIN_VALUE;
+    /** Continuation: keep sprint-jumping along the path, as a player chaining jumps does. */
+    private static final int PURSUE = 2;
+    private float maxTurn = 45f;
 
     /**
-     * The continuation (holding nothing, S or W in the air, nothing on the ground) that lands in the corridor and
-     * comes to rest there, or {@link #UNSAFE}.
+     * The continuation that keeps the player in the corridor: holding nothing, S or W in the air (nothing on the
+     * ground) until at rest, or {@link #PURSUE}; {@link #UNSAFE} if none does. Chains of jumps between blocks too
+     * small to stop on are only safe by carrying on.
      */
     private int safe(Cand cand, Corridor c, boolean allowSprint) {
         for (int fwd : new int[]{0, -1, 1}) {
             if (rests(cand, c, fwd, allowSprint)) return fwd;
         }
+        if (allowSprint && pursues(cand, c)) return PURSUE;
         return UNSAFE;
+    }
+
+    /** Sprint-jumping toward the path's next node stays in the corridor until it leaves the window or 3 s pass. */
+    private boolean pursues(Cand cand, Corridor c) {
+        PlayerSim s = cand.s.copy();
+        float yaw = cand.yaw;
+        double total = c.cum[c.nodes.length - 1];
+        for (int t = 0; t < SAFE_TICKS; t++) {
+            yaw = approach(yaw, pursuitYaw(s, c), maxTurn);
+            s.step(1, 0, true, true, yaw);
+            if (!alive(s, c)) return false;
+            if (s.onGround && !c.includesEnd && progress(s, c) >= total - 1.5) return true;
+        }
+        return true;
+    }
+
+    /** Yaw toward the first path node more than half a block ahead of the player's progress. */
+    private static float pursuitYaw(PlayerSim s, Corridor c) {
+        double prog = progress(s, c);
+        int n = c.nodes.length;
+        int j = n - 1;
+        for (int i = 0; i < n; i++) {
+            if (c.cum[i] > prog + 0.5) {
+                j = i;
+                break;
+            }
+        }
+        return PathFollower.yawTo(s.x, s.z, c.cx[j], c.cz[j]);
+    }
+
+    /** Distance along the corridor polyline of the point nearest the player. */
+    private static double progress(PlayerSim s, Corridor c) {
+        double bestD = Double.POSITIVE_INFINITY, prog = 0;
+        for (int i = 0; i + 1 < c.nodes.length; i++) {
+            double ax = c.cx[i], az = c.cz[i], dx = c.cx[i + 1] - ax, dz = c.cz[i + 1] - az;
+            double len2 = dx * dx + dz * dz;
+            double t = len2 < 1e-9 ? 0 : Math.max(0, Math.min(1, ((s.x - ax) * dx + (s.z - az) * dz) / len2));
+            double d = Math.hypot(s.x - (ax + dx * t), s.z - (az + dz * t));
+            if (d < bestD) {
+                bestD = d;
+                prog = c.cum[i] + t * Math.sqrt(len2);
+            }
+        }
+        return prog;
     }
 
     private boolean rests(Cand cand, Corridor c, int airFwd, boolean allowSprint) {
@@ -325,6 +392,9 @@ public final class InputPlanner {
         return prog - LATERAL_WEIGHT * bestD + MOMENTUM_WEIGHT * (s.vx * dirX + s.vz * dirZ) / drag;
     }
 
+    /** The first this many of the last {@link #yawOptions} look along the path; the rest are small offsets. */
+    private int aimedCount;
+
     private float[] yawOptions(PlayerState p, List<Long> path, int from) {
         List<Float> out = new ArrayList<>();
         long aim = path.get(lookahead(p, path, from));
@@ -334,10 +404,9 @@ public final class InputPlanner {
             long n = path.get(from + k);
             add(out, PathFollower.yawTo(p.x(), p.z(), Pos.x(n) + 0.5, Pos.z(n) + 0.5));
         }
+        aimedCount = out.size();
         add(out, base + 12f);
         add(out, base - 12f);
-        add(out, base + 35f);
-        add(out, base - 35f);
         float[] a = new float[out.size()];
         for (int i = 0; i < a.length; i++) a[i] = out.get(i);
         return a;

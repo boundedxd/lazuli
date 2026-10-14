@@ -5,6 +5,7 @@ import dev.lazuli.core.control.InputPlanner;
 import dev.lazuli.core.control.PathFollower;
 import dev.lazuli.core.control.PathTracker;
 import dev.lazuli.core.control.PlayerState;
+import dev.lazuli.core.move.Standing;
 import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.world.BlockView;
@@ -32,6 +33,7 @@ public final class PathExecutor {
     private final InputPlanner planner;
     private final PathFollower follower;
     private final PathTracker tracker = new PathTracker();
+    private final BlockView world;
     private final InputDriver input = new InputDriver();
     private boolean driving;
     private long lastBlock = NONE;
@@ -40,6 +42,7 @@ public final class PathExecutor {
     public PathExecutor(PathingSession session, Settings settings, BlockView world) {
         this.session = session;
         this.settings = settings;
+        this.world = world;
         this.planner = new InputPlanner(world);
         this.follower = new PathFollower(world);
     }
@@ -63,10 +66,12 @@ public final class PathExecutor {
         }
 
         BlockPos bp = player.blockPosition();
-        long block = Pos.pack(bp.getX(), bp.getY(), bp.getZ());
+        // standing over an edge, the node is the block actually under the player, not the air beside it
+        long block = player.onGround() ? Standing.nodeUnder(world, player.getX(), player.getY(), player.getZ())
+            : Pos.pack(bp.getX(), bp.getY(), bp.getZ());
         List<Long> path = snap.path();
-        int idx = tracker.update(path, snap.version(), bp.getX(), bp.getY(), bp.getZ());
-        boolean onNode = PathTracker.onNode(path, idx, bp.getX(), bp.getY(), bp.getZ());
+        int idx = tracker.update(path, snap.version(), Pos.x(block), Pos.y(block), Pos.z(block));
+        boolean onNode = PathTracker.onNode(path, idx, Pos.x(block), Pos.y(block), Pos.z(block));
         if (onNode) offPathTicks = 0;
         else if (player.onGround()) offPathTicks++;
         // Run-up blocks and corner cuts aren't path nodes: only re-plan from a node, or once clearly off the path.

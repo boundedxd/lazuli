@@ -52,6 +52,29 @@ public final class Standing {
             && top(w.physics(x, y - 1, z), LO, HI, LO, HI) >= 1 - EPS;
     }
 
+    /**
+     * The node a player at (x, y, z) stands on: their own block, or, when it overhangs an edge, the standable block
+     * under the rest of their footprint nearest their center. Their own block if none is standable.
+     */
+    public static long nodeUnder(BlockView w, double x, double y, double z) {
+        int by = (int) Math.floor(y + EPS);
+        int ox = (int) Math.floor(x), oz = (int) Math.floor(z);
+        if (standable(w, ox, by, oz)) return dev.lazuli.core.world.Pos.pack(ox, by, oz);
+        long best = dev.lazuli.core.world.Pos.pack(ox, by, oz);
+        double bestD = Double.POSITIVE_INFINITY;
+        for (int bx = (int) Math.floor(x - 0.3 + EPS); bx <= (int) Math.floor(x + 0.3 - EPS); bx++) {
+            for (int bz = (int) Math.floor(z - 0.3 + EPS); bz <= (int) Math.floor(z + 0.3 - EPS); bz++) {
+                if ((bx == ox && bz == oz) || !standable(w, bx, by, bz)) continue;
+                double d = Math.hypot(bx + 0.5 - x, bz + 0.5 - z);
+                if (d < bestD) {
+                    bestD = d;
+                    best = dev.lazuli.core.world.Pos.pack(bx, by, bz);
+                }
+            }
+        }
+        return best;
+    }
+
     public static boolean standable(BlockView w, int x, int y, int z) {
         return !Double.isNaN(feet(w, x, y, z));
     }

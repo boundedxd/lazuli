@@ -70,6 +70,17 @@ public final class PlayerSim {
      * @param yaw     Minecraft degrees (0 faces +Z, -90 faces +X)
      */
     public void step(int forward, boolean jump, boolean sprintKey, float yaw) {
+        step(forward, 0, jump, sprintKey, yaw);
+    }
+
+    /**
+     * Advances one tick.
+     *
+     * @param forward 1 for W, -1 for S, 0 for neither
+     * @param strafe  1 for A (left), -1 for D (right), 0 for neither
+     * @param yaw     Minecraft degrees (0 faces +Z, -90 faces +X)
+     */
+    public void step(int forward, int strafe, boolean jump, boolean sprintKey, float yaw) {
         // sprint state (LocalPlayer.aiStep): needs forward impulse; held W keeps it, releasing W stops it
         if (forward <= 0 || inWater) sprinting = false;
         else if (sprintKey) sprinting = true;
@@ -95,11 +106,23 @@ public final class PlayerSim {
             noJumpDelay = 0;
         }
 
-        double impulse = forward * 0.98;
+        // KeyboardInput normalizes (strafe, forward); LocalPlayer scales by 0.98 and stretches diagonals to the
+        // unit square (modifyInputSpeedForSquareMovement); Entity.getInputVector rotates by yaw
+        double mx = strafe, mz = forward, len = Math.hypot(mx, mz);
+        if (len > 0) {
+            mx /= len;
+            mz /= len;
+            double ax = Math.abs(mx), az = Math.abs(mz);
+            double ratio = az > ax ? ax / az : az / ax;
+            double scale = Math.min(0.98 * Math.sqrt(1 + ratio * ratio), 1.0);
+            mx *= scale;
+            mz *= scale;
+        }
+        double ix = mx * cos - mz * sin, iz = mz * cos + mx * sin;
         if (inWater) {
-            travelInWater(impulse, sin, cos);
+            travelInWater(ix, iz);
         } else {
-            travelInAir(impulse, sin, cos, jump);
+            travelInAir(ix, iz, jump);
         }
 
         // Block.stepOn (slime slowdown) runs after travel
@@ -114,14 +137,14 @@ public final class PlayerSim {
         inWater = fluidHeight() > 0;
     }
 
-    private void travelInAir(double impulse, double sin, double cos, boolean jumping) {
+    private void travelInAir(double ix, double iz, boolean jumping) {
         double f = onGround ? supporting(0.500001).friction : 1.0;
         double drag = f * 0.91;
         double speed = onGround
             ? (sprinting ? 0.13 : 0.1) * (0.21600002 / (f * f * f))
             : (sprinting ? 0.025999999 : 0.02);
-        vx += -impulse * speed * sin;
-        vz += impulse * speed * cos;
+        vx += ix * speed;
+        vz += iz * speed;
         boolean climbable = onClimbable();
         if (climbable) {
             vx = clamp(vx, -0.15, 0.15);
@@ -135,12 +158,12 @@ public final class PlayerSim {
         vz *= drag;
     }
 
-    private void travelInWater(double impulse, double sin, double cos) {
+    private void travelInWater(double ix, double iz) {
         boolean falling = vy <= 0;
         double yBefore = y;
         double f = 0.8; // never sprinting in water here (no sprint-swimming)
-        vx += -impulse * 0.02 * sin;
-        vz += impulse * 0.02 * cos;
+        vx += ix * 0.02;
+        vz += iz * 0.02;
         move(vx, vy, vz);
         if (horizontalCollision && onClimbable()) vy = 0.2;
         vx *= f;

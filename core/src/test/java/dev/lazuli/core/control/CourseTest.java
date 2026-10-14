@@ -7,6 +7,7 @@ import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.testutil.GridWorld;
 import dev.lazuli.core.world.BlockKind;
 import dev.lazuli.core.world.Pos;
+import dev.lazuli.core.move.Standing;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -18,7 +19,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class CourseTest {
     static final float MAX_TURN = 45f;
 
-    record Run(boolean arrived, int ticks, String log) {}
+    /** maxAirYawDev: largest yaw difference from the start-to-goal heading while airborne (degrees). */
+    record Run(boolean arrived, int ticks, String log, float maxAirYawDev) {}
 
     static Run drive(GridWorld w, int sx, int sy, int sz, int gx, int gy, int gz, int maxTicks) {
         List<String> msgs = new ArrayList<>();
@@ -29,8 +31,11 @@ class CourseTest {
         PathFollower fallback = new PathFollower(w);
         PathTracker tracker = new PathTracker();
         float yaw = PathFollower.yawTo(sx, sz, gx, gz);
+        final float heading = yaw;
+        float maxDev = 0;
         long lastBlock = Long.MIN_VALUE;
         int offPath = 0;
+        long loggedVersion = -1;
         StringBuilder log = new StringBuilder();
         long planNanos = 0, maxNanos = 0;
         int plans = 0;
@@ -39,13 +44,20 @@ class CourseTest {
             if (snap.state() == PathingSession.State.ARRIVED) {
                 System.out.printf("%s: %d ticks, plan avg %.2f ms max %.2f ms%n", Thread.currentThread().getStackTrace()[2].getMethodName(),
                     t, planNanos / 1e6 / Math.max(1, plans), maxNanos / 1e6);
-                return new Run(true, t, log.toString());
+                return new Run(true, t, log.toString(), maxDev);
             }
-            if (snap.state() != PathingSession.State.PATHING) return new Run(false, t, msgs + "\n" + log);
-            if (s.y < -10) return new Run(false, t, "fell at " + t + "\n" + log);
-            int bx = (int) Math.floor(s.x), by = (int) Math.floor(s.y + 1e-9), bz = (int) Math.floor(s.z);
-            long block = Pos.pack(bx, by, bz);
+            if (snap.state() != PathingSession.State.PATHING) return new Run(false, t, msgs + "\n" + log, maxDev);
+            if (s.y < -10) return new Run(false, t, "fell at " + t + "\n" + log, maxDev);
+            long block = s.onGround ? Standing.nodeUnder(w, s.x, s.y, s.z)
+                : Pos.pack((int) Math.floor(s.x), (int) Math.floor(s.y + 1e-9), (int) Math.floor(s.z));
+            int bx = Pos.x(block), by = Pos.y(block), bz = Pos.z(block);
             List<Long> path = snap.path();
+            if (snap.version() != loggedVersion && log.length() < 20000) {
+                loggedVersion = snap.version();
+                StringBuilder ps = new StringBuilder("path v" + loggedVersion + ":");
+                for (int i = 0; i < Math.min(14, path.size()); i++) ps.append(' ').append(Pos.toString(path.get(i)));
+                log.append(ps).append('\n');
+            }
             int idx = tracker.update(path, snap.version(), bx, by, bz);
             boolean onNode = PathTracker.onNode(path, idx, bx, by, bz);
             if (onNode) offPath = 0; else if (s.onGround) offPath++;
@@ -66,14 +78,15 @@ class CourseTest {
             if (c == null && idx >= 0) c = fallback.tick(st, path.subList(idx, path.size()), true);
             if (c == null) c = new Controls(false, false, false, yaw, 10f);
             yaw = InputPlanner.approach(yaw, c.targetYaw(), MAX_TURN);
-            s.step(c.impulse(), c.jump(), c.sprint(), yaw);
+            s.step(c.impulse(), c.strafe(), c.jump(), c.sprint(), yaw);
             t++;
+            if (!s.onGround) maxDev = Math.max(maxDev, Math.abs(RotationController.wrap(yaw - heading)));
             if (log.length() < 20000) {
-                log.append(String.format("t=%d pos=(%.2f,%.2f,%.2f) v=(%.3f,%.3f) g=%s idx=%d %s in=%d%s%s yaw=%.0f%n",
-                    t, s.x, s.y, s.z, s.vx, s.vz, s.onGround, idx, planned ? "P" : "F", c.impulse(), c.jump() ? "J" : "", c.sprint() ? "S" : "", yaw));
+                log.append(String.format("t=%d pos=(%.2f,%.2f,%.2f) v=(%.3f,%.3f) g=%s idx=%d %s in=%d/%d%s%s yaw=%.0f%n",
+                    t, s.x, s.y, s.z, s.vx, s.vz, s.onGround, idx, planned ? "P" : "F", c.impulse(), c.strafe(), c.jump() ? "J" : "", c.sprint() ? "S" : "", yaw));
             }
         }
-        return new Run(false, maxTicks, "timeout\n" + log);
+        return new Run(false, maxTicks, "timeout\n" + log, maxDev);
     }
 
     /** 1-wide strips along +x at y=0, z=0. */
@@ -150,6 +163,39 @@ class CourseTest {
         // 2 blocks of momentum, 2-gap, single block, 2-gap, single block, 1-gap, finish
         Run r = drive(strip(0, 2, 5, 5, 8, 8, 10, 12), 0, 1, 0, 12, 1, 0, 400);
         assertArrives(r, 120);
+    }
+
+    @Test
+    void longChainOfTwoGapsKeepsMomentumAndFacesForward() {
+        // single blocks with 2-block gaps: real players sprint-jump straight through, never turning to brake
+        Run r = drive(strip(0, 1, 4, 4, 7, 7, 10, 10, 13, 13, 16, 16, 19, 19, 22, 25), 0, 1, 0, 25, 1, 0, 400);
+        assertArrives(r, 130);
+        assertTrue(r.maxAirYawDev() < 15, "turned " + r.maxAirYawDev() + " degrees off the line mid-air\n" + r.log());
+    }
+
+    @Test
+    void zigzagTwoGapsOnSingleBlocks() {
+        // each 2-gap also shifts a block sideways: only doable carrying momentum from the jump before
+        GridWorld w = new GridWorld(BlockKind.AIR).fill(-2, 0, 0, 0, 0, 0, BlockKind.SOLID);
+        for (int i = 1; i <= 6; i++) w.fill(3 * i, 0, i % 2, 3 * i, 0, i % 2, BlockKind.SOLID);
+        assertArrives(drive(w, 0, 1, 0, 18, 1, 0, 400), 110);
+    }
+
+    @Test
+    void twoGapsUpwardWithoutTurningAway() {
+        GridWorld w = new GridWorld(BlockKind.AIR).fill(-2, 0, 0, 0, 0, 0, BlockKind.SOLID);
+        for (int i = 1; i <= 5; i++) w.fill(3 * i, 0, 0, 3 * i, i, 0, BlockKind.SOLID);
+        Run r = drive(w, 0, 1, 0, 15, 6, 0, 400);
+        assertArrives(r, 80);
+        assertTrue(r.maxAirYawDev() < 15, "turned " + r.maxAirYawDev() + " degrees off the line mid-air\n" + r.log());
+    }
+
+    @Test
+    void twoGapsBetweenOneDeepLedges() {
+        // ledges 1 deep along the direction of travel: no room to stop, so it has to keep the chain going
+        GridWorld w = new GridWorld(BlockKind.AIR).fill(-2, 0, 0, 0, 0, 0, BlockKind.SOLID);
+        for (int i = 1; i <= 6; i++) w.fill(3 * i, 0, 0, 3 * i, 0, 4, BlockKind.SOLID);
+        assertArrives(drive(w, 0, 1, 0, 18, 1, 2, 400), 110);
     }
 
     @Test

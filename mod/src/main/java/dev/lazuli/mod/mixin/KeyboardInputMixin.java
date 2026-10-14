@@ -18,7 +18,7 @@ public abstract class KeyboardInputMixin extends ClientInput {
     private void lazuli$override(CallbackInfo ci) {
         Controls c = InputDriver.current();
         if (c == null) return;
-        this.keyPresses = new Input(c.forward(), c.back(), false, false, c.jump(), false, c.sprint());
-        this.moveVector = new Vec2(0, c.impulse());
+        this.keyPresses = new Input(c.forward(), c.back(), c.left(), c.right(), c.jump(), false, c.sprint());
+        this.moveVector = new Vec2(c.strafe(), c.impulse()).normalized();
     }
 }
