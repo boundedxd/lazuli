@@ -250,6 +250,7 @@ public final class Builder {
         int end = Math.min(path.size() - 1, from + horizon);
         for (int i = Math.max(0, from); i < end; i++) {
             if (!actions(world, path.get(i), path.get(i + 1)).isEmpty()) return i;
+            if (dev.lazuli.core.move.Climbing.edge(world, path.get(i), path.get(i + 1))) return i; // the climber's
         }
         return path.size() - 1;
     }

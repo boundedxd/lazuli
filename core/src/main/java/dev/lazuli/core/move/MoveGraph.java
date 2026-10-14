@@ -99,7 +99,7 @@ public final class MoveGraph implements Graph {
 
     @Override
     public boolean isNode(long u) {
-        return !Double.isNaN(feet(u)) || swims(u) || dig.kind(Pos.x(u), Pos.y(u), Pos.z(u)) != Digging.Kind.NONE;
+        return !Double.isNaN(feet(u)) || swims(u) || Climbing.node(w, u) || dig.kind(Pos.x(u), Pos.y(u), Pos.z(u)) != Digging.Kind.NONE;
     }
 
     /** Deepest drop into water planned: water takes all the fall damage, but a deeper fall is just slow. */
@@ -188,6 +188,8 @@ public final class MoveGraph implements Graph {
         int ux = Pos.x(u), uy = Pos.y(u), uz = Pos.z(u);
         int dx = Pos.x(v) - ux, dz = Pos.z(v) - uz;
         if (Math.abs(dx) > 1 || Math.abs(dz) > 1) return jumpCost(u, v);
+        double climb = Climbing.cost(w, u, v, feet(u), feet(v), flat);
+        if (!Double.isNaN(climb)) return climb;
         if (dx == 0 && dz == 0) return INF;
         boolean su = swims(u), sv = swims(v);
         if (su || sv) return waterCost(u, v, su, sv);
@@ -431,7 +433,7 @@ public final class MoveGraph implements Graph {
                 if (isNode(v)) out.accept(v); // most of the column is solid ground or open air: no edge to price
             }
         }
-        if (dig.enabled()) {
+        if (dig.enabled() || climbs(u)) {
             for (int dy = -1; dy <= 1; dy += 2) {
                 long v = Pos.offset(u, 0, dy, 0);
                 if (isNode(v)) out.accept(v);
@@ -466,7 +468,7 @@ public final class MoveGraph implements Graph {
                 if (isNode(u)) out.accept(u);
             }
         }
-        if (dig.enabled()) {
+        if (dig.enabled() || climbs(v)) {
             for (int dy = -1; dy <= 1; dy += 2) {
                 long u = Pos.offset(v, 0, dy, 0);
                 if (isNode(u)) out.accept(u);
@@ -488,6 +490,11 @@ public final class MoveGraph implements Graph {
                 if (!Double.isNaN(feet(u)) && nearGap(u)) out.accept(u);
             }
         }
+    }
+
+    /** A climbable at u, or just above or below it: straight up and down are edges. */
+    private boolean climbs(long u) {
+        return Climbing.node(w, u) || Climbing.node(w, Pos.offset(u, 0, 1, 0)) || Climbing.node(w, Pos.offset(u, 0, -1, 0));
     }
 
     @Override

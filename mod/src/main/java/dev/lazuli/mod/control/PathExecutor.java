@@ -1,6 +1,7 @@
 package dev.lazuli.mod.control;
 
 import dev.lazuli.core.control.Builder;
+import dev.lazuli.core.control.Climber;
 import dev.lazuli.core.control.Controls;
 import dev.lazuli.core.control.EdgeWatch;
 import dev.lazuli.core.control.InputPlanner;
@@ -38,6 +39,7 @@ public final class PathExecutor {
     private final Settings settings;
     private final InputPlanner planner;
     private final PathFollower follower;
+    private final Climber climber;
     private final PathTracker tracker = new PathTracker();
     private final BlockView world;
     private final EdgeWatch edgeWatch = new EdgeWatch();
@@ -54,6 +56,7 @@ public final class PathExecutor {
         this.world = world;
         this.planner = new InputPlanner(world);
         this.follower = new PathFollower(world);
+        this.climber = new Climber(world);
     }
 
     public void tick(Minecraft mc) {
@@ -104,6 +107,9 @@ public final class PathExecutor {
         Controls c = eating ? null : interactor.tick(mc, state, path, idx, block);
         // eating: stand still meanwhile (counts as building, so standing still isn't taken as being stuck)
         if (eating) c = new Controls(false, false, false, false, curYaw, curPitch, 0, false);
+        boolean building = c != null;
+        // ladders and vines (still watched for getting stuck, unlike building)
+        if (c == null && idx >= 0) c = climber.tick(state, path, idx);
         boolean interacting = c != null;
         if (interacting) {
             planner.reset();
@@ -123,7 +129,7 @@ public final class PathExecutor {
                 }
             }
         }
-        long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(v.x, v.z), interacting);
+        long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(v.x, v.z), building);
         if (failed != null) session.edgeFailed(failed[0], failed[1]);
         if (c == null) c = new Controls(false, false, false, curYaw, curPitch);
         float yaw = InputPlanner.approach(curYaw, c.targetYaw(), maxTurn);

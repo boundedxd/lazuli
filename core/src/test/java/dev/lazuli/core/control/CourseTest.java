@@ -29,6 +29,7 @@ class CourseTest {
         PlayerSim s = new PlayerSim(w, sx + 0.5, sy, sz + 0.5, 0, 0, 0, true, false);
         InputPlanner planner = new InputPlanner(w);
         PathFollower fallback = new PathFollower(w);
+        Climber climber = new Climber(w);
         PathTracker tracker = new PathTracker();
         float yaw = PathFollower.yawTo(sx, sz, gx, gz);
         final float heading = yaw;
@@ -69,21 +70,25 @@ class CourseTest {
             PlayerState st = new PlayerState(s.x, s.y, s.z, yaw, 10f, s.onGround, s.horizontalCollision,
                 s.vx, s.vy, s.vz, s.sprinting, s.noJumpDelay, s.minorHorizontalCollision);
             long t0 = System.nanoTime();
-            Controls c = idx < 0 ? null : planner.plan(st, path, idx, true, MAX_TURN);
+            Controls c = idx < 0 ? null : climber.tick(st, path, idx);
+            boolean climbing = c != null;
+            if (climbing) planner.reset();
+            else if (idx >= 0) c = planner.plan(st, path.subList(0, Builder.walkableEnd(w, path, idx, 64) + 1), idx, true, MAX_TURN);
             long dt = System.nanoTime() - t0;
             planNanos += dt;
             maxNanos = Math.max(maxNanos, dt);
             plans++;
-            boolean planned = c != null;
+            boolean planned = c != null && !climbing;
             if (c == null && idx >= 0) c = fallback.tick(st, path.subList(idx, path.size()), true);
             if (c == null) c = new Controls(false, false, false, yaw, 10f);
             yaw = InputPlanner.approach(yaw, c.targetYaw(), MAX_TURN);
-            s.step(c.impulse(), c.strafe(), c.jump(), c.sprint(), yaw);
+            s.step(c.impulse(), c.strafe(), c.jump(), c.sprint(), c.sneak(), yaw);
             t++;
+            if (s.onGround && s.fallen() > 3.05) return new Run(false, t, "fell " + s.fallen() + " blocks at " + t + "\n" + log, maxDev);
             if (!s.onGround) maxDev = Math.max(maxDev, Math.abs(RotationController.wrap(yaw - heading)));
             if (log.length() < 20000) {
                 log.append(String.format("t=%d pos=(%.2f,%.2f,%.2f) v=(%.3f,%.3f) g=%s idx=%d %s in=%d/%d%s%s yaw=%.0f%n",
-                    t, s.x, s.y, s.z, s.vx, s.vz, s.onGround, idx, planned ? "P" : "F", c.impulse(), c.strafe(), c.jump() ? "J" : "", c.sprint() ? "S" : "", yaw));
+                    t, s.x, s.y, s.z, s.vx, s.vz, s.onGround, idx, climbing ? "C" : planned ? "P" : "F", c.impulse(), c.strafe(), c.jump() ? "J" : "", c.sprint() ? "S" : "", yaw));
             }
         }
         return new Run(false, maxTicks, "timeout\n" + log, maxDev);

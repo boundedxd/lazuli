@@ -187,6 +187,8 @@ public final class PlayerSim {
             vx = clamp(vx, -0.15, 0.15);
             vz = clamp(vz, -0.15, 0.15);
             vy = Math.max(vy, -0.15);
+            if (sneaking && vy < 0) vy = 0; // holding on
+            peakY = y; // no fall damage off a ladder
         }
         move(vx, vy, vz);
         if ((horizontalCollision || jumping) && climbable) vy = 0.2;
