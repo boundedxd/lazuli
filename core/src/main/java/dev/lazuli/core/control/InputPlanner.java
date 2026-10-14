@@ -1,6 +1,6 @@
 package dev.lazuli.core.control;
 
-import dev.lazuli.core.move.MoveGraph;
+import dev.lazuli.core.move.Standing;
 import dev.lazuli.core.physics.PlayerSim;
 import dev.lazuli.core.world.BlockKind;
 import dev.lazuli.core.world.BlockView;
@@ -33,6 +33,12 @@ public final class InputPlanner {
     private static final int[][] ACTIONS = {{1, 0}, {1, 1}, {1, -1}, {0, 0}, {-1, 0}};
 
     private final dev.lazuli.core.world.LocalCache world;
+    /** Longest safe fall (blocks); a landing that falls further is never planned, unless it's into water. */
+    private int maxFall = 3;
+
+    public void setMaxFall(int blocks) {
+        maxFall = blocks;
+    }
 
     public InputPlanner(BlockView world) {
         this.world = new dev.lazuli.core.world.LocalCache(world);
@@ -86,7 +92,10 @@ public final class InputPlanner {
         final boolean includesEnd;
         final int minY;
 
-        Corridor(List<Long> path, int from) {
+        /** Each cell's standing level: its feet height rounded (water and air cells: their block y). */
+        final long[] levels;
+
+        Corridor(BlockView world, List<Long> path, int from) {
             int start = Math.max(0, from - 2);
             int end = Math.min(path.size(), from + WINDOW);
             int n = end - start;
@@ -124,12 +133,24 @@ public final class InputPlanner {
                 }
             }
             cells = new long[all.size()];
-            for (int i = 0; i < cells.length; i++) cells[i] = all.get(i);
+            levels = new long[all.size()];
+            for (int i = 0; i < cells.length; i++) {
+                cells[i] = all.get(i);
+                double f = Standing.feet(world, Pos.x(cells[i]), Pos.y(cells[i]), Pos.z(cells[i]));
+                levels[i] = Math.round(Double.isNaN(f) ? Pos.y(cells[i]) : f);
+            }
         }
 
-        boolean contains(int bx, int by, int bz) {
-            for (long n : cells) {
-                if (Pos.y(n) == by && Math.abs(Pos.x(n) - bx) <= 1 && Math.abs(Pos.z(n) - bz) <= 1) return true;
+        /**
+         * Whether a player whose feet are at {@code feetY} in column (bx, bz) is beside a corridor cell at that height.
+         * Heights compare by level (feet rounded), so a dirt path (15/16 high) or a slab next to full blocks still
+         * counts as the same walk.
+         */
+        boolean contains(int bx, double feetY, int bz) {
+            long level = Math.round(feetY);
+            for (int i = 0; i < cells.length; i++) {
+                long n = cells[i];
+                if (levels[i] == level && Math.abs(Pos.x(n) - bx) <= 1 && Math.abs(Pos.z(n) - bz) <= 1) return true;
             }
             return false;
         }
@@ -146,7 +167,7 @@ public final class InputPlanner {
             return null;
         }
         world.recenter((int) Math.floor(p.x()), (int) Math.floor(p.y()), (int) Math.floor(p.z()));
-        Corridor c = new Corridor(path, from);
+        Corridor c = new Corridor(world, path, from);
         float[] yaws = yawOptions(p, path, from);
         int aimed = aimedCount;
         PlayerSim root = p.sim(world);
@@ -203,9 +224,47 @@ public final class InputPlanner {
         }
         if (best == null) {
             reset();
-            return null;
+            return root.onGround ? null : recover(root, p, c, allowSprint, maxTurn);
         }
         return remember(best, root, p.yaw(), c, allowSprint);
+    }
+
+    /**
+     * Airborne with no plan that stays on the path (it was replanned mid-jump, or the jump went wrong): steer for the
+     * landing nearest the path that is still safe, on firm ground no further down than a safe fall, anywhere.
+     */
+    private Controls recover(PlayerSim root, PlayerState p, Corridor c, boolean allowSprint, float maxTurn) {
+        Controls bestC = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int k = 0; k < 16; k++) {
+            float yaw = p.yaw() + k * 22.5f;
+            for (int fwd = -1; fwd <= 1; fwd++) {
+                PlayerSim s = root.copy();
+                float y = p.yaw();
+                boolean ok = false;
+                for (int t = 0; t < SAFE_TICKS; t++) {
+                    y = approach(y, yaw, maxTurn);
+                    s.step(fwd, 0, false, fwd > 0 && allowSprint, y);
+                    if (s.inWater) {
+                        ok = true;
+                        break;
+                    }
+                    if (s.onGround) {
+                        int bx = (int) Math.floor(s.x), by = (int) Math.floor(s.y + 1e-6), bz = (int) Math.floor(s.z);
+                        ok = firm(s) && s.fallen() <= maxFall + 0.05 && world.get(bx, by, bz) != BlockKind.DANGER
+                            && world.get(bx, by - 1, bz) != BlockKind.DANGER;
+                        break;
+                    }
+                }
+                if (!ok) continue;
+                double sc = score(s, c);
+                if (sc > bestScore) {
+                    bestScore = sc;
+                    bestC = new Controls(fwd > 0, fwd < 0, false, fwd > 0 && allowSprint, yaw, PITCH);
+                }
+            }
+        }
+        return bestC != null ? bestC : airBrake(p);
     }
 
     private boolean rollout(Cand ch, int fwd, int strafe, boolean jump, float segYaw, int len, boolean allowSprint,
@@ -325,12 +384,13 @@ public final class InputPlanner {
      * {@link #LANDING_MARGIN}.
      */
     private boolean alive(PlayerSim s, Corridor c, boolean wasInAir) {
-        if (s.onGround && wasInAir && !firm(s)) return false;
+        if (s.onGround && wasInAir && (!firm(s) || s.fallen() > maxFall + 0.05)) return false;
         if (s.onGround) {
             int bx = (int) Math.floor(s.x), by = (int) Math.floor(s.y + 1e-6), bz = (int) Math.floor(s.z);
-            if (!c.contains(bx, by, bz)) return false;
+            if (!c.contains(bx, s.y, bz)) return false;
             return world.get(bx, by, bz) != BlockKind.DANGER && world.get(bx, by - 1, bz) != BlockKind.DANGER;
         }
+        if (s.inWater) return s.y >= c.minY - 1.5; // swimming floats a little below the surface block
         return s.y >= c.minY - 0.6;
     }
 
@@ -505,10 +565,7 @@ public final class InputPlanner {
             double cx = x0 + ux * t, cz = z0 + uz * t;
             for (int side = -1; side <= 1; side++) {
                 int bx = (int) Math.floor(cx + px * side), bz = (int) Math.floor(cz + pz * side);
-                if (!(MoveGraph.floor(world.get(bx, y - 1, bz)) && MoveGraph.passable(world.get(bx, y, bz))
-                    && MoveGraph.passable(world.get(bx, y + 1, bz)))) {
-                    return false;
-                }
+                if (!Standing.walkableAt(world, bx, y, bz)) return false;
             }
         }
         return true;
@@ -518,5 +575,15 @@ public final class InputPlanner {
     public static float approach(float yaw, float target, float maxTurn) {
         float d = RotationController.wrap(target - yaw);
         return yaw + Math.max(-maxTurn, Math.min(maxTurn, d));
+    }
+
+    /**
+     * In the air with no safe plan: face the way the player is moving and hold S, so the landing comes as short as it
+     * can. Steering for the path instead is how a missed jump turns into a fall off the side.
+     */
+    public static Controls airBrake(PlayerState p) {
+        if (Math.hypot(p.vx(), p.vz()) < 1e-3) return new Controls(false, false, false, p.yaw(), PITCH);
+        float yaw = PathFollower.yawTo(0, 0, p.vx(), p.vz());
+        return new Controls(false, true, false, false, yaw, PITCH);
     }
 }

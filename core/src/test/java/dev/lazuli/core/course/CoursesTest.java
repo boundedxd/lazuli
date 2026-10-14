@@ -36,10 +36,11 @@ class CoursesTest {
             Interaction in = new Interaction(c.needsBreak(), c.needsPlace(), c.needsPlace() ? 64 : 0, TOOLS);
             int[] s = c.start(), g = c.goal();
             var r = InteractionCourseTest.drive(w, in, in.throwaways(), true, s[0], s[1], s[2], g[0], g[1], g[2], 4000);
-            System.out.printf("COURSE %-14s arrived=%s ticks=%d breaks=%d places=%d lowest=%.2f%n", c.name(), r.arrived(),
-                r.ticks(), r.breaks(), r.places(), r.lowestY());
+            System.out.printf("COURSE %-14s arrived=%s ticks=%d breaks=%d places=%d lowest=%.2f fall=%.2f%n", c.name(), r.arrived(),
+                r.ticks(), r.breaks(), r.places(), r.lowestY(), r.maxFall());
             assertTrue(r.arrived(), c.name() + ": " + r.log());
-            assertTrue(r.lowestY() >= c.lowest() - 0.01, c.name() + " went below " + c.lowest() + " (took the long way round)\n" + r.log());
+            assertTrue(r.maxFall() <= 3.05, c.name() + " fell " + r.maxFall() + " blocks " + r.log());
+            assertTrue(r.lowestY() >= c.lowest() - 0.1, c.name() + " went below " + c.lowest() + " (took the long way round)\n" + r.log());
         })).toList();
     }
 }

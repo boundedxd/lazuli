@@ -18,24 +18,40 @@ public final class Standing {
 
     private Standing() {}
 
+    /** Blocks up to this high are stood on in their own cell; taller ones from the cell above. */
+    private static final double HALF = 0.5 + 1e-6;
+
     /** Feet height when standing centered in (x, y, z), or NaN if a player can't stand there. */
     public static double feet(BlockView w, int x, int y, int z) {
         BlockKind k = w.get(x, y, z);
         if (k == BlockKind.DANGER || k == BlockKind.WATER) return Double.NaN;
         double support;
         double here = k == BlockKind.UNKNOWN ? 0 : top(w.physics(x, y, z), LO, HI, LO, HI);
-        if (here >= 1 - EPS) return Double.NaN;
+        // one node per place to stand: a block up to half high (slab, carpet) is stood on in its own cell, a taller
+        // one (dirt path, farmland, soul sand, a chest) from the cell above, like a full block
+        if (here > HALF) return Double.NaN;
         if (here > EPS) {
             support = y + here;
         } else {
             BlockKind below = w.get(x, y - 1, z);
             if (below == BlockKind.DANGER || below == BlockKind.WATER) return Double.NaN;
             double t = below == BlockKind.UNKNOWN ? 1 : top(w.physics(x, y - 1, z), LO, HI, LO, HI);
-            if (t < 1 - EPS) return Double.NaN;
+            if (t <= HALF) return Double.NaN;
             support = y - 1 + t;
             if (support >= y + 1 - EPS) return Double.NaN;
         }
         return clear(w, x + LO, z + LO, x + HI, z + HI, support, support + BODY) ? support : Double.NaN;
+    }
+
+    /**
+     * Whether a player can stand in column (x, z) at about level {@code y}, on anything from a slab to a full block:
+     * feet within half a block of y (a dirt path's 15/16 counts as y, so does a bottom slab in the block below).
+     */
+    public static boolean walkableAt(BlockView w, int x, int y, int z) {
+        double f = feet(w, x, y, z);
+        if (!Double.isNaN(f) && Math.abs(f - y) <= 0.5) return true;
+        f = feet(w, x, y - 1, z);
+        return !Double.isNaN(f) && Math.abs(f - y) <= 0.5;
     }
 
     /**
@@ -45,11 +61,14 @@ public final class Standing {
     public static boolean hasSupport(BlockView w, int x, int y, int z) {
         BlockKind k = w.get(x, y, z);
         if (k == BlockKind.UNKNOWN) return true;
-        if (k != BlockKind.AIR && k != BlockKind.WATER && top(w.physics(x, y, z), LO, HI, LO, HI) > EPS) return true;
+        if (k != BlockKind.AIR && k != BlockKind.WATER) {
+            double here = top(w.physics(x, y, z), LO, HI, LO, HI);
+            if (here > EPS && here <= HALF) return true;
+        }
         BlockKind below = w.get(x, y - 1, z);
         if (below == BlockKind.UNKNOWN) return true;
         return below != BlockKind.AIR && below != BlockKind.WATER && below != BlockKind.DANGER
-            && top(w.physics(x, y - 1, z), LO, HI, LO, HI) >= 1 - EPS;
+            && top(w.physics(x, y - 1, z), LO, HI, LO, HI) > HALF;
     }
 
     /**

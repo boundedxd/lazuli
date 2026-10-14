@@ -9,10 +9,16 @@ import dev.lazuli.core.world.BlockView;
  */
 public record PlayerState(double x, double y, double z, float yaw, float pitch, boolean onGround,
                           boolean horizontalCollision, double vx, double vy, double vz, boolean sprinting,
-                          int noJumpDelay, boolean minorHorizontalCollision) {
+                          int noJumpDelay, boolean minorHorizontalCollision, double fallDistance) {
+    /** @param fallDistance blocks fallen so far in the current fall (0 on the ground) */
+    public PlayerState(double x, double y, double z, float yaw, float pitch, boolean onGround, boolean horizontalCollision,
+                       double vx, double vy, double vz, boolean sprinting, int noJumpDelay, boolean minorHorizontalCollision) {
+        this(x, y, z, yaw, pitch, onGround, horizontalCollision, vx, vy, vz, sprinting, noJumpDelay, minorHorizontalCollision, 0);
+    }
+
     public PlayerState(double x, double y, double z, float yaw, float pitch, boolean onGround, boolean horizontalCollision,
                        double vx, double vy, double vz, boolean sprinting) {
-        this(x, y, z, yaw, pitch, onGround, horizontalCollision, vx, vy, vz, sprinting, 0, false);
+        this(x, y, z, yaw, pitch, onGround, horizontalCollision, vx, vy, vz, sprinting, 0, false, 0);
     }
 
     public PlayerState(double x, double y, double z, float yaw, float pitch, boolean onGround, boolean horizontalCollision) {
@@ -25,6 +31,7 @@ public record PlayerState(double x, double y, double z, float yaw, float pitch, 
         s.noJumpDelay = noJumpDelay;
         s.horizontalCollision = horizontalCollision;
         s.minorHorizontalCollision = minorHorizontalCollision;
+        s.peakY = y + fallDistance;
         return s;
     }
 }

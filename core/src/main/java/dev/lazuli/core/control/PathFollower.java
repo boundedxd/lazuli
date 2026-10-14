@@ -1,6 +1,6 @@
 package dev.lazuli.core.control;
 
-import dev.lazuli.core.move.MoveGraph;
+import dev.lazuli.core.move.Standing;
 import dev.lazuli.core.physics.PlayerSim;
 import dev.lazuli.core.world.BlockView;
 import dev.lazuli.core.world.Pos;
@@ -163,12 +163,12 @@ public final class PathFollower {
      */
     private boolean acceptable(PlayerSim s, List<Long> path, int from, float yaw) {
         int bx = (int) Math.floor(s.x), by = (int) Math.round(s.y), bz = (int) Math.floor(s.z);
-        if (Math.abs(s.y - by) > 1e-6 || !MoveGraph.floor(world.get(bx, by - 1, bz))) return false;
+        if (!Standing.walkableAt(world, bx, by, bz)) return false;
         int exact = -1;
         boolean near = false;
         for (int i = from; i < Math.min(path.size(), from + LANDING_WINDOW); i++) {
             long n = path.get(i);
-            if (Pos.y(n) != by) continue;
+            if (level(n) != by) continue;
             int dx = Math.abs(Pos.x(n) - bx), dz = Math.abs(Pos.z(n) - bz);
             if (dx == 0 && dz == 0) {
                 exact = i;
@@ -240,11 +240,7 @@ public final class PathFollower {
             double cx = x0 + ux * t, cz = z0 + uz * t;
             for (int side = -1; side <= 1; side++) {
                 int bx = (int) Math.floor(cx + px * side), bz = (int) Math.floor(cz + pz * side);
-                if (!(MoveGraph.floor(world.get(bx, y - 1, bz))
-                    && MoveGraph.passable(world.get(bx, y, bz))
-                    && MoveGraph.passable(world.get(bx, y + 1, bz)))) {
-                    return false;
-                }
+                if (!Standing.walkableAt(world, bx, y, bz)) return false;
             }
         }
         return true;
@@ -253,5 +249,11 @@ public final class PathFollower {
     /** Minecraft convention: yaw 0 faces +Z, -90 faces +X. */
     public static float yawTo(double fromX, double fromZ, double toX, double toZ) {
         return (float) (Math.toDegrees(Math.atan2(toZ - fromZ, toX - fromX)) - 90.0);
+    }
+
+    /** A node's standing level: its feet height rounded (a dirt path or slab counts as the full block level). */
+    private int level(long n) {
+        double f = Standing.feet(world, Pos.x(n), Pos.y(n), Pos.z(n));
+        return (int) Math.round(Double.isNaN(f) ? Pos.y(n) : f);
     }
 }

@@ -20,6 +20,8 @@ public record Course(String name, String what, List<Fill> fills, int[] start, in
     /** Block types a course is made of. */
     public enum Material {
         AIR, STONE, DIRT, GRAVEL, GLASS, ICE, SLAB, WATER, LAVA,
+        /** Dirt path: 15/16 of a block high. */
+        DIRT_PATH,
         /** The block the goal stands on (gold in the game). */
         GOAL;
 
@@ -28,7 +30,7 @@ public record Course(String name, String what, List<Fill> fills, int[] start, in
                 case AIR -> BlockKind.AIR;
                 case WATER -> BlockKind.WATER;
                 case LAVA -> BlockKind.DANGER;
-                case SLAB -> BlockKind.OBSTACLE;
+                case SLAB, DIRT_PATH -> BlockKind.OBSTACLE;
                 default -> BlockKind.SOLID;
             };
         }
@@ -44,6 +46,7 @@ public record Course(String name, String what, List<Fill> fills, int[] start, in
                 case GLASS -> BlockPhysics.intern(full, 0.6f, 1, 1, 0, 0.3f, 4);
                 case ICE -> BlockPhysics.intern(full, 0.98f, 1, 1, 0, 0.5f, 5);
                 case SLAB -> BlockPhysics.intern(new double[]{0, 0, 0, 1, 0.5, 1}, 0.6f, 1, 1, 0, 2f, 6);
+                case DIRT_PATH -> BlockPhysics.intern(new double[]{0, 0, 0, 1, 0.9375, 1}, 0.6f, 1, 1, 0, 0.65f, 9);
                 case WATER -> BlockPhysics.WATER_BLOCK;
                 case LAVA -> BlockPhysics.intern(new double[0], 0.6f, 1, 1, BlockPhysics.LAVA, -1, 7);
                 case GOAL -> BlockPhysics.intern(full, 0.6f, 1, 1, 0, 3f, 8);

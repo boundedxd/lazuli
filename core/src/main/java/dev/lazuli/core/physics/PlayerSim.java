@@ -29,6 +29,8 @@ public final class PlayerSim {
     public boolean onGround, sprinting, horizontalCollision, inWater;
     /** Shift held this tick. */
     public boolean sneaking;
+    /** Highest feet height since last on the ground or in water: a landing's fall is this minus the landing height. */
+    public double peakY;
     /** The last horizontal collision only grazed (movement within 8 degrees of the input): sprinting survives it. */
     public boolean minorHorizontalCollision;
     /** This tick's input direction in world space, for {@link #minorHorizontalCollision}. */
@@ -55,6 +57,7 @@ public final class PlayerSim {
         // a player standing on the ground always carries one tick of gravity into the next tick
         if (onGround && vy == 0) this.vy = -GRAVITY * 0.98;
         this.inWater = fluidHeight() > 0;
+        this.peakY = y;
     }
 
     public PlayerSim copy() {
@@ -65,6 +68,7 @@ public final class PlayerSim {
         s.minorHorizontalCollision = minorHorizontalCollision;
         s.inWater = inWater;
         s.sneaking = sneaking;
+        s.peakY = peakY;
         return s;
     }
 
@@ -102,6 +106,7 @@ public final class PlayerSim {
      */
     public void step(int forward, int strafe, boolean jump, boolean sprintKey, boolean sneak, float yaw) {
         sneaking = sneak;
+        if (onGround || inWater) peakY = y; // a new fall starts from where the player stood or swam
         // sprint state (LocalPlayer.aiStep): needs forward impulse; held W keeps it, releasing W stops it
         if (forward <= 0 || inWater || sneak) sprinting = false;
         else if (sprintKey) sprinting = true;
@@ -160,6 +165,13 @@ public final class PlayerSim {
             }
         }
         inWater = fluidHeight() > 0;
+        if (inWater) peakY = y;
+        else peakY = Math.max(peakY, y);
+    }
+
+    /** Blocks fallen by a landing this tick (0 if not landing): what decides fall damage. */
+    public double fallen() {
+        return onGround ? Math.max(0, peakY - y) : 0;
     }
 
     private void travelInAir(double ix, double iz, boolean jumping) {

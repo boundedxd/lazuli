@@ -20,7 +20,9 @@ class PartialBlockCourseTest {
         assertEquals(1.0, Standing.feet(w, 0, 1, 0), 1e-9);
         assertEquals(1.5, Standing.feet(w, 1, 1, 0), 1e-9);
         assertEquals(1.0625, Standing.feet(w, 2, 1, 0), 1e-9);
-        assertEquals(1.875, Standing.feet(w, 3, 1, 0), 1e-9);
+        // taller than half a block: stood on from the cell above, like a full block
+        assertEquals(1.875, Standing.feet(w, 3, 2, 0), 1e-9);
+        assertTrue(Double.isNaN(Standing.feet(w, 3, 1, 0)));
         assertEquals(1.5, Standing.feet(w, 4, 1, 0), 1e-9, "on top of a fence");
         assertFalse(Standing.standable(w, 1, 2, 0), "not floating above the slab");
     }

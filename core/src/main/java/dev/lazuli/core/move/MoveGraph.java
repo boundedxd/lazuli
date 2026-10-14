@@ -125,6 +125,8 @@ public final class MoveGraph implements Graph {
     private static final double STEP = 0.6 + 1e-6;
     /** Highest rise a standing jump clears. */
     private static final double JUMP_RISE = 1.25;
+    /** How high a jump's arc peaks above its take-off (0.42 jump velocity under vanilla gravity and drag). */
+    static final double JUMP_APEX = 1.2522;
 
     @Override
     public double optimisticCost(long u, long v) {
@@ -194,7 +196,8 @@ public final class MoveGraph implements Graph {
         int ux = Pos.x(u), uy = Pos.y(u), uz = Pos.z(u);
         int vx = Pos.x(v), vy = Pos.y(v), vz = Pos.z(v);
         int dy = vy - uy;
-        if (dy > 1 || dy < -maxFall) return INF;
+        // the fall that hurts counts from the top of the jump, about 1.25 above the take-off
+        if (dy > 1 || JUMP_APEX - dy > maxFall + 1e-9) return INF;
         double dx = vx - ux, dz = vz - uz, d = Math.hypot(dx, dz);
         if (d > JUMP_RANGE + 1e-9) return INF;
         if (Double.isNaN(feet(u)) || Double.isNaN(feet(v))) return INF;

@@ -83,6 +83,15 @@ public final class Courses {
             .fill(12, 1, -2, 12, 3, 9, STONE);
         out.add(course("maze", "walls to walk around", b, 0, 1, 0, 16, 1, 0, 1, false, false));
 
+        b = new Course.Builder().ground(-2, 40, -3, 3).fill(-2, 0, 0, 12, 0, 0, DIRT_PATH).fill(12, 0, 0, 12, 0, 2, DIRT_PATH)
+            .fill(12, 0, 2, 26, 0, 2, DIRT_PATH).fill(26, 0, -2, 26, 0, 2, DIRT_PATH).fill(26, 0, -2, 40, 0, -2, DIRT_PATH);
+        out.add(course("dirt-path", "a winding dirt path (15/16 high) through grass: walk on and off it freely", b,
+            0, 1, 0, 38, 1, -2, 1, false, false));
+
+        b = new Course.Builder().ground(-2, 20).fill(-2, 1, -2, 6, 6, 2, STONE);
+        for (int i = 0; i < 6; i++) b.fill(7 + i, 1, -2, 7 + i, 5 - i, -2, STONE);
+        out.add(course("cliff", "6 blocks down: take the stairs at the side, never jump off", b, 0, 7, 0, 16, 1, 0, 1, false, false));
+
         b = new Course.Builder().ground(-6, 6, -4, 4).fill(-4, 1, -3, 4, 6, 3, STONE).fill(-1, 1, -1, 1, 2, 1, AIR);
         out.add(course("dig-out", "sealed in a room under 4 blocks of stone: dig out to the top", b, 0, 1, 0, 3, 7, 0, 1, true, true));
         return out;

@@ -30,7 +30,7 @@ public class InteractionCourseTest {
     static final Interaction BREAK = new Interaction(true, false, 0, p -> Interaction.handTicks(p, false));
     static final Interaction PLACE = new Interaction(false, true, 64, p -> Double.POSITIVE_INFINITY);
 
-    public record Run(boolean arrived, int ticks, int breaks, int places, double lowestY, String log) {}
+    public record Run(boolean arrived, int ticks, int breaks, int places, double lowestY, double maxFall, String log) {}
 
     /** The game as far as building goes: blocks appear and vanish in the sim's world. */
     static final class SimHands implements Builder.Hands {
@@ -126,18 +126,18 @@ public class InteractionCourseTest {
         float yaw = PathFollower.yawTo(sx, sz, gx, gz), pitch = 10f;
         long lastBlock = Long.MIN_VALUE;
         int offPath = 0;
-        double lowest = s.y;
+        double lowest = s.y, maxFall = 0;
         long shownVersion = -1;
         StringBuilder log = new StringBuilder();
         for (int t = 0; t < maxTicks; ) {
             PathingSession.Snapshot snap = session.snapshot();
             if (snap.state() == PathingSession.State.ARRIVED) {
-                return new Run(true, t, hands.breaks, hands.places, lowest, log.toString());
+                return new Run(true, t, hands.breaks, hands.places, lowest, maxFall, log.toString());
             }
             if (snap.state() != PathingSession.State.PATHING) {
-                return new Run(false, t, hands.breaks, hands.places, lowest, msgs + "\n" + log);
+                return new Run(false, t, hands.breaks, hands.places, lowest, maxFall, msgs + "\n" + log);
             }
-            if (s.y < -40) return new Run(false, t, hands.breaks, hands.places, lowest, "fell\n" + log);
+            if (s.y < -40) return new Run(false, t, hands.breaks, hands.places, lowest, maxFall, "fell\n" + log);
             long block = s.onGround ? Standing.nodeUnder(w, s.x, s.y, s.z)
                 : Pos.pack((int) Math.floor(s.x), (int) Math.floor(s.y + 1e-9), (int) Math.floor(s.z));
             List<Long> path = snap.path();
@@ -155,13 +155,22 @@ public class InteractionCourseTest {
             }
             if (hands.cooldown > 0) hands.cooldown--;
             PlayerState st = new PlayerState(s.x, s.y, s.z, yaw, pitch, s.onGround, s.horizontalCollision,
-                s.vx, s.vy, s.vz, s.sprinting, s.noJumpDelay, s.minorHorizontalCollision);
+                s.vx, s.vy, s.vz, s.sprinting, s.noJumpDelay, s.minorHorizontalCollision, s.onGround ? 0 : Math.max(0, s.peakY - s.y));
             Controls c = builder.tick(st, path, idx, block, in.allowBreak(), in.allowPlace());
+            String who = "build";
             boolean building = c != null;
             if (!building && idx >= 0) {
                 List<Long> walkable = path.subList(0, Builder.walkableEnd(w, path, idx, 64) + 1);
                 c = planner.plan(st, walkable, idx, true, CourseTest.MAX_TURN);
-                if (c == null) c = fallback.tick(st, walkable.subList(Math.min(idx, walkable.size() - 1), walkable.size()), true);
+                who = "mpc";
+                if (c == null && !s.onGround) {
+                    c = InputPlanner.airBrake(st);
+                    who = "brake";
+                }
+                if (c == null) {
+                    c = fallback.tick(st, walkable.subList(Math.min(idx, walkable.size() - 1), walkable.size()), true);
+                    who = "follow";
+                }
             } else {
                 planner.reset();
             }
@@ -172,14 +181,15 @@ public class InteractionCourseTest {
             pitch = c.targetPitch();
             s.step(c.impulse(), c.strafe(), c.jump(), c.sprint(), c.sneak(), yaw);
             lowest = Math.min(lowest, s.y);
+            maxFall = Math.max(maxFall, s.fallen());
             t++;
             if (log.length() < 30000) {
-                log.append(String.format("t=%d pos=(%.2f,%.2f,%.2f) g=%s idx=%d/%d in=%d%s%s%s block=%s path0=%s%n", t, s.x, s.y, s.z,
+                log.append(String.format("t=%d pos=(%.2f,%.2f,%.2f) g=%s idx=%d/%d in=%d%s%s%s block=%s path0=%s %s%n", t, s.x, s.y, s.z,
                     s.onGround, idx, path.size(), c.impulse(), c.jump() ? "J" : "", c.sneak() ? "S" : "", building ? " build" : "",
-                    Pos.toString(block), path.isEmpty() ? "-" : Pos.toString(path.get(0))));
+                    Pos.toString(block), path.isEmpty() ? "-" : Pos.toString(path.get(0)), who));
             }
         }
-        return new Run(false, maxTicks, hands.breaks, hands.places, lowest, "timeout\n" + log);
+        return new Run(false, maxTicks, hands.breaks, hands.places, lowest, maxFall, "timeout\n" + log);
     }
 
     // ---- breaking ----
