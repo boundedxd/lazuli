@@ -1,14 +1,13 @@
 package dev.lazuli.core.move;
 
 import dev.lazuli.core.physics.Reach;
-import dev.lazuli.core.physics.Reach;
-import dev.lazuli.core.physics.Reach;
 import dev.lazuli.core.planner.Graph;
 import dev.lazuli.core.planner.LazyDStarLite;
 import dev.lazuli.core.world.BlockKind;
 import dev.lazuli.core.world.BlockView;
 import dev.lazuli.core.world.Pos;
 
+import java.util.List;
 import java.util.function.LongConsumer;
 
 /**
@@ -35,6 +34,7 @@ public final class MoveGraph implements Graph {
     private final double flat;
     private final double heuristicWeight;
     private final boolean parkour;
+    private final Digging dig;
 
     private final java.util.Map<Long, Boolean> nearGap = new java.util.HashMap<>();
     private final java.util.Map<Edge, Double> jumpTicks = new java.util.HashMap<>();
@@ -50,6 +50,13 @@ public final class MoveGraph implements Graph {
      * @param parkour         whether gap jumps are allowed
      */
     public MoveGraph(BlockView world, int maxFall, boolean sprint, double heuristicWeight, boolean parkour) {
+        this(world, maxFall, sprint, heuristicWeight, parkour, Interaction.NONE);
+    }
+
+    /** @param interaction what the path may break and place (see {@link Digging}) */
+    public MoveGraph(BlockView world, int maxFall, boolean sprint, double heuristicWeight, boolean parkour,
+                     Interaction interaction) {
+        this.dig = new Digging(world, interaction);
         this.w = world;
         this.maxFall = maxFall;
         this.sprint = sprint;
@@ -84,7 +91,15 @@ public final class MoveGraph implements Graph {
 
     @Override
     public boolean isNode(long u) {
-        return !Double.isNaN(feet(u));
+        return dig.kind(Pos.x(u), Pos.y(u), Pos.z(u)) != Digging.Kind.NONE;
+    }
+
+    /**
+     * What edge u->v needs done to the world before it can be walked: nothing for edges that work as the world is,
+     * else the breaks and placement {@link Digging} priced in.
+     */
+    public List<Digging.Action> actions(long u, long v) {
+        return baseCost(u, v) < INF ? List.of() : Digging.actions(w, u, v);
     }
 
     /** True for an edge whose feasibility the physics decides: a gap jump, or a diagonal jump up or drop. */
@@ -105,6 +120,12 @@ public final class MoveGraph implements Graph {
 
     @Override
     public double optimisticCost(long u, long v) {
+        double c = baseCost(u, v);
+        return c < INF || !dig.enabled() ? c : Math.min(c, dig.cost(u, v, flat, maxFall));
+    }
+
+    /** Cost of moving through the world as it is. */
+    private double baseCost(long u, long v) {
         int ux = Pos.x(u), uy = Pos.y(u), uz = Pos.z(u);
         int dx = Pos.x(v) - ux, dz = Pos.z(v) - uz;
         if (Math.abs(dx) > 1 || Math.abs(dz) > 1) return jumpCost(u, v);
@@ -158,7 +179,7 @@ public final class MoveGraph implements Graph {
         if (dy > 1 || dy < -maxFall) return INF;
         double dx = vx - ux, dz = vz - uz, d = Math.hypot(dx, dz);
         if (d > JUMP_RANGE + 1e-9) return INF;
-        if (!isNode(u) || !isNode(v)) return INF;
+        if (!Standing.standable(w, ux, uy, uz) || !Standing.standable(w, vx, vy, vz)) return INF;
         int top = Math.max(uy, vy) + 2;
         // walk the straight line between the centers: the arc needs room, and there must be a real gap
         double ux0 = ux + 0.5, uz0 = uz + 0.5, nx = dx / d, nz = dz / d, px = -nz * 0.3, pz = nx * 0.3;
@@ -267,6 +288,10 @@ public final class MoveGraph implements Graph {
         for (int[] d : DIRS) {
             for (int dy = -maxFall - 1; dy <= 2; dy++) out.accept(Pos.offset(u, d[0], dy, d[1]));
         }
+        if (dig.enabled()) {
+            out.accept(Pos.offset(u, 0, 1, 0));
+            out.accept(Pos.offset(u, 0, -1, 0));
+        }
         if (!parkour || !nearGap(u)) return;
         for (int[] o : JUMP_OFFSETS) {
             for (int dy = -maxFall; dy <= 1; dy++) out.accept(Pos.offset(u, o[0], dy, o[1]));
@@ -277,6 +302,10 @@ public final class MoveGraph implements Graph {
     public void predecessors(long v, LongConsumer out) {
         for (int[] d : DIRS) {
             for (int dy = -2; dy <= maxFall + 1; dy++) out.accept(Pos.offset(v, d[0], dy, d[1]));
+        }
+        if (dig.enabled()) {
+            out.accept(Pos.offset(v, 0, 1, 0));
+            out.accept(Pos.offset(v, 0, -1, 0));
         }
         if (!parkour) return;
         for (int[] o : JUMP_OFFSETS) {
@@ -295,7 +324,8 @@ public final class MoveGraph implements Graph {
 
     @Override
     public int horizontalReach() {
-        return parkour ? JUMP_RANGE + 1 : 1;
+        // digging checks the neighbours of the cells it breaks for liquids
+        return parkour ? JUMP_RANGE + 1 : dig.enabled() ? 2 : 1;
     }
 
     @Override

@@ -46,13 +46,13 @@ public final class Trace implements BlockView {
     }
 
     public void write(Writer out) throws IOException {
-        out.write("lazuli-trace 1\n");
+        out.write("lazuli-trace 2\n");
         for (Map.Entry<Long, BlockKind> e : kinds.entrySet()) {
             long k = e.getKey();
             BlockPhysics p = physics(Pos.x(k), Pos.y(k), Pos.z(k));
-            StringBuilder sb = new StringBuilder(String.format(Locale.ROOT, "block %d %d %d %s %s %s %s %d %d",
+            StringBuilder sb = new StringBuilder(String.format(Locale.ROOT, "block %d %d %d %s %s %s %s %d %s %d %d",
                 Pos.x(k), Pos.y(k), Pos.z(k), e.getValue().name(), p.friction, p.speedFactor, p.jumpFactor, p.flags,
-                p.boxes.length / 6));
+                p.hardness, p.tag, p.boxes.length / 6));
             for (double b : p.boxes) sb.append(' ').append(b);
             out.write(sb.append('\n').toString());
         }
@@ -70,12 +70,12 @@ public final class Trace implements BlockView {
         for (String line; (line = r.readLine()) != null; ) {
             String[] f = line.trim().split("\\s+");
             if (f[0].equals("block")) {
-                int n = Integer.parseInt(f[9]);
+                int n = Integer.parseInt(f[11]);
                 double[] boxes = new double[n * 6];
-                for (int i = 0; i < boxes.length; i++) boxes[i] = Double.parseDouble(f[10 + i]);
+                for (int i = 0; i < boxes.length; i++) boxes[i] = Double.parseDouble(f[12 + i]);
                 t.putBlock(Integer.parseInt(f[1]), Integer.parseInt(f[2]), Integer.parseInt(f[3]), BlockKind.valueOf(f[4]),
                     BlockPhysics.intern(boxes, Float.parseFloat(f[5]), Float.parseFloat(f[6]), Float.parseFloat(f[7]),
-                        Integer.parseInt(f[8])));
+                        Integer.parseInt(f[8]), Float.parseFloat(f[9]), Integer.parseInt(f[10])));
             } else if (f[0].equals("tick")) {
                 t.ticks.add(new Tick(Integer.parseInt(f[1]), Integer.parseInt(f[2]), Boolean.parseBoolean(f[3]),
                     Boolean.parseBoolean(f[4]), Float.parseFloat(f[5]), Double.parseDouble(f[6]), Double.parseDouble(f[7]),

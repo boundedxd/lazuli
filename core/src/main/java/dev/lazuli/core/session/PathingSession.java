@@ -2,6 +2,7 @@ package dev.lazuli.core.session;
 
 import dev.lazuli.core.goal.Goal;
 import dev.lazuli.core.goal.GoalBlock;
+import dev.lazuli.core.move.Interaction;
 import dev.lazuli.core.move.MoveGraph;
 import dev.lazuli.core.move.SafeSpotFinder;
 import dev.lazuli.core.planner.LazyDStarLite;
@@ -17,6 +18,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
 /**
  * Owns one Lazy D* Lite planner. All mutation happens on {@code worker} (which must run tasks in order);
@@ -37,6 +39,7 @@ public final class PathingSession {
     private final Settings settings;
     private final Executor worker;
     private final Consumer<String> messages;
+    private final Supplier<Interaction> interaction;
     private final AtomicBoolean replanQueued = new AtomicBoolean();
     private volatile Snapshot snapshot = new Snapshot(State.IDLE, List.of(), null, 0);
 
@@ -50,6 +53,13 @@ public final class PathingSession {
 
     public PathingSession(BlockView world, IntSupplier minY, IntSupplier maxY, Settings settings,
                           Executor worker, Consumer<String> messages) {
+        this(world, minY, maxY, settings, worker, messages, () -> Interaction.NONE);
+    }
+
+    /** @param interaction the player's tools and blocks, read on the calling thread when a path starts */
+    public PathingSession(BlockView world, IntSupplier minY, IntSupplier maxY, Settings settings,
+                          Executor worker, Consumer<String> messages, Supplier<Interaction> interaction) {
+        this.interaction = interaction;
         this.world = world;
         this.minY = minY;
         this.maxY = maxY;
@@ -63,16 +73,35 @@ public final class PathingSession {
     }
 
     public void start(Goal goal, boolean fallback, long playerPos) {
+        MoveGraph g = newGraph();
         worker.execute(() -> {
             this.goal = goal;
             this.fallback = fallback;
             this.player = playerPos;
-            this.graph = new MoveGraph(world, settings.maxFallHeight.get(), settings.allowSprint.get(),
-                settings.heuristicWeight.get(), settings.allowParkour.get());
+            this.graph = g;
             createPlanner();
             messages.accept("Pathing to " + goal.describe());
             replan();
         });
+    }
+
+    /** Re-plans the current trip from scratch with fresh settings and inventory (e.g. after running out of blocks). */
+    public void rebuild() {
+        MoveGraph g = newGraph();
+        worker.execute(() -> {
+            if (planner == null) return;
+            this.graph = g;
+            createPlanner();
+            replan();
+        });
+    }
+
+    private MoveGraph newGraph() {
+        Interaction in = interaction.get();
+        in = new Interaction(in.allowBreak() && settings.allowBreak.get(), in.allowPlace() && settings.allowPlace.get(),
+            in.throwaways(), in.breakTime());
+        return new MoveGraph(world, settings.maxFallHeight.get(), settings.allowSprint.get(),
+            settings.heuristicWeight.get(), settings.allowParkour.get(), in);
     }
 
     public void stop() {

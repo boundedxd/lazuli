@@ -12,6 +12,12 @@ public final class Settings {
     public final Setting<Boolean> allowSprint = bool("allowSprint", true);
     public final Setting<Integer> maxFallHeight = integer("maxFallHeight", 3, 0, 20);
     public final Setting<Boolean> allowParkour = bool("allowParkour", true);
+    public final Setting<Boolean> allowBreak = bool("allowBreak", true);
+    public final Setting<Boolean> allowPlace = bool("allowPlace", true);
+    /** Block ids (namespace optional) the path may place for bridging and pillaring. */
+    public final Setting<String> throwawayBlocks = register(new Setting<>("throwawayBlocks",
+        "dirt,cobblestone,cobbled_deepslate,netherrack,stone,andesite,diorite,granite,tuff,deepslate,blackstone,end_stone",
+        s -> s.replace(" ", "")));
     public final Setting<Boolean> cancelOnUserInput = bool("cancelOnUserInput", true);
     public final Setting<Double> rotationSpeed = decimal("rotationSpeed", 45.0, 1.0, 180.0);
     public final Setting<Integer> evalHorizon = integer("evalHorizon", 32, 1, 4096);

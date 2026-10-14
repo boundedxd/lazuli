@@ -19,6 +19,13 @@ public final class BlockPhysics {
     public static final int LAVA = 16;
     /** Cobwebs, berry bushes, powder snow: slows to a crawl; never path through. */
     public static final int STICKY = 32;
+    /** Sand, gravel, concrete powder: falls when unsupported. Never dug out from under. */
+    public static final int FALLING = 64;
+    /** A block can be placed into this space (air, grass, snow layers...). */
+    public static final int REPLACEABLE = 128;
+
+    /** Hardness for terrain without detailed data: stone. */
+    public static final float DEFAULT_HARDNESS = 1.5f;
 
     public static final float DEFAULT_FRICTION = 0.6f;
 
@@ -29,9 +36,9 @@ public final class BlockPhysics {
 
     /** Id 0 means "derive from the block kind", see {@link #forKind}. */
     public static final short DERIVED = 0;
-    public static final BlockPhysics EMPTY = intern(new double[0], DEFAULT_FRICTION, 1, 1, 0);
+    public static final BlockPhysics EMPTY = intern(new double[0], DEFAULT_FRICTION, 1, 1, REPLACEABLE, 0, 0);
     public static final BlockPhysics FULL = intern(new double[]{0, 0, 0, 1, 1, 1}, DEFAULT_FRICTION, 1, 1, 0);
-    public static final BlockPhysics WATER_BLOCK = intern(new double[0], DEFAULT_FRICTION, 1, 1, WATER);
+    public static final BlockPhysics WATER_BLOCK = intern(new double[0], DEFAULT_FRICTION, 1, 1, WATER, -1, 0);
 
     /** Flattened boxes: minX, minY, minZ, maxX, maxY, maxZ per box, block-local. */
     public final double[] boxes;
@@ -39,29 +46,41 @@ public final class BlockPhysics {
     public final float speedFactor;
     public final float jumpFactor;
     public final int flags;
+    /** Vanilla destroy time; negative for unbreakable (bedrock). */
+    public final float hardness;
+    /** Opaque block identity from the game (registry id), so blocks that differ only in tool or drops stay apart. */
+    public final int tag;
     /** Highest collision top, block-local (0 if no collision). */
     public final double top;
     public final short id;
 
-    private BlockPhysics(double[] boxes, float friction, float speedFactor, float jumpFactor, int flags, short id) {
+    private BlockPhysics(double[] boxes, float friction, float speedFactor, float jumpFactor, int flags, float hardness,
+                         int tag, short id) {
         this.boxes = boxes;
         this.friction = friction;
         this.speedFactor = speedFactor;
         this.jumpFactor = jumpFactor;
         this.flags = flags;
+        this.hardness = hardness;
+        this.tag = tag;
         double t = 0;
         for (int i = 0; i < boxes.length; i += 6) t = Math.max(t, boxes[i + 4]);
         this.top = t;
         this.id = id;
     }
 
-    public static synchronized BlockPhysics intern(double[] boxes, float friction, float speedFactor, float jumpFactor, int flags) {
-        BlockPhysics probe = new BlockPhysics(boxes, friction, speedFactor, jumpFactor, flags, (short) -1);
+    public static BlockPhysics intern(double[] boxes, float friction, float speedFactor, float jumpFactor, int flags) {
+        return intern(boxes, friction, speedFactor, jumpFactor, flags, DEFAULT_HARDNESS, 0);
+    }
+
+    public static synchronized BlockPhysics intern(double[] boxes, float friction, float speedFactor, float jumpFactor,
+                                                   int flags, float hardness, int tag) {
+        BlockPhysics probe = new BlockPhysics(boxes, friction, speedFactor, jumpFactor, flags, hardness, tag, (short) -1);
         BlockPhysics existing = INTERN.get(probe);
         if (existing != null) return existing;
         if (PALETTE.size() >= Short.MAX_VALUE - 1) return FULL; // absurdly many distinct shapes: be conservative
         short id = (short) (PALETTE.size() + 1);
-        BlockPhysics p = new BlockPhysics(boxes.clone(), friction, speedFactor, jumpFactor, flags, id);
+        BlockPhysics p = new BlockPhysics(boxes.clone(), friction, speedFactor, jumpFactor, flags, hardness, tag, id);
         PALETTE.add(p);
         INTERN.put(p, p);
         BlockPhysics[] next = Arrays.copyOf(byIdArray, id + 1);
@@ -96,12 +115,13 @@ public final class BlockPhysics {
     public boolean equals(Object o) {
         if (!(o instanceof BlockPhysics p)) return false;
         return Float.compare(friction, p.friction) == 0 && Float.compare(speedFactor, p.speedFactor) == 0
-            && Float.compare(jumpFactor, p.jumpFactor) == 0 && flags == p.flags && Arrays.equals(boxes, p.boxes);
+            && Float.compare(jumpFactor, p.jumpFactor) == 0 && flags == p.flags && Float.compare(hardness, p.hardness) == 0
+            && tag == p.tag && Arrays.equals(boxes, p.boxes);
     }
 
     @Override
     public int hashCode() {
         return Arrays.hashCode(boxes) * 31 + Float.hashCode(friction) * 17 + Float.hashCode(speedFactor) * 7
-            + Float.hashCode(jumpFactor) * 3 + flags;
+            + Float.hashCode(jumpFactor) * 3 + flags + Float.hashCode(hardness) * 11 + tag * 13;
     }
 }

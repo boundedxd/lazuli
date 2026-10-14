@@ -4,11 +4,105 @@ import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Per-chunk block kinds plus optional physics palette ids. Written by the client thread, read by the planner
- * thread. Single-block writes race benignly; each is followed by a change notification.
+ * Per-chunk block kinds and physics palette ids. Each 16x16x16 section stores one byte per block indexing a small
+ * per-section palette of (kind, physics id) pairs, so detailed physics costs nothing over the kinds alone. Written by
+ * the client thread, read by the planner thread. Single-block writes race benignly; each is followed by a change
+ * notification.
  */
 public final class WorldCache implements BlockView {
-    private record Chunk(byte[][] kinds, short[][] physics) {}
+    private record Chunk(Section[] sections) {}
+
+    /** One section's blocks as palette indices. Entry 0 of the palette is plain air. */
+    static final class Section {
+        private volatile byte[] small = new byte[4096];
+        private volatile short[] large;
+        private volatile byte[] kinds = new byte[16];
+        private volatile short[] phys = new short[16];
+        private int size = 1;
+
+        Section() {
+            kinds[0] = (byte) BlockKind.AIR.ordinal();
+        }
+
+        private int entry(int i) {
+            short[] l = large;
+            return l != null ? l[i] & 0xFFFF : small[i] & 0xFF;
+        }
+
+        BlockKind kind(int i) {
+            return BlockKind.byId(kinds[entry(i)]);
+        }
+
+        short physics(int i) {
+            return phys[entry(i)];
+        }
+
+        synchronized void set(int i, BlockKind kind, short physicsId) {
+            int e = find(kind, physicsId);
+            if (e < 0) {
+                if (size == phys.length) grow();
+                e = size;
+                // fill the entry before any block points at it
+                kinds[e] = (byte) kind.ordinal();
+                phys[e] = physicsId;
+                kinds = kinds;
+                phys = phys;
+                size++;
+                if (e >= 256 && large == null) {
+                    short[] l = new short[4096];
+                    byte[] sm = small;
+                    for (int j = 0; j < 4096; j++) l[j] = (short) (sm[j] & 0xFF);
+                    large = l;
+                }
+            }
+            if (large != null) large[i] = (short) e;
+            else small[i] = (byte) e;
+        }
+
+        private int find(BlockKind kind, short physicsId) {
+            byte k = (byte) kind.ordinal();
+            for (int e = 0; e < size; e++) if (kinds[e] == k && phys[e] == physicsId) return e;
+            return -1;
+        }
+
+        private void grow() {
+            if (size >= 4096) compact();
+            if (size < phys.length) return;
+            int n = phys.length * 2;
+            byte[] k = Arrays.copyOf(kinds, n);
+            short[] p = Arrays.copyOf(phys, n);
+            kinds = k;
+            phys = p;
+        }
+
+        /** Drops palette entries no block uses any more (only after thousands of distinct writes). */
+        private void compact() {
+            int[] remap = new int[size];
+            Arrays.fill(remap, -1);
+            byte[] k = new byte[phys.length];
+            short[] p = new short[phys.length];
+            short[] l = new short[4096];
+            k[0] = kinds[0];
+            p[0] = phys[0];
+            remap[0] = 0;
+            int n = 1;
+            for (int j = 0; j < 4096; j++) {
+                int e = entry(j);
+                if (remap[e] < 0) {
+                    remap[e] = n;
+                    k[n] = kinds[e];
+                    p[n] = phys[e];
+                    n++;
+                }
+                l[j] = (short) remap[e];
+            }
+            // readers may briefly pair new indices with old palettes; the change notification that follows repairs it
+            kinds = k;
+            phys = p;
+            large = l;
+            size = n;
+        }
+    }
 
     private final ConcurrentHashMap<Long, Chunk> chunks = new ConcurrentHashMap<>();
     private volatile int minY;
@@ -41,12 +135,28 @@ public final class WorldCache implements BlockView {
         putChunk(cx, cz, sections, new short[sections.length][]);
     }
 
-    /** @param physics per section, null where every block's physics follows from its kind */
-    public void putChunk(int cx, int cz, byte[][] sections, short[][] physics) {
-        if (sections.length != sectionCount() || physics.length != sectionCount()) {
-            throw new IllegalArgumentException("expected " + sectionCount() + " sections, got " + sections.length);
+    /**
+     * @param kinds   per section, null for all air
+     * @param physics per section, null where every block's physics follows from its kind
+     */
+    public void putChunk(int cx, int cz, byte[][] kinds, short[][] physics) {
+        if (kinds.length != sectionCount() || physics.length != sectionCount()) {
+            throw new IllegalArgumentException("expected " + sectionCount() + " sections, got " + kinds.length);
         }
-        chunks.put(key(cx, cz), new Chunk(sections, physics));
+        Section[] out = new Section[kinds.length];
+        byte air = (byte) BlockKind.AIR.ordinal();
+        for (int s = 0; s < kinds.length; s++) {
+            if (kinds[s] == null) continue;
+            Section sec = new Section();
+            byte[] k = kinds[s];
+            short[] p = physics[s];
+            for (int i = 0; i < 4096; i++) {
+                short id = p == null ? BlockPhysics.DERIVED : p[i];
+                if (k[i] != air || id != BlockPhysics.DERIVED) sec.set(i, BlockKind.byId(k[i]), id);
+            }
+            out[s] = sec;
+        }
+        chunks.put(key(cx, cz), new Chunk(out));
     }
 
     public void removeChunk(int cx, int cz) {
@@ -67,17 +177,15 @@ public final class WorldCache implements BlockView {
             return;
         }
         int s = (y - minY) >> 4;
-        if (c.kinds[s] == null) {
+        Section sec = c.sections[s];
+        if (sec == null) {
             if (kind == BlockKind.AIR && physicsId == BlockPhysics.DERIVED) {
                 return;
             }
-            byte[] fresh = new byte[4096];
-            Arrays.fill(fresh, (byte) BlockKind.AIR.ordinal());
-            c.kinds[s] = fresh;
+            sec = new Section();
+            c.sections[s] = sec;
         }
-        c.kinds[s][index(x, y, z)] = (byte) kind.ordinal();
-        if (c.physics[s] == null && physicsId != BlockPhysics.DERIVED) c.physics[s] = new short[4096];
-        if (c.physics[s] != null) c.physics[s][index(x, y, z)] = physicsId;
+        sec.set(index(x, y, z), kind, physicsId);
     }
 
     @Override
@@ -92,8 +200,8 @@ public final class WorldCache implements BlockView {
         if (c == null) {
             return BlockKind.UNKNOWN;
         }
-        byte[] section = c.kinds[(y - minY) >> 4];
-        return section == null ? BlockKind.AIR : BlockKind.byId(section[index(x, y, z)]);
+        Section section = c.sections[(y - minY) >> 4];
+        return section == null ? BlockKind.AIR : section.kind(index(x, y, z));
     }
 
     @Override
@@ -101,11 +209,11 @@ public final class WorldCache implements BlockView {
         if (y >= minY && y <= maxY()) {
             Chunk c = chunks.get(key(x >> 4, z >> 4));
             if (c != null) {
-                int s = (y - minY) >> 4;
-                short[] ids = c.physics[s];
-                if (ids != null) {
-                    BlockPhysics p = BlockPhysics.byId(ids[index(x, y, z)]);
-                    if (p != null) return p;
+                Section sec = c.sections[(y - minY) >> 4];
+                if (sec != null) {
+                    int i = index(x, y, z);
+                    BlockPhysics p = BlockPhysics.byId(sec.physics(i));
+                    return p != null ? p : BlockPhysics.forKind(sec.kind(i));
                 }
             }
         }
