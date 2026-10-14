@@ -1,5 +1,6 @@
 package dev.lazuli.mod.control;
 
+import dev.lazuli.core.chat.Chat;
 import dev.lazuli.core.physics.Trace;
 import dev.lazuli.core.world.BlockKind;
 import dev.lazuli.core.world.BlockPhysics;
@@ -52,7 +53,7 @@ public final class TraceRecorder {
         minY = maxY = b.getY();
         minZ = maxZ = b.getZ();
         trace.ticks.add(state(p, 0, 0, false));
-        chat.accept("Recording " + name + "; " + "#record stop to save");
+        chat.accept(Chat.ok("Recording {}; #record stop to save", name));
     }
 
     public void tick(Minecraft mc) {
@@ -74,20 +75,21 @@ public final class TraceRecorder {
         maxY = Math.max(maxY, b.getY());
         maxZ = Math.max(maxZ, b.getZ());
         if (trace.ticks.size() > MAX_TICKS || maxX - minX > 96 || maxZ - minZ > 96 || maxY - minY > 48) {
-            chat.accept("Recording too long or too far; saving");
+            chat.accept(Chat.warn("Recording too long or too far; saving"));
             stop(mc);
         }
     }
 
     private static Trace.Tick state(LocalPlayer p, int fwd, int strafe, boolean jump) {
         Vec3 v = p.getDeltaMovement();
-        return new Trace.Tick(fwd, strafe, jump, p.isSprinting(), p.getYRot(), p.getX(), p.getY(), p.getZ(),
+        // the rotation the player moved with: with free look that is not the camera's
+        return new Trace.Tick(fwd, strafe, jump, p.isSprinting(), RotationDriver.yaw(p), p.getX(), p.getY(), p.getZ(),
             v.x, v.y, v.z, p.onGround());
     }
 
     public void stop(Minecraft mc) {
         if (trace == null) {
-            chat.accept("Not recording");
+            chat.accept(Chat.err("Not recording"));
             return;
         }
         Trace t = trace;
@@ -114,10 +116,10 @@ public final class TraceRecorder {
                 t.write(w);
             }
             Trace.Divergence d = t.replay();
-            chat.accept(String.format("Saved %d ticks to %s (sim error: %.4f per tick, worst at tick %d; %.3f drift)",
+            chat.accept(Chat.GREEN + String.format("Saved %d ticks to %s (sim error: %.4f per tick, worst at tick %d; %.3f drift)",
                 t.ticks.size() - 1, file.getFileName(), d.maxStep(), d.worstStep(), d.maxDrift()));
         } catch (IOException e) {
-            chat.accept("Could not save trace: " + e.getMessage());
+            chat.accept(Chat.err("Could not save trace: {}", e.getMessage()));
         }
     }
 }

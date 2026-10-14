@@ -26,9 +26,9 @@ public final class InputDriver {
         RotationDriver.set(mc.player, yaw, pitch);
     }
 
+    /** Lets go of the keys; the rotation stays Lazuli's until the trip ends (see {@link RotationDriver#end}). */
     public void release() {
         current = null;
-        RotationDriver.end();
     }
 
     /** True if the user is physically pressing a movement key. */

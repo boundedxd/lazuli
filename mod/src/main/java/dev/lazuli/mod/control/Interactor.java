@@ -1,5 +1,6 @@
 package dev.lazuli.mod.control;
 
+import dev.lazuli.core.chat.Chat;
 import dev.lazuli.core.control.Builder;
 import dev.lazuli.core.control.Controls;
 import dev.lazuli.core.control.PlayerState;
@@ -48,6 +49,12 @@ public final class Interactor implements Builder.Hands {
         this.session = session;
         this.chat = chat;
         this.builder = new Builder(world, this);
+    }
+
+    /** Breaks {@code pos} next tick (for processes that aim on their own, like #mine). */
+    public static void mineAt(BlockPos pos, Direction face) {
+        miningFace = face;
+        mining = pos;
     }
 
     public static BlockPos mining() {
@@ -146,7 +153,7 @@ public final class Interactor implements Builder.Hands {
     public void outOfBlocks() {
         if (rebuildCooldown == 0) {
             rebuildCooldown = 40; // the new path takes a moment
-            chat.accept("Out of throwaway blocks; re-planning without placing");
+            chat.accept(Chat.warn("Out of throwaway blocks; re-planning without placing"));
             session.rebuild();
         }
     }

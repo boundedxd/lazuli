@@ -10,7 +10,11 @@ import dev.lazuli.core.world.BlockKind;
 import dev.lazuli.core.world.BlockView;
 import dev.lazuli.core.world.Pos;
 
+import dev.lazuli.core.chat.Chat;
+
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 
 /** Baritone-style chat commands. Messages not starting with the configured prefix are left alone. */
@@ -31,22 +35,33 @@ public final class CommandHandler {
 
         /** Starts recording a golden trace; the reply says where it will be saved. */
         default void recordStart(String name) {
-            reply("Recording isn't available here");
+            reply(Chat.err("Recording isn't available here"));
         }
 
         default void recordStop() {
-            reply("Recording isn't available here");
+            reply(Chat.err("Recording isn't available here"));
         }
 
         /** Arms #click: the next left-click on a block sets the goal (see {@link CommandHandler#setGoal(Goal)}). */
         default void startClick() {
-            reply("Clicking isn't available here");
+            reply(Chat.err("Clicking isn't available here"));
         }
 
         /** Opens the settings screen. */
         default void openConfig() {
-            reply("No config screen here; use set <name> <value>");
+            reply(Chat.err("No config screen here; use set <name> <value>"));
         }
+
+        /**
+         * Starts mining: find, walk to and break these blocks (ids like {@code diamond_ore} or
+         * {@code minecraft:diamond_ore}) until {@code quantity} are broken, or every one in reach when it's 0.
+         */
+        default void mine(int quantity, List<String> blocks) {
+            reply(Chat.err("Mining isn't available here"));
+        }
+
+        /** Stops whatever process (mining...) is running on top of pathing. */
+        default void stopProcesses() {}
     }
 
     private final Context ctx;
@@ -72,7 +87,7 @@ public final class CommandHandler {
         try {
             run(cmd, args, prefix);
         } catch (IllegalArgumentException e) {
-            ctx.reply(e.getMessage());
+            ctx.reply(Chat.err(e.getMessage()));
         }
         return true;
     }
@@ -84,18 +99,53 @@ public final class CommandHandler {
             case "goto" -> {
                 if (setGoal(args)) startPath();
             }
-            case "stop", "cancel" -> ctx.session().stop();
+            case "stop", "cancel" -> {
+                ctx.stopProcesses();
+                ctx.session().stop();
+            }
             case "set" -> set(args);
             case "settings" -> {
-                for (Setting<?> s : ctx.settings().all()) ctx.reply(s.name() + " = " + s.format());
+                ctx.reply(Chat.info("Settings ({}set <name> <value> to change):", prefix));
+                for (Setting<?> s : ctx.settings().all()) ctx.reply(Chat.pair(s.name(), s.get()));
             }
             case "record" -> record(args);
             case "config" -> ctx.openConfig();
             case "click" -> ctx.startClick();
-            case "help" -> ctx.reply("Commands: goal [x y z | x z | y | clear] [true|false], path, goto <goal>, stop, "
-                + "click, set <name> [value], settings, config, record start <name> | stop");
-            default -> ctx.reply("Unknown command: " + cmd + ". Try " + prefix + "help");
+            case "mine" -> mine(args);
+            case "help" -> help(prefix);
+            default -> ctx.reply(Chat.err("Unknown command: {}. Try {}help", cmd, prefix));
         }
+    }
+
+    private void help(String p) {
+        ctx.reply(Chat.info("Lazuli commands:"));
+        ctx.reply(Chat.usage(p + "goal [x y z | x z | y | clear] [true|false]", "set the goal (true: fall back to the nearest safe spot)"));
+        ctx.reply(Chat.usage(p + "path", "go to the goal"));
+        ctx.reply(Chat.usage(p + "goto <goal>", "set the goal and go"));
+        ctx.reply(Chat.usage(p + "click", "left-click a block to make it the goal"));
+        ctx.reply(Chat.usage(p + "mine [quantity] <block> [block...]", "find and mine blocks, e.g. " + p + "mine 16 diamond_ore"));
+        ctx.reply(Chat.usage(p + "stop", "stop pathing and mining"));
+        ctx.reply(Chat.usage(p + "set <name> [value]", "show or change a setting"));
+        ctx.reply(Chat.usage(p + "settings", "list every setting"));
+        ctx.reply(Chat.usage(p + "config", "open the settings screen"));
+        ctx.reply(Chat.usage(p + "record start <name> | stop", "record a movement trace"));
+    }
+
+    /** Baritone's form: mine [quantity] <block> [block...]. */
+    private void mine(String[] args) {
+        int quantity = 0;
+        int from = 0;
+        if (args.length > 0 && args[0].matches("\\d+")) {
+            quantity = Integer.parseInt(args[0]);
+            from = 1;
+        }
+        if (from >= args.length) {
+            ctx.reply(Chat.err("Usage: mine [quantity] <block> [block...]"));
+            return;
+        }
+        List<String> blocks = new ArrayList<>();
+        for (int i = from; i < args.length; i++) blocks.add(args[i].toLowerCase(Locale.ROOT));
+        ctx.mine(quantity, blocks);
     }
 
     private void record(String[] args) {
@@ -104,7 +154,7 @@ public final class CommandHandler {
         } else if (args.length == 2 && args[0].equalsIgnoreCase("start") && args[1].matches("[A-Za-z0-9_-]+")) {
             ctx.recordStart(args[1]);
         } else {
-            ctx.reply("Usage: record start <name> | record stop  (name: letters, digits, _ and -)");
+            ctx.reply(Chat.err("Usage: record start <name> | record stop  (name: letters, digits, _ and -)"));
         }
     }
 
@@ -112,7 +162,7 @@ public final class CommandHandler {
     public void setGoal(Goal g) {
         goal = g;
         fallback = false;
-        ctx.reply("Goal set: " + goal.describe());
+        ctx.reply(Chat.ok("Goal set: {}", goal.describe()));
     }
 
     private boolean setGoal(String[] args) {
@@ -120,16 +170,16 @@ public final class CommandHandler {
         GoalParser.ParsedGoal parsed = GoalParser.parse(args, f[0], f[1], f[2]);
         if (parsed.goal() == null) {
             goal = null;
-            ctx.reply("Goal cleared");
+            ctx.reply(Chat.ok("Goal cleared"));
             return false;
         }
         if (parsed.goal() instanceof GoalBlock b && !parsed.fallback() && knownAndUnstandable(b)) {
-            ctx.reply("Can't stand at " + b.x() + " " + b.y() + " " + b.z() + " (use true to allow nearest safe spot)");
+            ctx.reply(Chat.err("Can't stand at {} (use true to allow the nearest safe spot)", b.x() + " " + b.y() + " " + b.z()));
             return false;
         }
         goal = parsed.goal();
         fallback = parsed.fallback();
-        ctx.reply("Goal set: " + goal.describe() + (fallback ? " (fallback on)" : ""));
+        ctx.reply(Chat.ok("Goal set: {}" + (fallback ? " (fallback on)" : ""), goal.describe()));
         return true;
     }
 
@@ -148,7 +198,7 @@ public final class CommandHandler {
 
     private void startPath() {
         if (goal == null) {
-            ctx.reply("No goal set");
+            ctx.reply(Chat.err("No goal set"));
             return;
         }
         int[] f = ctx.playerFeet();
@@ -157,12 +207,12 @@ public final class CommandHandler {
 
     private void set(String[] args) {
         if (args.length == 0 || args.length > 2) {
-            ctx.reply("Usage: set <name> [value]");
+            ctx.reply(Chat.err("Usage: set <name> [value]"));
             return;
         }
         var found = ctx.settings().byName(args[0]);
         if (found.isEmpty()) {
-            ctx.reply("Unknown setting: " + args[0]);
+            ctx.reply(Chat.err("Unknown setting: {}", args[0]));
             return;
         }
         Setting<?> s = found.get();
@@ -170,6 +220,6 @@ public final class CommandHandler {
             s.parse(args[1]);
             ctx.settingsChanged();
         }
-        ctx.reply(s.name() + " = " + s.format());
+        ctx.reply(Chat.pair(s.name(), s.get()));
     }
 }

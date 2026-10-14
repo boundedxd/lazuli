@@ -65,6 +65,7 @@ public final class LazuliConfig implements WalksyLibApi {
                     .build())
                 .group(OptionGroup.builder("Behaviour")
                     .option(bool(s.cancelOnUserInput, "Stop pathing when you press a movement key."))
+                    .option(bool(s.minePickup, "#mine walks over to pick up what each broken block drops."))
                     .option(Options.ofButton("Stop pathing", () -> stopAction.run()).build())
                     .option(Options.ofKeybind("Stop pathing key", STOP).build())
                     .option(Options.ofKeybind("Open config key", OPEN_CONFIG).build())

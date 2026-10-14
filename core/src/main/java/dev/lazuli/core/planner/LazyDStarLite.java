@@ -51,6 +51,13 @@ public final class LazyDStarLite {
     private long expansions;
     /** System.nanoTime() after which the current plan() gives up. */
     private long deadline = Long.MAX_VALUE;
+    /** Set from any thread to make the running (and any later) plan() give up at once. */
+    private volatile boolean cancelled;
+
+    /** Stops the search: safe to call from any thread, takes effect within a few hundred expansions. */
+    public void cancel() {
+        cancelled = true;
+    }
 
     public LazyDStarLite(Graph graph, LongPredicate isGoal, long[] goalCandidates, long start) {
         this.graph = graph;
@@ -184,7 +191,7 @@ public final class LazyDStarLite {
             Key top = open.first();
             Node s = node(target);
             if (top.compareKeys(key(target, s)) >= 0 && s.rhs == s.g) return true;
-            if (expansions++ >= maxExpansions || (expansions & 255) == 0 && System.nanoTime() > deadline) return false;
+            if (expansions++ >= maxExpansions || (expansions & 255) == 0 && (cancelled || System.nanoTime() > deadline)) return false;
             long u = top.id();
             Node n = nodes.get(u);
             Key fresh = key(u, n);

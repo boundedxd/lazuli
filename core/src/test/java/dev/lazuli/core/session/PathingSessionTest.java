@@ -1,5 +1,7 @@
 package dev.lazuli.core.session;
 
+import dev.lazuli.core.goal.GoalAdjacent;
+import dev.lazuli.core.goal.GoalAny;
 import dev.lazuli.core.goal.GoalBlock;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.testutil.GridWorld;
@@ -17,7 +19,7 @@ class PathingSessionTest {
     private final List<String> msgs = new ArrayList<>();
 
     private PathingSession session(BlockView w) {
-        return new PathingSession(w, () -> -64, () -> 319, new Settings(), Runnable::run, msgs::add);
+        return new PathingSession(w, () -> -64, () -> 319, new Settings(), Runnable::run, m -> msgs.add(dev.lazuli.core.chat.Chat.strip(m)));
     }
 
     @Test
@@ -93,5 +95,40 @@ class PathingSessionTest {
             s.playerMoved(path.get(Math.min(path.size() - 1, 8)));
         }
         assertEquals(PathingSession.State.ARRIVED, s.snapshot().state(), msgs.toString());
+    }
+
+    @Test
+    void quietMiningTripEndsNextToTheNearerOre() {
+        // ores in a wall at x=10..12: one in its face, one buried 2 deep; no breaking allowed
+        GridWorld w = GridWorld.flatFloor(0, 0, 20, 20).fill(10, 1, 0, 12, 3, 20, BlockKind.SOLID);
+        PathingSession s = session(w);
+        GoalAny g = new GoalAny(List.of(new GoalAdjacent(12, 1, 5), new GoalAdjacent(10, 2, 15)), "ore");
+        s.start(g, false, Pos.pack(2, 1, 2), true);
+        assertEquals(PathingSession.State.PATHING, s.snapshot().state(), msgs.toString());
+        long end = s.snapshot().path().get(s.snapshot().path().size() - 1);
+        assertEquals(Pos.pack(9, 1, 15), end, Pos.toString(end));
+        assertTrue(msgs.isEmpty(), msgs.toString());
+    }
+
+    @Test
+    void stopIsImmediateEvenWhileTheWorkerIsSearching() throws Exception {
+        // a huge open world and a goal walled off: the search runs until its time budget
+        GridWorld w = GridWorld.flatFloor(-300, -300, 300, 300).fill(250, 1, 250, 252, 4, 252, BlockKind.SOLID);
+        var pool = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            PathingSession s = new PathingSession(w, () -> -64, () -> 319, new Settings(), pool, msgs::add);
+            s.start(new GoalBlock(251, 1, 251), false, Pos.pack(-250, 1, -250));
+            Thread.sleep(300); // well into the search
+            long t0 = System.nanoTime();
+            s.stop();
+            assertEquals(PathingSession.State.IDLE, s.snapshot().state());
+            pool.submit(() -> {}).get(); // the worker is free again
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            assertTrue(ms < 500, "worker busy for " + ms + " ms after stop");
+            Thread.sleep(100);
+            assertEquals(PathingSession.State.IDLE, s.snapshot().state(), "nothing from the old trip is published");
+        } finally {
+            pool.shutdownNow();
+        }
     }
 }

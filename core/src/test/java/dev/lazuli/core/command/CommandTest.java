@@ -1,5 +1,6 @@
 package dev.lazuli.core.command;
 
+import dev.lazuli.core.chat.Chat;
 import dev.lazuli.core.goal.GoalBlock;
 import dev.lazuli.core.goal.GoalXZ;
 import dev.lazuli.core.goal.GoalYLevel;
@@ -17,21 +18,54 @@ import static org.junit.jupiter.api.Assertions.*;
 class CommandTest {
     private final List<String> replies = new ArrayList<>();
     private int saved;
+    private final List<String> mined = new ArrayList<>();
     private Settings settings;
     private PathingSession session;
 
     private CommandHandler handler() {
         BlockView world = GridWorld.flatFloor(0, 0, 20, 20);
         settings = new Settings();
-        session = new PathingSession(world, () -> -64, () -> 319, settings, Runnable::run, replies::add);
+        session = new PathingSession(world, () -> -64, () -> 319, settings, Runnable::run, m -> replies.add(Chat.strip(m)));
         return new CommandHandler(new CommandHandler.Context() {
             public int[] playerFeet() { return new int[]{0, 1, 0}; }
             public BlockView world() { return world; }
             public PathingSession session() { return session; }
             public Settings settings() { return settings; }
-            public void reply(String msg) { replies.add(msg); }
+            public void reply(String msg) { replies.add(Chat.strip(msg)); }
             public void settingsChanged() { saved++; }
+            public void mine(int quantity, List<String> blocks) {
+                mined.add(quantity + " " + blocks);
+            }
         });
+    }
+
+    @Test
+    void mineTakesBaritonesArguments() {
+        CommandHandler h = handler();
+        h.handle("#mine diamond_ore");
+        h.handle("#mine 64 iron_ore minecraft:Coal_Ore");
+        h.handle("#mine 5");
+        assertEquals(List.of("0 [diamond_ore]", "64 [iron_ore, minecraft:coal_ore]"), mined);
+        assertTrue(replies.get(0).startsWith("Usage: mine"), replies.toString());
+    }
+
+    @Test
+    void repliesAreColoured() {
+        List<String> raw = new ArrayList<>();
+        Settings st = new Settings();
+        CommandHandler h = new CommandHandler(new CommandHandler.Context() {
+            public int[] playerFeet() { return new int[]{0, 1, 0}; }
+            public BlockView world() { return GridWorld.flatFloor(0, 0, 4, 4); }
+            public PathingSession session() { return null; }
+            public Settings settings() { return st; }
+            public void reply(String msg) { raw.add(msg); }
+            public void settingsChanged() {}
+        });
+        h.handle("#bogus");
+        h.handle("#set allowBreak");
+        assertTrue(raw.get(0).startsWith(Chat.RED), raw.get(0));
+        assertEquals("Unknown command: bogus. Try #help", Chat.strip(raw.get(0)));
+        assertTrue(raw.get(1).contains(Chat.GREEN + "true"), raw.get(1));
     }
 
     @Test

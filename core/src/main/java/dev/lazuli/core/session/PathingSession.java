@@ -1,5 +1,6 @@
 package dev.lazuli.core.session;
 
+import dev.lazuli.core.chat.Chat;
 import dev.lazuli.core.goal.Goal;
 import dev.lazuli.core.goal.GoalBlock;
 import dev.lazuli.core.goal.GoalNear;
@@ -59,15 +60,23 @@ public final class PathingSession {
     private final AtomicBoolean dirtyQueued = new AtomicBoolean();
     private final java.util.concurrent.ConcurrentLinkedQueue<int[]> dirty = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private volatile Snapshot snapshot = new Snapshot(State.IDLE, List.of(), null, 0);
+    /** Bumped by every start and stop (on the caller's thread): work for an older trip is dropped. */
+    private final java.util.concurrent.atomic.AtomicLong generation = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong versions = new java.util.concurrent.atomic.AtomicLong();
+    /** The planner currently searching, so a stop from another thread can cut its search short. */
+    private volatile LazyDStarLite searching;
 
     // worker-confined
-    private long version;
+    /** The generation of the trip the worker is running. */
+    private long tripGeneration;
     private LazyDStarLite planner;
     private MoveGraph graph;
     private Goal goal;
     /** The current segment's end, or null while planning straight to {@link #goal}. */
     private GoalNear segment;
     private boolean fallback;
+    /** Whether this trip keeps its own progress out of chat. */
+    private boolean quiet;
     private long player;
     /** When the player's reported node stopped being a node (nanoTime), or -1. */
     private long invalidStartSince = -1;
@@ -96,13 +105,23 @@ public final class PathingSession {
     }
 
     public void start(Goal goal, boolean fallback, long playerPos) {
+        start(goal, fallback, playerPos, false);
+    }
+
+    /** @param quiet no "Pathing to" / "Arrived" chat (for trips a process makes on its own, like mining) */
+    public void start(Goal goal, boolean fallback, long playerPos, boolean quiet) {
         MoveGraph g = newGraph();
+        long gen = generation.incrementAndGet();
+        cancelSearch();
         worker.execute(() -> {
+            if (generation.get() != gen) return; // stopped or replaced before it began
+            tripGeneration = gen;
             this.goal = goal;
             this.fallback = fallback;
             this.player = playerPos;
             this.graph = g;
-            messages.accept("Pathing to " + goal.describe());
+            this.quiet = quiet;
+            if (!quiet) messages.accept(Chat.info("Pathing to {}", goal.describe()));
             begin();
         });
     }
@@ -126,11 +145,30 @@ public final class PathingSession {
     }
 
     public void stop() {
+        stop(false);
+    }
+
+    /** Stops at once: the executor sees IDLE right away and any search under way is cut short. */
+    public void stop(boolean quiet) {
+        long gen = generation.incrementAndGet();
+        cancelSearch();
+        snapshot = new Snapshot(State.IDLE, List.of(), snapshot.goal(), versions.incrementAndGet());
+        if (!quiet) messages.accept(Chat.warn("Stopped"));
         worker.execute(() -> {
+            if (generation.get() != gen) return;
+            tripGeneration = gen;
             planner = null;
-            publish(State.IDLE, List.of());
-            messages.accept("Stopped");
         });
+    }
+
+    private void cancelSearch() {
+        LazyDStarLite p = searching;
+        if (p != null) p.cancel();
+    }
+
+    /** The worker's trip has been stopped or replaced: nothing it finds may be published. */
+    private boolean stale() {
+        return generation.get() != tripGeneration;
     }
 
     public void playerMoved(long playerPos) {
@@ -195,7 +233,8 @@ public final class PathingSession {
                     else if (goal instanceof GoalNear n) wy += (int) Math.round((n.y() - wy) * tr[1] / d);
                     segment = new GoalNear(wx, surface(wx, wy, wz), wz, SEGMENT_RADIUS);
                     createPlanner();
-                    PlanResult r = planner.plan(settings.evalHorizon.get(), MAX_EXPANSIONS, MAX_PATH_LENGTH, SEGMENT_NANOS);
+                    PlanResult r = search(SEGMENT_NANOS);
+                    if (stale()) return;
                     if (r.status() == PlanResult.Status.FOUND) {
                         publish(State.PATHING, r.path());
                         return;
@@ -240,7 +279,7 @@ public final class PathingSession {
         if (goal.isGoal(Pos.x(player), Pos.y(player), Pos.z(player))) {
             planner = null;
             publish(State.ARRIVED, List.of());
-            messages.accept("Arrived at " + goal.describe());
+            if (!quiet) messages.accept(Chat.ok("Arrived at {}", goal.describe()));
             return;
         }
         if (segment != null && Math.hypot(segment.x() - Pos.x(player), segment.z() - Pos.z(player)) <= HANDOFF
@@ -256,7 +295,8 @@ public final class PathingSession {
         } else {
             invalidStartSince = -1;
         }
-        PlanResult r = planner.plan(settings.evalHorizon.get(), MAX_EXPANSIONS, MAX_PATH_LENGTH, MAX_PLAN_NANOS);
+        PlanResult r = search(MAX_PLAN_NANOS);
+        if (stale()) return;
         if (r.status() == PlanResult.Status.FOUND) {
             publish(State.PATHING, r.path());
             return;
@@ -271,7 +311,7 @@ public final class PathingSession {
                 long s = spot.getAsLong();
                 goal = new GoalBlock(Pos.x(s), Pos.y(s), Pos.z(s));
                 fallback = false;
-                messages.accept("Goal unreachable; heading to nearest safe spot " + Pos.toString(s));
+                messages.accept(Chat.warn("Goal unreachable; heading to nearest safe spot {}", Pos.toString(s)));
                 createPlanner();
                 replan();
                 return;
@@ -279,10 +319,21 @@ public final class PathingSession {
         }
         planner = null;
         publish(State.FAILED, List.of());
-        messages.accept(r.status() == PlanResult.Status.NO_PATH ? "Goal unreachable" : "Gave up: search budget exceeded");
+        if (!quiet) messages.accept(Chat.err(r.status() == PlanResult.Status.NO_PATH ? "Goal unreachable" : "Gave up: search budget exceeded"));
+    }
+
+    private PlanResult search(long nanos) {
+        searching = planner;
+        if (stale()) planner.cancel(); // a stop that came before this search started
+        try {
+            return planner.plan(settings.evalHorizon.get(), MAX_EXPANSIONS, MAX_PATH_LENGTH, nanos);
+        } finally {
+            searching = null;
+        }
     }
 
     private void publish(State state, List<Long> path) {
-        snapshot = new Snapshot(state, List.copyOf(path), goal, ++version);
+        if (stale()) return;
+        snapshot = new Snapshot(state, List.copyOf(path), goal, versions.incrementAndGet());
     }
 }

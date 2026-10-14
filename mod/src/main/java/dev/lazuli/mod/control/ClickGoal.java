@@ -1,5 +1,6 @@
 package dev.lazuli.mod.control;
 
+import dev.lazuli.core.chat.Chat;
 import dev.lazuli.core.goal.GoalBlock;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -29,7 +30,7 @@ public final class ClickGoal {
 
     public static void arm() {
         armed = true;
-        chat.accept("Left-click a block to make it the goal");
+        chat.accept(Chat.info("Left-click a block to make it the goal"));
     }
 
     /** Called instead of vanilla's attack; true if the click was used here. */
@@ -40,7 +41,7 @@ public final class ClickGoal {
         double range = mc.options.getEffectiveRenderDistance() * 16.0;
         HitResult hit = cam.pick(range, mc.getDeltaTracker().getGameTimeDeltaPartialTick(true), false);
         if (!(hit instanceof BlockHitResult bh) || hit.getType() != HitResult.Type.BLOCK) {
-            chat.accept("No block there (still waiting for a click)");
+            chat.accept(Chat.warn("No block there (still waiting for a click)"));
             swallowing = true;
             return true;
         }

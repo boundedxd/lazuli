@@ -1,0 +1,383 @@
+package dev.lazuli.mod.control;
+
+import dev.lazuli.core.chat.Chat;
+import dev.lazuli.core.control.Controls;
+import dev.lazuli.core.control.InputPlanner;
+import dev.lazuli.core.goal.Goal;
+import dev.lazuli.core.goal.GoalAdjacent;
+import dev.lazuli.core.goal.GoalAny;
+import dev.lazuli.core.goal.GoalNear;
+import dev.lazuli.core.session.PathingSession;
+import dev.lazuli.core.settings.Settings;
+import dev.lazuli.core.world.BlockKind;
+import dev.lazuli.core.world.BlockView;
+import dev.lazuli.core.world.Pos;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+
+/**
+ * #mine: finds the blocks in loaded chunks, paths next to the nearest few (the planner picks whichever is cheapest),
+ * breaks them with the crosshair actually on them, and optionally walks over the drops. Runs on top of the
+ * {@link PathingSession}: it starts quiet trips and takes over the controls only to aim and break.
+ */
+public final class MineProcess {
+    /** How many of the nearest targets one trip may head for. */
+    private static final int TRIP_TARGETS = 12;
+    /** Targets this close to the eye are tried straight away, without a trip. */
+    private static final double DIRECT = 5.0;
+    /** Ticks to wait for drops to appear and be picked up after a break. */
+    private static final int PICKUP_TICKS = 100;
+    /** Ticks breaking may take before the block counts as unbreakable from here. */
+    private static final int BREAK_TIMEOUT = 600;
+
+    private enum Phase { IDLE, TRAVEL, BREAK, PICKUP }
+
+    private final PathingSession session;
+    private final Settings settings;
+    private final BlockView world;
+    private final Consumer<String> chat;
+    private final InputDriver input = new InputDriver();
+
+    private Set<Block> targets = Set.of();
+    private String what = "";
+    private int quantity, mined;
+    private final Set<Long> known = new HashSet<>();
+    private final Set<Long> blacklist = new HashSet<>();
+    private Phase phase = Phase.IDLE;
+    private List<Long> tripTargets = List.of();
+    /** Snapshot version when the current trip was asked for (-1: no trip); a newer one means the session took it. */
+    private long tripStart = -1;
+    private BlockPos breaking;
+    private int breakTicks;
+    private Vec3 dropAt;
+    private int pickupTicks;
+    private boolean pickupTrip;
+    private boolean driving;
+
+    public MineProcess(PathingSession session, Settings settings, BlockView world, Consumer<String> chat) {
+        this.session = session;
+        this.settings = settings;
+        this.world = world;
+        this.chat = chat;
+    }
+
+    public boolean active() {
+        return phase != Phase.IDLE;
+    }
+
+    /** Starts mining the named blocks; {@code quantity} 0 means every one that can be found. */
+    public void start(Minecraft mc, int quantity, List<String> names) {
+        Set<Block> blocks = new LinkedHashSet<>();
+        for (String n : names) {
+            Identifier id = Identifier.tryParse(n.contains(":") ? n : "minecraft:" + n);
+            Block b = id == null ? null : BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
+            if (b == null || b.defaultBlockState().isAir()) {
+                chat.accept(Chat.err("Unknown block: {}", n));
+                return;
+            }
+            blocks.add(b);
+            // "diamond_ore" means the deepslate kind too, as players mean it
+            if (id.getPath().endsWith("_ore") && !id.getPath().startsWith("deepslate_")) {
+                BuiltInRegistries.BLOCK.getOptional(Identifier.fromNamespaceAndPath(id.getNamespace(), "deepslate_" + id.getPath()))
+                    .ifPresent(blocks::add);
+            }
+        }
+        stop(false);
+        targets = Set.copyOf(blocks);
+        what = String.join(", ", names);
+        this.quantity = quantity;
+        mined = 0;
+        known.clear();
+        blacklist.clear();
+        scanLoaded(mc);
+        phase = Phase.TRAVEL;
+        chat.accept(Chat.ok("Mining {}" + (quantity > 0 ? " x{}" : "") + " ({} known in loaded chunks)",
+            quantity > 0 ? new Object[]{what, quantity, known.size()} : new Object[]{what, known.size()}));
+    }
+
+    /** Stops mining (and the trip it started). */
+    public void stop(boolean announce) {
+        if (phase == Phase.IDLE) return;
+        boolean wasTravelling = phase == Phase.TRAVEL || phase == Phase.PICKUP;
+        phase = Phase.IDLE;
+        release();
+        if (wasTravelling && session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
+        if (announce) chat.accept(Chat.warn("Stopped mining ({} broken)", mined));
+    }
+
+    private void finish(String msg) {
+        phase = Phase.IDLE;
+        release();
+        if (session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
+        chat.accept(msg);
+    }
+
+    // ---- block tracking ----
+
+    private void scanLoaded(Minecraft mc) {
+        int r = mc.options.getEffectiveRenderDistance() + 1;
+        int pcx = mc.player.blockPosition().getX() >> 4, pcz = mc.player.blockPosition().getZ() >> 4;
+        for (int cx = pcx - r; cx <= pcx + r; cx++)
+            for (int cz = pcz - r; cz <= pcz + r; cz++) {
+                LevelChunk c = mc.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
+                if (c != null) scan(c);
+            }
+    }
+
+    /** Called for every loaded chunk while mining. */
+    public void onChunkLoad(LevelChunk chunk) {
+        if (phase != Phase.IDLE) scan(chunk);
+    }
+
+    private void scan(LevelChunk chunk) {
+        LevelChunkSection[] sections = chunk.getSections();
+        int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
+        for (int i = 0; i < sections.length; i++) {
+            LevelChunkSection sec = sections[i];
+            if (sec == null || sec.hasOnlyAir() || !sec.maybeHas(s -> targets.contains(s.getBlock()))) continue;
+            int y0 = chunk.getSectionYFromSectionIndex(i) << 4;
+            for (int y = 0; y < 16; y++)
+                for (int z = 0; z < 16; z++)
+                    for (int x = 0; x < 16; x++) {
+                        if (targets.contains(sec.getBlockState(x, y, z).getBlock())) known.add(Pos.pack(x0 + x, y0 + y, z0 + z));
+                    }
+        }
+    }
+
+    /** Called whenever a block changes in the client's world. */
+    public void onBlockChanged(BlockPos pos, BlockState state) {
+        if (phase == Phase.IDLE) return;
+        long p = Pos.pack(pos.getX(), pos.getY(), pos.getZ());
+        if (targets.contains(state.getBlock())) known.add(p);
+        else known.remove(p);
+    }
+
+    // ---- each tick ----
+
+    public void tick(Minecraft mc) {
+        if (phase == Phase.IDLE) return;
+        LocalPlayer player = mc.player;
+        if (player == null || mc.level == null) {
+            stop(false);
+            return;
+        }
+        if (settings.cancelOnUserInput.get() && input.userInterfering(mc)) {
+            stop(true);
+            return;
+        }
+        if (quantity > 0 && mined >= quantity && phase != Phase.PICKUP) {
+            finish(Chat.ok("Done: mined {} {}", mined, what));
+            return;
+        }
+        switch (phase) {
+            case BREAK -> breakTick(mc, player);
+            case PICKUP -> pickupTick(mc, player);
+            case TRAVEL -> travelTick(mc, player);
+            default -> {}
+        }
+    }
+
+    private void travelTick(Minecraft mc, LocalPlayer player) {
+        release();
+        if (player.onGround()) {
+            BlockPos direct = reachable(mc, player);
+            if (direct != null) {
+                if (session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
+                beginBreak(direct);
+                breakTick(mc, player);
+                return;
+            }
+        }
+        PathingSession.Snapshot snap = session.snapshot();
+        if (tripStart >= 0) {
+            if (snap.version() == tripStart || snap.state() == PathingSession.State.PATHING) return; // under way
+            // the trip ended without a target coming into sight: don't head for it (or them, if it failed) again
+            if (snap.state() == PathingSession.State.ARRIVED) blacklist.add(tripTargets.get(0));
+            else blacklist.addAll(tripTargets);
+            tripStart = -1;
+        }
+        List<Long> next = nearest(player, TRIP_TARGETS);
+        if (next.isEmpty()) {
+            finish(mined > 0 ? Chat.ok("No more {} in loaded chunks ({} mined)", what, mined)
+                : Chat.err("No reachable {} in loaded chunks", what));
+            return;
+        }
+        List<Goal> goals = new ArrayList<>();
+        for (long p : next) goals.add(new GoalAdjacent(Pos.x(p), Pos.y(p), Pos.z(p)));
+        tripTargets = next;
+        BlockPos f = player.blockPosition();
+        tripStart = snap.version();
+        session.start(new GoalAny(goals, what), false, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
+    }
+
+    private void beginBreak(BlockPos pos) {
+        phase = Phase.BREAK;
+        breaking = pos;
+        breakTicks = 0;
+        tripStart = -1;
+    }
+
+    private void breakTick(Minecraft mc, LocalPlayer player) {
+        if (!targets.contains(mc.level.getBlockState(breaking).getBlock())) {
+            mined++;
+            known.remove(Pos.pack(breaking.getX(), breaking.getY(), breaking.getZ()));
+            if (quantity > 0) chat.accept(Chat.info("Mined {}/{}", mined, quantity));
+            tripStart = -1;
+            if (settings.minePickup.get()) {
+                phase = Phase.PICKUP;
+                dropAt = Vec3.atCenterOf(breaking);
+                pickupTicks = 0;
+                pickupTrip = false;
+            } else {
+                phase = Phase.TRAVEL;
+            }
+            breaking = null;
+            release();
+            return;
+        }
+        if (++breakTicks > BREAK_TIMEOUT) {
+            blacklist.add(Pos.pack(breaking.getX(), breaking.getY(), breaking.getZ()));
+            phase = Phase.TRAVEL;
+            release();
+            return;
+        }
+        Vec3 eye = player.getEyePosition();
+        float[] aim = aimAt(mc, player, eye, breaking);
+        if (aim == null) {
+            phase = Phase.TRAVEL; // went out of sight (or reach): walk to it instead
+            release();
+            return;
+        }
+        float maxTurn = settings.rotationSpeed.get().floatValue();
+        float yaw0 = RotationDriver.yaw(player), pitch0 = RotationDriver.pitch(player);
+        BlockHitResult hit = crosshair(mc, player, eye, yaw0, pitch0);
+        if (hit != null && hit.getBlockPos().equals(breaking)) {
+            player.getInventory().setSelectedSlot(Tools.bestTool(player, mc.level.getBlockState(breaking)));
+            Interactor.mineAt(breaking, hit.getDirection());
+        }
+        float yaw = InputPlanner.approach(yaw0, aim[0], maxTurn);
+        float pitch = pitch0 + Math.max(-maxTurn, Math.min(maxTurn, aim[1] - pitch0));
+        input.apply(mc, new Controls(false, false, false, false, aim[0], aim[1], 0, false), yaw, pitch, settings.freeLook.get());
+        driving = true;
+    }
+
+    private void pickupTick(Minecraft mc, LocalPlayer player) {
+        release();
+        pickupTicks++;
+        List<ItemEntity> items = mc.level.getEntitiesOfClass(ItemEntity.class, new AABB(dropAt, dropAt).inflate(4),
+            e -> e.isAlive());
+        if (items.isEmpty() && pickupTicks > 10 || pickupTicks > PICKUP_TICKS) {
+            if (pickupTrip && session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
+            phase = Phase.TRAVEL;
+            tripStart = -1;
+            return;
+        }
+        if (items.isEmpty()) return; // drops take a tick or two to show up
+        ItemEntity item = items.stream().min(Comparator.comparingDouble(player::distanceToSqr)).get();
+        if (player.distanceToSqr(item) < 1.0) return; // about to be picked up
+        PathingSession.Snapshot snap = session.snapshot();
+        if (pickupTrip) {
+            if (snap.version() == tripStart || snap.state() == PathingSession.State.PATHING) return;
+            if (snap.state() != PathingSession.State.ARRIVED) {
+                phase = Phase.TRAVEL; // can't get to it: leave it
+                tripStart = -1;
+                return;
+            }
+        }
+        // a first trip, or arrived and the item rolled on: go (again) to where it is now
+        BlockPos ip = item.blockPosition(), f = player.blockPosition();
+        tripStart = snap.version();
+        session.start(new GoalNear(ip.getX(), ip.getY(), ip.getZ(), 1), false, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
+        pickupTrip = true;
+    }
+
+    // ---- choosing and aiming ----
+
+    /** The nearest targets not ruled out, safe to open up (no lava next to them). */
+    private List<Long> nearest(LocalPlayer player, int n) {
+        double px = player.getX(), py = player.getY(), pz = player.getZ();
+        return known.stream().filter(p -> !blacklist.contains(p) && safe(p))
+            .sorted(Comparator.comparingDouble(p -> sq(Pos.x(p) + 0.5 - px) + sq(Pos.y(p) + 0.5 - py) + sq(Pos.z(p) + 0.5 - pz)))
+            .limit(n).toList();
+    }
+
+    private boolean safe(long p) {
+        int x = Pos.x(p), y = Pos.y(p), z = Pos.z(p);
+        int[][] around = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int[] d : around) if (world.get(x + d[0], y + d[1], z + d[2]) == BlockKind.DANGER) return false;
+        return true;
+    }
+
+    /** A target the eye can see within reach right now, nearest first. */
+    private BlockPos reachable(Minecraft mc, LocalPlayer player) {
+        Vec3 eye = player.getEyePosition();
+        BlockPos best = null;
+        double bestD = Double.POSITIVE_INFINITY;
+        for (long p : known) {
+            if (blacklist.contains(p) || !safe(p)) continue;
+            double d = eye.distanceToSqr(Pos.x(p) + 0.5, Pos.y(p) + 0.5, Pos.z(p) + 0.5);
+            if (d > DIRECT * DIRECT || d >= bestD) continue;
+            BlockPos bp = new BlockPos(Pos.x(p), Pos.y(p), Pos.z(p));
+            if (aimAt(mc, player, eye, bp) != null) {
+                best = bp;
+                bestD = d;
+            }
+        }
+        return best;
+    }
+
+    /** Yaw and pitch putting the crosshair on a visible part of the block within reach, or null. */
+    private static float[] aimAt(Minecraft mc, LocalPlayer player, Vec3 eye, BlockPos bp) {
+        double[][] pts = {{0.5, 0.5, 0.5}, {0.5, 0.95, 0.5}, {0.5, 0.05, 0.5}, {0.05, 0.5, 0.5}, {0.95, 0.5, 0.5},
+            {0.5, 0.5, 0.05}, {0.5, 0.5, 0.95}};
+        double reach = player.blockInteractionRange();
+        for (double[] q : pts) {
+            Vec3 t = new Vec3(bp.getX() + q[0], bp.getY() + q[1], bp.getZ() + q[2]);
+            if (t.distanceTo(eye) > reach) continue;
+            double dx = t.x - eye.x, dy = t.y - eye.y, dz = t.z - eye.z;
+            float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
+            float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)));
+            BlockHitResult h = crosshair(mc, player, eye, yaw, pitch);
+            if (h != null && h.getBlockPos().equals(bp)) return new float[]{yaw, pitch};
+        }
+        return null;
+    }
+
+    private static BlockHitResult crosshair(Minecraft mc, LocalPlayer player, Vec3 eye, float yaw, float pitch) {
+        Vec3 dir = Vec3.directionFromRotation(pitch, yaw);
+        HitResult h = mc.level.clip(new ClipContext(eye, eye.add(dir.scale(player.blockInteractionRange())),
+            ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        return h instanceof BlockHitResult b && b.getType() == HitResult.Type.BLOCK ? b : null;
+    }
+
+    private void release() {
+        if (driving) input.release();
+        driving = false;
+    }
+
+    private static double sq(double d) {
+        return d * d;
+    }
+}
