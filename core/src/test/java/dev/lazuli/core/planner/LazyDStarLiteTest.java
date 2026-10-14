@@ -42,6 +42,24 @@ class LazyDStarLiteTest {
     }
 
     @Test
+    void aMissedEdgeIsRetriedBeforeItCountsAsImpassable() {
+        GridGraph g = new GridGraph(10, 2, 0.0);
+        long s = Pos.pack(0, 0, 0), t = Pos.pack(5, 0, 5);
+        List<Long> in = new java.util.ArrayList<>(g.neighbors(t));
+        long only = in.get(0);
+        for (long n : in) if (n != only) g.setCost(n, t, Double.POSITIVE_INFINITY);
+        LazyDStarLite p = planner(g, s, t);
+        assertEquals(PlanResult.Status.FOUND, p.plan(ALL, 1_000_000, ALL).status());
+        p.edgeFailed(only, t);
+        p.edgeFailed(only, t);
+        PlanResult r = p.plan(ALL, 1_000_000, ALL);
+        assertEquals(PlanResult.Status.FOUND, r.status(), "two misses: still worth another try");
+        assertEquals(only, r.path().get(r.path().size() - 2));
+        p.edgeFailed(only, t);
+        assertEquals(PlanResult.Status.NO_PATH, p.plan(ALL, 1_000_000, ALL).status(), "three: impassable");
+    }
+
+    @Test
     void budgetExceededInsteadOfHanging() {
         GridGraph g = new GridGraph(60, 3, 0.0);
         assertEquals(PlanResult.Status.BUDGET_EXCEEDED,

@@ -20,6 +20,10 @@ public final class Settings {
         s -> s.replace(" ", "")));
     public final Setting<Boolean> cancelOnUserInput = bool("cancelOnUserInput", true);
     public final Setting<Double> rotationSpeed = decimal("rotationSpeed", 45.0, 1.0, 180.0);
+    /** Sneak to stop dead before a long or curved jump (off: eases to a stop walking). */
+    public final Setting<Boolean> allowSneakStop = bool("allowSneakStop", false);
+    /** Snap the view sideways or round to steer or brake mid-air (off: look where it goes, steer with A, D and S). */
+    public final Setting<Boolean> allowFlicks = bool("allowFlicks", false);
     /** Turn only server-side, leaving the camera to the mouse (Baritone's freeLook). */
     public final Setting<Boolean> freeLook = bool("freeLook", false);
     /** #mine walks over to the drops of each block it breaks. */

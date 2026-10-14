@@ -187,7 +187,7 @@ public class InteractionCourseTest {
                 c = planner.plan(st, walkable, idx, true, CourseTest.MAX_TURN);
                 who = "mpc";
                 if (c == null && !s.onGround) {
-                    c = InputPlanner.airBrake(st);
+                    c = InputPlanner.airBrake(st, false);
                     who = "brake";
                 }
                 if (c == null) {

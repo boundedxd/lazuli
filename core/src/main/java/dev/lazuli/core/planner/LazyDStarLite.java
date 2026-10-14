@@ -84,9 +84,20 @@ public final class LazyDStarLite {
         start = newStart;
     }
 
-    /** The player couldn't make it along u->v: treat that edge as impassable until the blocks around it change. */
+    /** Misses along an edge before it counts as impassable: a jump can fail once to a wobble or lag. */
+    private static final int FAILS = 3;
+    private final Map<Long, Map<Long, Integer>> failures = new HashMap<>();
+
+    /**
+     * The player couldn't make it along u->v: each miss doubles its cost (an about as good way round goes instead),
+     * and after {@link #FAILS} it's impassable until the blocks around it change.
+     */
     public void edgeFailed(long u, long v) {
-        evaluated.computeIfAbsent(u, k -> new HashMap<>()).put(v, INF);
+        int n = failures.computeIfAbsent(u, k -> new HashMap<>()).merge(v, 1, Integer::sum);
+        Map<Long, Double> fromU = evaluated.computeIfAbsent(u, k -> new HashMap<>());
+        Double c = fromU.get(v);
+        if (n >= FAILS || c == null) fromU.put(v, INF);
+        else fromU.put(v, c * 2);
         recompute(u);
     }
 

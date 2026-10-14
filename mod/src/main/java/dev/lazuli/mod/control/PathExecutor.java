@@ -114,6 +114,7 @@ public final class PathExecutor {
         // ladders and vines (still watched for getting stuck, unlike building)
         if (c == null && idx >= 0) c = climber.tick(state, path, idx);
         // long and upward gap jumps: played exactly as proven, not left to the input planner
+        jumper.setSneak(settings.allowSneakStop.get());
         if (c == null && !building) c = jumper.tick(state, path, idx, sprint);
         boolean interacting = c != null;
         if (interacting) {
@@ -122,8 +123,9 @@ public final class PathExecutor {
             // move only as far as the world allows: up to the next block to break or place, never into the gap after it
             List<Long> walkable = path.subList(0, Builder.walkableEnd(world, path, idx, WALK_HORIZON) + 1);
             planner.setMaxFall(settings.maxFallHeight.get());
+            planner.setFlicks(settings.allowFlicks.get());
             c = planner.plan(state, walkable, idx, sprint, maxTurn);
-            if (c == null && !player.onGround()) c = InputPlanner.airBrake(state);
+            if (c == null && !player.onGround()) c = InputPlanner.airBrake(state, settings.allowFlicks.get());
             if (c == null) c = follower.tick(state, walkable.subList(Math.min(idx, walkable.size() - 1), walkable.size()), sprint);
             if (gentle && c != null && c.jump() && player.onGround() && idx + 1 < path.size()) {
                 // walk, don't hop, onto anything not higher up (gaps still need their jump)

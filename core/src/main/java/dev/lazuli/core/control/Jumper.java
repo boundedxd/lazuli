@@ -38,8 +38,23 @@ public final class Jumper {
     private int prep;
     private static final int PREP_LIMIT = 60;
 
+    /** Whether lining up may sneak (stopping dead on the spot); off, it eases to a stop walking. */
+    private boolean sneak;
+    /**
+     * Ticks since it last sneaked. The game's crouch (and its slowdown) outlasts the key by a tick or two, which the
+     * script doesn't allow for, so it never sets off sooner than {@link #UNCROUCH} ticks after.
+     */
+    private int sinceSneak = UNCROUCH;
+    private static final int UNCROUCH = 3;
+    /** Lining up sneaks only while moving faster than this (blocks a tick): stopped, it lets go, ready to set off. */
+    private static final double STILL = 0.02;
+
     public Jumper(BlockView world) {
         this.world = world;
+    }
+
+    public void setSneak(boolean allow) {
+        sneak = allow;
     }
 
     public void reset() {
@@ -74,7 +89,8 @@ public final class Jumper {
             prep = 0;
         }
         if (script == null || !p.onGround() || ++prep > PREP_LIMIT) return null;
-        if (Math.abs(RotationController.wrap(p.yaw() - script.yaw())) < AIMED) {
+        if (sinceSneak < UNCROUCH) sinceSneak++;
+        if (sinceSneak >= UNCROUCH && Math.abs(RotationController.wrap(p.yaw() - script.yaw())) < AIMED) {
             // go as soon as some take-off tick lands from right here, as the player is (no need to stop first)
             JumpEvaluator.Script go = fromHere(p);
             if (go != null) {
@@ -86,9 +102,11 @@ public final class Jumper {
                 return play(p);
             }
         }
-        // line up at the center, where the script was proven; sneaking near it, for small enough steps to stop there
+        // line up at the center, where the script was proven (sneaking near it, if allowed, to stop dead there)
         double d = Math.hypot(p.x() - (Pos.x(u) + 0.5), p.z() - (Pos.z(u) + 0.5));
-        return Climber.seek(p, Pos.x(u), Pos.z(u), new int[]{0, 0}, script.yaw(), PITCH, d < FINE);
+        boolean crouch = sneak && d < FINE && Math.hypot(p.vx(), p.vz()) > STILL;
+        if (crouch) sinceSneak = 0;
+        return Climber.seek(p, Pos.x(u), Pos.z(u), new int[]{0, 0}, script.yaw(), PITCH, crouch);
     }
 
     /** The script, or the same with an earlier take-off, that lands on the target from the player's state; or null. */

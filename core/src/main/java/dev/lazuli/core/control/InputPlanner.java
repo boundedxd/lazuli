@@ -49,6 +49,19 @@ public final class InputPlanner {
         maxFall = blocks;
     }
 
+    /**
+     * Whether it may snap the view sideways or round to steer or brake (a player keeps looking where they're going and
+     * steers with A, D and S). Off, it never looks further than {@link #FLICK_LIMIT} off the way along the path.
+     */
+    private boolean flicks;
+
+    public void setFlicks(boolean allow) {
+        flicks = allow;
+    }
+
+    /** Without flicks, the most (degrees) it looks away from the way along the path, or turns to recover mid-air. */
+    private static final float FLICK_LIMIT = 45f;
+
     public InputPlanner(BlockView world) {
         this.world = new dev.lazuli.core.world.LocalCache(world);
     }
@@ -247,15 +260,19 @@ public final class InputPlanner {
     private Controls recover(PlayerSim root, PlayerState p, Corridor c, boolean allowSprint, float maxTurn) {
         Controls bestC = null;
         double bestScore = Double.NEGATIVE_INFINITY;
+        int[] strafes = flicks ? new int[]{0} : new int[]{0, 1, -1};
         for (int k = 0; k < 16; k++) {
-            float yaw = p.yaw() + k * 22.5f;
-            for (int fwd = -1; fwd <= 1; fwd++) {
+            float turn = k <= 8 ? k * 22.5f : (k - 16) * 22.5f;
+            if (!flicks && Math.abs(turn) > FLICK_LIMIT) continue;
+            float yaw = p.yaw() + turn;
+            for (int fwd = -1; fwd <= 1; fwd++)
+            for (int strafe : strafes) {
                 PlayerSim s = root.copy();
                 float y = p.yaw();
                 boolean ok = false;
                 for (int t = 0; t < SAFE_TICKS; t++) {
                     y = approach(y, yaw, maxTurn);
-                    s.step(fwd, 0, false, fwd > 0 && allowSprint, y);
+                    s.step(fwd, strafe, false, fwd > 0 && allowSprint, y);
                     if (s.inWater) {
                         ok = true;
                         break;
@@ -271,11 +288,11 @@ public final class InputPlanner {
                 double sc = score(s, c) - RECOVER_TURN_WEIGHT * Math.abs(RotationController.wrap(yaw - p.yaw()));
                 if (sc > bestScore) {
                     bestScore = sc;
-                    bestC = new Controls(fwd > 0, fwd < 0, false, fwd > 0 && allowSprint, yaw, PITCH);
+                    bestC = new Controls(fwd > 0, fwd < 0, false, fwd > 0 && allowSprint, yaw, PITCH, strafe);
                 }
             }
         }
-        return bestC != null ? bestC : airBrake(p);
+        return bestC != null ? bestC : airBrake(p, flicks);
     }
 
     /** Whether any edge between nodes {@code from} and {@code to} climbs or crosses a gap, so needs a jump. */
@@ -560,6 +577,7 @@ public final class InputPlanner {
             long n = path.get(from + k);
             add(out, PathFollower.yawTo(p.x(), p.z(), Pos.x(n) + 0.5, Pos.z(n) + 0.5));
         }
+        if (!flicks) out.removeIf(y -> Math.abs(RotationController.wrap(y - base)) > FLICK_LIMIT);
         aimedCount = out.size();
         add(out, base + 12f);
         add(out, base - 12f);
@@ -611,12 +629,25 @@ public final class InputPlanner {
     }
 
     /**
-     * In the air with no safe plan: face the way the player is moving and hold S, so the landing comes as short as it
-     * can. Steering for the path instead is how a missed jump turns into a fall off the side.
+     * In the air with no safe plan: brake against the way the player is moving, so the landing comes as short as it
+     * can. Steering for the path instead is how a missed jump turns into a fall off the side. With {@code flicks} it
+     * faces the motion and holds S; without, it keeps looking where it is and presses S, A or D against the motion.
      */
-    public static Controls airBrake(PlayerState p) {
-        if (Math.hypot(p.vx(), p.vz()) < 1e-3) return new Controls(false, false, false, p.yaw(), PITCH);
-        float yaw = PathFollower.yawTo(0, 0, p.vx(), p.vz());
-        return new Controls(false, true, false, false, yaw, PITCH);
+    private static final double STOPPED = 0.04;
+
+    public static Controls airBrake(PlayerState p, boolean flicks) {
+        // nearly stopped: braking would only flip the motion round (and facing it, spin on the spot)
+        if (Math.hypot(p.vx(), p.vz()) < STOPPED) return new Controls(false, false, false, p.yaw(), PITCH);
+        if (flicks) {
+            float yaw = PathFollower.yawTo(0, 0, p.vx(), p.vz());
+            return new Controls(false, true, false, false, yaw, PITCH);
+        }
+        // the motion split along where it looks (forward) and to its left (A)
+        double r = Math.toRadians(p.yaw()), sin = Math.sin(r), cos = Math.cos(r);
+        double ahead = -p.vx() * sin + p.vz() * cos, left = p.vx() * cos + p.vz() * sin;
+        double speed = Math.hypot(ahead, left);
+        int fwd = ahead > 0.4 * speed ? -1 : ahead < -0.4 * speed ? 1 : 0;
+        int strafe = left > 0.4 * speed ? -1 : left < -0.4 * speed ? 1 : 0;
+        return new Controls(fwd > 0, fwd < 0, false, false, p.yaw(), PITCH, strafe);
     }
 }
