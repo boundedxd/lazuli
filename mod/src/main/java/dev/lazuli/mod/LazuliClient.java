@@ -113,7 +113,8 @@ public final class LazuliClient implements ClientModInitializer {
 			if (session.snapshot().state() == PathingSession.State.PATHING) session.stop();
 		}
 		int cx = chunk.getPos().x, cz = chunk.getPos().z;
-		cache.putChunk(cx, cz, ChunkScanner.scan(chunk, cache.sectionCount()));
+		ChunkScanner.Scan scan = ChunkScanner.scan(chunk, cache.sectionCount());
+		cache.putChunk(cx, cz, scan.kinds(), scan.physics());
 		session.regionChanged(cx * 16, cache.minY(), cz * 16, cx * 16 + 15, cache.maxY(), cz * 16 + 15);
 	}
 
@@ -128,7 +129,7 @@ public final class LazuliClient implements ClientModInitializer {
 	public static void onBlockChanged(ClientLevel level, BlockPos pos, BlockState state) {
 		LazuliClient self = instance;
 		if (self == null || level != self.lastLevel) return;
-		self.cache.set(pos.getX(), pos.getY(), pos.getZ(), BlockClassifier.classify(state));
+		self.cache.set(pos.getX(), pos.getY(), pos.getZ(), BlockClassifier.classify(state), BlockClassifier.physicsId(state));
 		self.session.regionChanged(pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ());
 	}
 }
