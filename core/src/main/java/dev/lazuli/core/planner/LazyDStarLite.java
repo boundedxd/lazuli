@@ -108,9 +108,17 @@ public final class LazyDStarLite {
     public PlanResult plan(int evalHorizon, long maxExpansions, int maxPathLength) {
         expansions = 0;
         while (true) {
-            if (!computeShortestPath(maxExpansions)) return PlanResult.budgetExceeded();
-            if (g(start) == INF) return PlanResult.noPath();
-            List<Long> path = extractPath(maxPathLength);
+            List<Long> path;
+            while (true) {
+                if (!computeShortestPath(start, maxExpansions)) return PlanResult.budgetExceeded();
+                if (g(start) == INF) return PlanResult.noPath();
+                path = extractPath(maxPathLength);
+                // With an inflated heuristic the search can stop while nodes beyond the start are still
+                // inconsistent; settle every node on the path so g strictly decreases along it.
+                long bad = firstInconsistent(path);
+                if (bad == GOAL) break;
+                if (!computeShortestPath(bad, maxExpansions)) return PlanResult.budgetExceeded();
+            }
             boolean changed = false;
             for (int i = 0; i + 1 < path.size() && i < evalHorizon; i++) {
                 long u = path.get(i), v = path.get(i + 1);
@@ -132,11 +140,21 @@ public final class LazyDStarLite {
         }
     }
 
-    private boolean computeShortestPath(long maxExpansions) {
+    /** Returns the first path node whose g and rhs disagree, or GOAL if all are consistent. */
+    private long firstInconsistent(List<Long> path) {
+        for (long v : path) {
+            Node n = nodes.get(v);
+            if (n == null || n.g != n.rhs) return v;
+        }
+        return GOAL;
+    }
+
+    /** Expands until {@code target} is consistent and no queued key is smaller than its key. */
+    private boolean computeShortestPath(long target, long maxExpansions) {
         while (!open.isEmpty()) {
             Key top = open.first();
-            Node s = node(start);
-            if (top.compareKeys(key(start, s)) >= 0 && s.rhs == s.g) return true;
+            Node s = node(target);
+            if (top.compareKeys(key(target, s)) >= 0 && s.rhs == s.g) return true;
             if (expansions++ >= maxExpansions) return false;
             long u = top.id();
             Node n = nodes.get(u);
@@ -175,8 +193,10 @@ public final class LazyDStarLite {
 
     private List<Long> extractPath(int maxLength) {
         List<Long> path = new ArrayList<>();
+        java.util.Set<Long> seen = new java.util.HashSet<>();
         long u = start;
         path.add(u);
+        seen.add(u);
         while (path.size() < maxLength) {
             long[] best = {0};
             double[] bestCost = {INF};
@@ -188,7 +208,7 @@ public final class LazyDStarLite {
                     best[0] = s;
                 }
             });
-            if (bestCost[0] == INF || best[0] == GOAL) break;
+            if (bestCost[0] == INF || best[0] == GOAL || !seen.add(best[0])) break;
             u = best[0];
             path.add(u);
         }

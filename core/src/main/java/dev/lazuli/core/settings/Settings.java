@@ -14,6 +14,7 @@ public final class Settings {
     public final Setting<Boolean> cancelOnUserInput = bool("cancelOnUserInput", true);
     public final Setting<Double> rotationSpeed = decimal("rotationSpeed", 30.0, 1.0, 180.0);
     public final Setting<Integer> evalHorizon = integer("evalHorizon", 32, 1, 4096);
+    public final Setting<Double> heuristicWeight = decimal("heuristicWeight", 1.5, 1.0, 10.0);
     public final Setting<Boolean> renderPath = bool("renderPath", true);
     public final Setting<String> prefix = register(new Setting<>("prefix", "#", s -> {
         if (s.isEmpty() || s.contains(" ")) throw new IllegalArgumentException("prefix must be non-empty and contain no spaces");

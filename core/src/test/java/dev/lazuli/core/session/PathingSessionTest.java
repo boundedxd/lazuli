@@ -46,7 +46,8 @@ class PathingSessionTest {
         w.fill(5, 1, -5, 5, 2, 4, BlockKind.SOLID);
         s.regionChanged(5, 1, -5, 5, 2, 4);
         assertEquals(PathingSession.State.PATHING, s.snapshot().state());
-        assertTrue(s.snapshot().path().contains(Pos.pack(5, 1, 5)));
+        assertTrue(s.snapshot().path().contains(Pos.pack(5, 1, 5)),
+            s.snapshot().path().stream().map(Pos::toString).toList().toString());
     }
 
     @Test

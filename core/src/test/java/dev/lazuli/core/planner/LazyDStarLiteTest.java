@@ -84,6 +84,50 @@ class LazyDStarLiteTest {
     }
 
     @Test
+    void weightedHeuristicGivesValidBoundedPathsUnderRandomChanges() {
+        double w = 1.5;
+        for (int trial = 0; trial < 25; trial++) {
+            Random r = new Random(500 + trial);
+            GridGraph g = new GridGraph(25, trial, 0.2) {
+                @Override
+                public double heuristic(long a, long b) {
+                    return w * super.heuristic(a, b);
+                }
+            };
+            long start = Pos.pack(0, 0, 0), goal = Pos.pack(24, 0, 24);
+            g.neighbors(start).forEach(n -> g.setCost(start, n, 1));
+            g.neighbors(goal).forEach(n -> g.setCost(n, goal, 1));
+            LazyDStarLite p = planner(g, start, goal);
+            long cur = start;
+            for (int step = 0; step < 15; step++) {
+                PlanResult res = p.plan(ALL, 10_000_000, ALL);
+                double best = g.dijkstra(cur, goal);
+                if (best == Double.POSITIVE_INFINITY) {
+                    assertEquals(PlanResult.Status.NO_PATH, res.status());
+                    break;
+                }
+                assertEquals(PlanResult.Status.FOUND, res.status());
+                List<Long> path = res.path();
+                assertEquals(goal, path.get(path.size() - 1), "trial " + trial + " step " + step);
+                assertEquals(path.size(), new java.util.HashSet<>(path).size(), "path loops");
+                assertTrue(pathCost(g, path) <= w * best + 1e-9, "cost bound, trial " + trial);
+                if (path.size() > 1) {
+                    cur = path.get(1);
+                    p.moveStart(cur);
+                }
+                for (int k = 0; k < 8; k++) {
+                    long u = Pos.pack(r.nextInt(25), 0, r.nextInt(25));
+                    for (long v : g.neighbors(u)) {
+                        g.setCost(u, v, r.nextDouble() < 0.25 ? Double.POSITIVE_INFINITY : 1 + r.nextInt(5));
+                        p.regionChanged(Math.min(Pos.x(u), Pos.x(v)), 0, Math.min(Pos.z(u), Pos.z(v)),
+                            Math.max(Pos.x(u), Pos.x(v)), 0, Math.max(Pos.z(u), Pos.z(v)));
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void evaluatedCostBelowOptimisticIsRejected() {
         GridGraph g = new GridGraph(5, 4, 0.0) {
             @Override

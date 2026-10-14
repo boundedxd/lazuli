@@ -16,11 +16,18 @@ public final class MoveGraph implements Graph {
     private final BlockView w;
     private final int maxFall;
     private final double flat;
+    private final double heuristicWeight;
 
     public MoveGraph(BlockView world, int maxFall, boolean sprint) {
+        this(world, maxFall, sprint, 1.0);
+    }
+
+    /** {@code heuristicWeight > 1} trades path optimality (at most that factor) for far fewer expansions. */
+    public MoveGraph(BlockView world, int maxFall, boolean sprint, double heuristicWeight) {
         this.w = world;
         this.maxFall = maxFall;
         this.flat = sprint ? Costs.SPRINT_ONE : Costs.WALK_ONE;
+        this.heuristicWeight = heuristicWeight;
     }
 
     public static boolean passable(BlockKind k) {
@@ -85,7 +92,7 @@ public final class MoveGraph implements Graph {
     @Override
     public double heuristic(long a, long b) {
         int dx = Math.abs(Pos.x(a) - Pos.x(b)), dz = Math.abs(Pos.z(a) - Pos.z(b));
-        return flat * (Math.max(dx, dz) + (Costs.SQRT2 - 1) * Math.min(dx, dz));
+        return heuristicWeight * flat * (Math.max(dx, dz) + (Costs.SQRT2 - 1) * Math.min(dx, dz));
     }
 
     @Override
