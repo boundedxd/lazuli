@@ -48,7 +48,7 @@ public final class LazuliClient implements ClientModInitializer {
 		SettingsStore.load(configFile, settings);
 
 		session = new PathingSession(cache, cache::minY, cache::maxY, settings, worker, this::chat);
-		executor = new PathExecutor(session, settings);
+		executor = new PathExecutor(session, settings, cache);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {

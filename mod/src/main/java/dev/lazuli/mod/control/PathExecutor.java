@@ -20,14 +20,15 @@ public final class PathExecutor {
 
     private final PathingSession session;
     private final Settings settings;
-    private final PathFollower follower = new PathFollower();
+    private final PathFollower follower;
     private final RotationController rotation = new RotationController();
     private final InputDriver input = new InputDriver();
     private boolean driving;
     private long lastBlock = NONE;
     private Controls lastControls;
 
-    public PathExecutor(PathingSession session, Settings settings) {
+    public PathExecutor(PathingSession session, Settings settings, dev.lazuli.core.world.BlockView world) {
+        this.follower = new PathFollower(world);
         this.session = session;
         this.settings = settings;
     }
