@@ -24,6 +24,9 @@ public interface Graph {
         return optimisticCost(u, v);
     }
 
+    /** The world changed: drop anything cached about it. */
+    default void invalidate() {}
+
     /** Consistent, symmetric lower bound on the cost between any two positions. */
     double heuristic(long a, long b);
 

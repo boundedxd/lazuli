@@ -144,4 +144,70 @@ class CourseTest {
         Run r = drive(w, 0, 1, 0, 10, 1, 4, 400);
         assertArrives(r, 200);
     }
+
+    @Test
+    void twoGapTwoGapOneGapOnSingleBlocks() {
+        // 2 blocks of momentum, 2-gap, single block, 2-gap, single block, 1-gap, finish
+        Run r = drive(strip(0, 2, 5, 5, 8, 8, 10, 12), 0, 1, 0, 12, 1, 0, 400);
+        assertArrives(r, 120);
+    }
+
+    @Test
+    void threeGapsAndAFourGap() {
+        Run r = drive(strip(-4, 0, 4, 5, 9, 12, 17, 19), -4, 1, 0, 19, 1, 0, 400);
+        assertArrives(r, 150);
+    }
+
+    @Test
+    void diagonalIslands() {
+        GridWorld w = new GridWorld(BlockKind.AIR).fill(-2, 0, -2, 0, 0, 0, BlockKind.SOLID)
+            .set(2, 0, 2, BlockKind.SOLID).set(4, 0, 5, BlockKind.SOLID).set(7, 0, 6, BlockKind.SOLID)
+            .fill(9, 0, 8, 11, 0, 10, BlockKind.SOLID);
+        Run r = drive(w, -2, 1, -2, 11, 1, 10, 400);
+        assertArrives(r, 150);
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("benchmark")
+    void bedrockOnly() {
+        // the bottom of the world with everything but bedrock deleted: a solid layer, then
+        // 80/60/40/20 percent chances per block for the four layers above it
+        int arrived = 0;
+        StringBuilder fails = new StringBuilder();
+        for (long seed = 1; seed <= 10; seed++) {
+            java.util.Random rnd = new java.util.Random(seed);
+            GridWorld w = new GridWorld(BlockKind.AIR).fill(-4, 0, -6, 44, 0, 6, BlockKind.SOLID);
+            double[] p = {0.8, 0.6, 0.4, 0.2};
+            for (int x = -4; x <= 44; x++) {
+                for (int z = -6; z <= 6; z++) {
+                    for (int y = 1; y <= 4; y++) {
+                        if (rnd.nextDouble() < p[y - 1]) w.set(x, y, z, BlockKind.SOLID);
+                    }
+                }
+            }
+            int[] s0 = surface(w, 0, 0), s1 = surface(w, 40, 0);
+            Run r = drive(w, s0[0], s0[1], s0[2], s1[0], s1[1], s1[2], 1500);
+            if (r.arrived()) arrived++;
+            else fails.append("seed ").append(seed).append(": ").append(r.log(), 0, Math.min(400, r.log().length())).append('\n');
+        }
+        System.out.println("bedrock: " + arrived + "/10\n" + fails);
+        assertTrue(arrived >= 8, fails.toString());
+    }
+
+    /** A standable spot near (x, z): the top of a column with two air blocks above. */
+    static int[] surface(GridWorld w, int x, int z) {
+        for (int r = 0; r < 6; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    for (int y = 6; y >= 1; y--) {
+                        if (w.get(x + dx, y - 1, z + dz) == BlockKind.SOLID && w.get(x + dx, y, z + dz) == BlockKind.AIR
+                            && w.get(x + dx, y + 1, z + dz) == BlockKind.AIR) {
+                            return new int[]{x + dx, y, z + dz};
+                        }
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("no surface");
+    }
 }

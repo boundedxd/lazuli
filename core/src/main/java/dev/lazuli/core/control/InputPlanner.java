@@ -102,9 +102,14 @@ public final class InputPlanner {
                 all.add(nodes[i]);
                 if (i + 1 < n) {
                     int dx = Pos.x(nodes[i + 1]) - Pos.x(nodes[i]), dz = Pos.z(nodes[i + 1]) - Pos.z(nodes[i]);
-                    int span = Math.max(Math.abs(dx), Math.abs(dz));
-                    for (int k = 1; k < span; k++) {
-                        all.add(Pos.offset(nodes[i], Integer.signum(dx) * k, 0, Integer.signum(dz) * k));
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) >= 2) {
+                        // a jump: every block its straight line crosses may be run-up
+                        double len = Math.hypot(dx, dz);
+                        for (double t = 0.25; t < len; t += 0.25) {
+                            long cell = Pos.pack((int) Math.floor(cx[i] + dx * t / len), y[i],
+                                (int) Math.floor(cz[i] + dz * t / len));
+                            if (!all.contains(cell)) all.add(cell);
+                        }
                     }
                 }
             }

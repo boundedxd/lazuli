@@ -38,18 +38,42 @@ class ParkourTest {
         assertTrue(g.optimisticCost(Pos.pack(0, 1, 0), Pos.pack(2, 1, 0)) < INF);
     }
 
-    @Test
-    void twoBlockGapNeedsRunupAndSprint() {
-        GridWorld w = strip(-3, 0, 3, 6);
-        assertTrue(graph(w, true).optimisticCost(Pos.pack(-1, 1, 0), Pos.pack(3, 1, 0)) < INF);
-        assertEquals(INF, graph(w, false).optimisticCost(Pos.pack(-1, 1, 0), Pos.pack(3, 1, 0)));
-        assertEquals(INF, graph(strip(0, 0, 3, 6), true).optimisticCost(Pos.pack(-1, 1, 0), Pos.pack(3, 1, 0)));
+    private static double eval(GridWorld w, long u, long v) {
+        return graph(w, true).evaluate(u, v);
     }
 
     @Test
-    void threeBlockGapWithTwoBlockRunup() {
-        GridWorld w = strip(-5, 0, 4, 8);
-        assertTrue(graph(w, true).optimisticCost(Pos.pack(-2, 1, 0), Pos.pack(4, 1, 0)) < INF);
+    void physicsDecidesWhichGapsAreJumpable() {
+        // standing 2-gap from a single block: fine
+        assertTrue(eval(strip(0, 0, 3, 6), Pos.pack(0, 1, 0), Pos.pack(3, 1, 0)) < INF);
+        // 3-gap with a 2-block run-up: fine
+        assertTrue(eval(strip(-5, 0, 4, 8), Pos.pack(-2, 1, 0), Pos.pack(4, 1, 0)) < INF);
+        // 5-gap: not in vanilla
+        assertEquals(INF, eval(strip(-6, 0, 6, 9), Pos.pack(-1, 1, 0), Pos.pack(6, 1, 0)));
+        // geometry alone rules out a 7-gap
+        assertEquals(INF, graph(strip(-6, 0, 8, 9), true).optimisticCost(Pos.pack(0, 1, 0), Pos.pack(8, 1, 0)));
+    }
+
+    @Test
+    void diagonalAndOddAngleJumps() {
+        GridWorld w = new GridWorld(BlockKind.AIR).set(0, 0, 0, BlockKind.SOLID).set(2, 0, 2, BlockKind.SOLID)
+            .set(5, 0, 3, BlockKind.SOLID);
+        assertTrue(eval(w, Pos.pack(0, 1, 0), Pos.pack(2, 1, 2)) < INF, "diagonal 1-gap");
+        assertTrue(eval(w, Pos.pack(2, 1, 2), Pos.pack(5, 1, 3)) < INF, "3-over-1-across");
+    }
+
+    @Test
+    void optimisticNeverExceedsEvaluated() {
+        GridWorld w = strip(-5, 0, 2, 2, 5, 5, 9, 12).fill(14, 1, 0, 15, 1, 0, BlockKind.SOLID);
+        MoveGraph g = graph(w, true);
+        for (int x = -5; x <= 15; x++) {
+            for (int x2 = x - 7; x2 <= x + 7; x2++) {
+                for (int dy = -3; dy <= 1; dy++) {
+                    long u = Pos.pack(x, 1, 0), v = Pos.pack(x2, 1 + dy, 0);
+                    assertTrue(g.evaluate(u, v) >= g.optimisticCost(u, v));
+                }
+            }
+        }
     }
 
     @Test
@@ -78,7 +102,9 @@ class ParkourTest {
 
     @Test
     void jumpPredecessorsMirrorSuccessors() {
-        MoveGraph g = graph(new GridWorld(BlockKind.UNKNOWN), true);
+        GridWorld w = new GridWorld(BlockKind.AIR);
+        for (int x = -12; x <= 12; x += 2) w.fill(x, 63, -12, x, 63, 12, BlockKind.SOLID); // striped floor
+        MoveGraph g = graph(w, true);
         long o = Pos.pack(0, 64, 0);
         g.successors(o, v -> {
             Set<Long> pv = new HashSet<>();

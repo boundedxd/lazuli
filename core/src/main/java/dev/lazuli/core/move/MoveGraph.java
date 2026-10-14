@@ -1,5 +1,8 @@
 package dev.lazuli.core.move;
 
+import dev.lazuli.core.physics.Reach;
+import dev.lazuli.core.physics.Reach;
+import dev.lazuli.core.physics.Reach;
 import dev.lazuli.core.planner.Graph;
 import dev.lazuli.core.planner.LazyDStarLite;
 import dev.lazuli.core.world.BlockKind;
@@ -9,28 +12,22 @@ import dev.lazuli.core.world.Pos;
 import java.util.function.LongConsumer;
 
 /**
- * Rule-based maneuvers: flat walk/sprint (cardinal + diagonal), ascend one block, descend/fall up to maxFall,
- * and cardinal parkour gap jumps. A gap jump edge starts at the beginning of its run-up, so the planner never
- * needs to know the player's speed (every edge starts from a near-standstill).
+ * Maneuvers: flat walk/sprint (cardinal + diagonal), ascend one block, descend/fall up to maxFall, and jumps
+ * to any standable block within {@link #JUMP_RANGE} in any direction, from {@code maxFall} below to one above.
+ * Nothing about jumps is hard-coded: the optimistic cost only rules out geometrically impossible ones (no gap
+ * to cross, blocked arc, gap wider than the player could fly), and {@link #evaluate} runs the physics
+ * ({@link JumpEvaluator}) on the edges the planner actually wants to use. A jump edge starts standing at u, so
+ * its run-up is part of the edge and costs stay independent of how the player got to u.
  */
 public final class MoveGraph implements Graph {
     private static final int[][] DIRS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-    private static final int[][] CARDINALS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
     private static final double INF = LazyDStarLite.INF;
-
-    /** A gap jump: land {@code dy} higher after clearing {@code gap} blocks, with {@code runup} blocks of run-up before the edge. */
-    public record Jump(int dy, int gap, int runup, boolean needsSprint) {
-        /** Horizontal distance from the edge's start (run-up start) to the landing. */
-        public int span() {
-            return runup + gap + 1;
-        }
-    }
-
-    public static final Jump[] JUMPS = {
-        new Jump(0, 1, 0, false), new Jump(0, 2, 1, true), new Jump(0, 3, 2, true),
-        new Jump(1, 1, 1, true), new Jump(1, 2, 2, true),
-        new Jump(-1, 1, 0, false), new Jump(-1, 2, 1, true), new Jump(-1, 3, 2, true),
-    };
+    /** Farthest a jump edge reaches horizontally (run-up included). */
+    public static final int JUMP_RANGE = 7;
+    /** Upper bound on horizontal speed in the air (blocks/tick), for ruling out gaps that can't be flown. */
+    private static final double MAX_AIR_SPEED = 0.42;
+    private static final double PLAYER_HALF_WIDTH = 0.3;
+    private static final int[][] JUMP_OFFSETS = jumpOffsets();
 
     private final BlockView w;
     private final int maxFall;
@@ -38,6 +35,11 @@ public final class MoveGraph implements Graph {
     private final double flat;
     private final double heuristicWeight;
     private final boolean parkour;
+
+    private final java.util.Map<Long, Boolean> nearGap = new java.util.HashMap<>();
+    private final java.util.Map<Edge, Double> jumpTicks = new java.util.HashMap<>();
+
+    private record Edge(long u, long v) {}
 
     public MoveGraph(BlockView world, int maxFall, boolean sprint) {
         this(world, maxFall, sprint, 1.0, false);
@@ -77,15 +79,10 @@ public final class MoveGraph implements Graph {
         return isStandable(w, Pos.x(u), Pos.y(u), Pos.z(u));
     }
 
-    /** The gap jump an edge u->v represents, or null if it isn't one. */
-    public static Jump jumpFor(long u, long v) {
-        int dx = Pos.x(v) - Pos.x(u), dy = Pos.y(v) - Pos.y(u), dz = Pos.z(v) - Pos.z(u);
-        if ((dx != 0) == (dz != 0)) return null;
-        int span = Math.abs(dx + dz);
-        for (Jump j : JUMPS) {
-            if (j.dy() == dy && j.span() == span) return j;
-        }
-        return null;
+    /** True for an edge that is a jump rather than a walk/ascend/descend step. */
+    public static boolean isJump(long u, long v) {
+        int dx = Math.abs(Pos.x(v) - Pos.x(u)), dz = Math.abs(Pos.z(v) - Pos.z(u));
+        return Math.max(dx, dz) >= 2 || (dx == 1 && dz == 1 && Pos.y(v) != Pos.y(u));
     }
 
     @Override
@@ -100,7 +97,20 @@ public final class MoveGraph implements Graph {
             if (diag && !(open2(ux + dx, uy, uz) && open2(ux, uy, uz + dz))) return INF;
             return diag ? flat * Costs.SQRT2 : flat;
         }
-        if (diag) return INF;
+        if (diag) {
+            // diagonal step up or down: plausible if the arc has room above u; the physics decides
+            if (!parkour || dy > 1 || dy < -maxFall) return INF;
+            if (dy == 1 && !passable(w.get(ux, uy + 2, uz))) return INF;
+            // only over loaded terrain: the sim can't judge unknown blocks
+            int vy = Pos.y(v);
+            for (int y = Math.min(uy, vy) - 1; y <= Math.max(uy, vy) + 1; y++) {
+                if (w.get(ux + dx, y, uz) == BlockKind.UNKNOWN || w.get(ux, y, uz + dz) == BlockKind.UNKNOWN
+                    || w.get(ux + dx, y, uz + dz) == BlockKind.UNKNOWN) {
+                    return INF;
+                }
+            }
+            return Reach.minTicks(Costs.SQRT2 - 0.71) + Costs.JUMP_PENALTY;
+        }
         if (dy == 1) {
             return passable(w.get(ux, uy + 2, uz)) ? flat + Costs.JUMP_PENALTY : INF;
         }
@@ -115,31 +125,113 @@ public final class MoveGraph implements Graph {
 
     private double jumpCost(long u, long v) {
         if (!parkour) return INF;
-        Jump j = jumpFor(u, v);
-        if (j == null || (j.needsSprint() && !sprint)) return INF;
-        int x = Pos.x(u), y = Pos.y(u), z = Pos.z(u);
-        int sx = Integer.signum(Pos.x(v) - x), sz = Integer.signum(Pos.z(v) - z);
-        // run-up and take-off blocks
-        for (int k = 0; k <= j.runup(); k++) {
-            if (!isStandable(w, x + sx * k, y, z + sz * k)) return INF;
-        }
-        int tx = x + sx * j.runup(), tz = z + sz * j.runup();
-        if (!passable(w.get(tx, y + 2, tz))) return INF;
-        boolean tall = j.dy() > 0 || j.gap() >= 3;
-        // the gap: a real gap (no floor; unknown counts as floor, so no jumps through unloaded terrain),
-        // with room for the whole jump arc
-        for (int k = 1; k <= j.gap(); k++) {
-            int gx = tx + sx * k, gz = tz + sz * k;
-            if (floor(w.get(gx, y - 1, gz))) return INF;
-            for (int yy = y; yy <= y + (tall ? 3 : 2); yy++) {
-                if (!passable(w.get(gx, yy, gz))) return INF;
+        int ux = Pos.x(u), uy = Pos.y(u), uz = Pos.z(u);
+        int vx = Pos.x(v), vy = Pos.y(v), vz = Pos.z(v);
+        int dy = vy - uy;
+        if (dy > 1 || dy < -maxFall) return INF;
+        double dx = vx - ux, dz = vz - uz, d = Math.hypot(dx, dz);
+        if (d > JUMP_RANGE + 1e-9) return INF;
+        if (!isNode(u) || !isNode(v)) return INF;
+        int top = Math.max(uy, vy) + 2;
+        // walk the straight line between the centers: the arc needs room, and there must be a real gap
+        double ux0 = ux + 0.5, uz0 = uz + 0.5, nx = dx / d, nz = dz / d, px = -nz * 0.3, pz = nx * 0.3;
+        double firstGap = -1, lastGap = -1;
+        long prevCell = Long.MIN_VALUE;
+        int steps = (int) Math.ceil(d / 0.25);
+        for (int i = 1; i < steps; i++) {
+            double t = i * 0.25, cx = ux0 + nx * t, cz = uz0 + nz * t;
+            int bx = (int) Math.floor(cx), bz = (int) Math.floor(cz);
+            boolean ends = (bx == ux && bz == uz) || (bx == vx && bz == vz);
+            boolean gap = !floor(w.get(bx, uy - 1, bz));
+            if (gap && !ends) {
+                if (firstGap < 0) firstGap = t;
+                lastGap = t;
+            }
+            long cell = Pos.pack(bx, 0, bz);
+            if (!ends && cell != prevCell) {
+                int low = gap ? Math.min(uy, vy) : uy;
+                for (int y = low; y <= top; y++) {
+                    if (!passable(w.get(bx, y, bz))) return INF;
+                }
+            }
+            prevCell = cell;
+            for (int side = -1; side <= 1; side += 2) {
+                int sx = (int) Math.floor(cx + px * side), sz = (int) Math.floor(cz + pz * side);
+                if ((sx == ux && sz == uz) || (sx == vx && sz == vz)) continue;
+                for (int y = uy; y <= top - 1; y++) {
+                    if (!passable(w.get(sx, y, sz))) return INF;
+                }
             }
         }
-        // landing
-        if (!isNode(v)) return INF;
-        int vx = Pos.x(v), vy = Pos.y(v), vz = Pos.z(v);
-        if (!passable(w.get(vx, Math.max(vy, y) + 2, vz))) return INF;
-        return flat * j.span() + Costs.JUMP_PENALTY + (j.gap() >= 3 ? Costs.JUMP_PENALTY : 0);
+        if (firstGap < 0) return INF; // nothing to jump over: walking edges cover it
+        double gapLen = lastGap - firstGap + 0.25;
+        if (gapLen > maxFlight(dy) + 2 * PLAYER_HALF_WIDTH) return INF;
+        // the landing counts anywhere inside v, so the center travels at least d - 0.71
+        return Reach.minTicks(d - 0.71) + Costs.JUMP_PENALTY;
+    }
+
+    /** Generous bound on horizontal flight distance for a jump landing {@code dy} higher. */
+    private static double maxFlight(int dy) {
+        double y = 0, vy = 0.42;
+        int t = 0;
+        boolean falling = false;
+        while (t < 200) {
+            y += vy;
+            vy = (vy - 0.08) * 0.98;
+            t++;
+            if (vy < 0) falling = true;
+            if (falling && y <= dy) break;
+        }
+        return 0.65 + MAX_AIR_SPEED * t;
+    }
+
+    @Override
+    public double evaluate(long u, long v) {
+        double opt = optimisticCost(u, v);
+        if (opt == INF || !isJump(u, v)) return opt;
+        Edge e = new Edge(u, v);
+        Double ticks = jumpTicks.get(e);
+        if (ticks == null) {
+            ticks = JumpEvaluator.ticks(w, u, v, sprint);
+            jumpTicks.put(e, ticks);
+        }
+        return Math.max(opt, ticks + Costs.JUMP_PENALTY);
+    }
+
+    @Override
+    public void invalidate() {
+        nearGap.clear();
+        jumpTicks.clear();
+    }
+
+    /** Some block within jump range around u's floor level is not floor, so jumps from u could matter. */
+    private boolean nearGap(long u) {
+        Boolean cached = nearGap.get(u);
+        if (cached != null) return cached;
+        int x = Pos.x(u), y = Pos.y(u) - 1, z = Pos.z(u);
+        boolean found = false;
+        for (int[] o : JUMP_OFFSETS) {
+            if (!floor(w.get(x + o[0], y, z + o[1]))) {
+                found = true;
+                break;
+            }
+        }
+        nearGap.put(u, found);
+        return found;
+    }
+
+    private static int[][] jumpOffsets() {
+        java.util.List<int[]> out = new java.util.ArrayList<>();
+        for (int dx = -JUMP_RANGE; dx <= JUMP_RANGE; dx++) {
+            for (int dz = -JUMP_RANGE; dz <= JUMP_RANGE; dz++) {
+                if (Math.max(Math.abs(dx), Math.abs(dz)) >= 2 && dx * dx + dz * dz <= JUMP_RANGE * JUMP_RANGE) {
+                    out.add(new int[]{dx, dz});
+                }
+            }
+        }
+        // nearest first, so nearGap() usually stops early
+        out.sort(java.util.Comparator.comparingInt(o -> o[0] * o[0] + o[1] * o[1]));
+        return out.toArray(new int[0][]);
     }
 
     @Override
@@ -147,9 +239,9 @@ public final class MoveGraph implements Graph {
         for (int[] d : DIRS) {
             for (int dy = -maxFall; dy <= 1; dy++) out.accept(Pos.offset(u, d[0], dy, d[1]));
         }
-        if (!parkour) return;
-        for (int[] d : CARDINALS) {
-            for (Jump j : JUMPS) out.accept(Pos.offset(u, d[0] * j.span(), j.dy(), d[1] * j.span()));
+        if (!parkour || !nearGap(u)) return;
+        for (int[] o : JUMP_OFFSETS) {
+            for (int dy = -maxFall; dy <= 1; dy++) out.accept(Pos.offset(u, o[0], dy, o[1]));
         }
     }
 
@@ -159,8 +251,11 @@ public final class MoveGraph implements Graph {
             for (int dy = -1; dy <= maxFall; dy++) out.accept(Pos.offset(v, d[0], dy, d[1]));
         }
         if (!parkour) return;
-        for (int[] d : CARDINALS) {
-            for (Jump j : JUMPS) out.accept(Pos.offset(v, -d[0] * j.span(), -j.dy(), -d[1] * j.span()));
+        for (int[] o : JUMP_OFFSETS) {
+            for (int dy = -1; dy <= maxFall; dy++) {
+                long u = Pos.offset(v, -o[0], dy, -o[1]);
+                if (nearGap(u)) out.accept(u);
+            }
         }
     }
 
@@ -172,7 +267,7 @@ public final class MoveGraph implements Graph {
 
     @Override
     public int horizontalReach() {
-        return parkour ? 6 : 1;
+        return parkour ? JUMP_RANGE + 1 : 1;
     }
 
     @Override

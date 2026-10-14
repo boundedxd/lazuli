@@ -77,6 +77,7 @@ public final class LazyDStarLite {
 
     /** Blocks inside the box changed: un-evaluate and repair every vertex whose edges may depend on them. */
     public void regionChanged(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+        graph.invalidate();
         int hr = graph.horizontalReach() + 1;
         int vr = graph.verticalReach() + 1;
         int x0 = minX - hr, x1 = maxX + hr, y0 = minY - vr, y1 = maxY + vr, z0 = minZ - hr, z1 = maxZ + hr;

@@ -6,4 +6,11 @@ dependencies {
 	testImplementation 'org.junit.jupiter:junit-jupiter'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
-test { useJUnitPlatform() }
+test { useJUnitPlatform { excludeTags 'benchmark' } }
+
+// slow closed-loop benchmarks (bedrock maps etc.): ./gradlew :core:benchmark
+tasks.register('benchmark', Test) {
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform { includeTags 'benchmark' }
+}
