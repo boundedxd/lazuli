@@ -17,6 +17,7 @@ import java.util.List;
 /** Runs once per client tick: follows the planner's latest path. */
 public final class PathExecutor {
     private static final long NONE = Long.MIN_VALUE + 1;
+    private static final int OFF_PATH_TICKS = 10;
 
     private final PathingSession session;
     private final Settings settings;
@@ -26,6 +27,9 @@ public final class PathExecutor {
     private boolean driving;
     private long lastBlock = NONE;
     private Controls lastControls;
+    private int lastIdx = -1;
+    private long lastVersion = -1;
+    private int offPathTicks;
 
     public PathExecutor(PathingSession session, Settings settings, dev.lazuli.core.world.BlockView world) {
         this.follower = new PathFollower(world);
@@ -53,13 +57,25 @@ public final class PathExecutor {
 
         BlockPos bp = player.blockPosition();
         long block = Pos.pack(bp.getX(), bp.getY(), bp.getZ());
-        if (player.onGround() && block != lastBlock) {
+        List<Long> path = snap.path();
+        int idx = indexOf(path, bp);
+        if (idx >= 0) {
+            lastIdx = idx;
+            lastVersion = snap.version();
+            offPathTicks = 0;
+        } else if (player.onGround()) {
+            offPathTicks++;
+        }
+        // Run-up blocks of a gap jump aren't path nodes: only re-plan from a path node, or once we've
+        // clearly left the path (knocked off, fell).
+        if (player.onGround() && block != lastBlock && (idx >= 0 || offPathTicks > OFF_PATH_TICKS)) {
             lastBlock = block;
             session.playerMoved(block);
         }
+        if (idx < 0 && lastVersion == snap.version() && lastIdx < path.size() - 1) {
+            idx = lastIdx;
+        }
 
-        List<Long> path = snap.path();
-        int idx = indexOf(path, bp);
         Controls c;
         if (idx >= 0) {
             boolean sprint = settings.allowSprint.get() && player.getFoodData().getFoodLevel() > 6;
@@ -96,6 +112,8 @@ public final class PathExecutor {
         }
         driving = false;
         lastControls = null;
+        lastIdx = -1;
+        offPathTicks = 0;
         rotation.reset();
     }
 

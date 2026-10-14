@@ -49,9 +49,26 @@ public final class PathFollower {
         boolean sprint = forward && allowSprint && err < 15f;
         boolean hop = sprint && j > 1 && dist >= HOP_MIN_DISTANCE;
         double nextDist = Math.hypot(Pos.x(next) + 0.5 - p.x(), Pos.z(next) + 0.5 - p.z());
+        int span = Math.max(Math.abs(Pos.x(next) - Pos.x(cur)), Math.abs(Pos.z(next) - Pos.z(cur)));
+        boolean gapJump = span >= 2;
+        boolean takeoff = gapJump && pastEdge(p, next, Pos.y(cur));
         boolean jump = p.onGround() && forward
-            && ((Pos.y(next) > Pos.y(cur) && nextDist < 1.3) || p.horizontalCollision() || hop);
+            && ((!gapJump && Pos.y(next) > Pos.y(cur) && nextDist < 1.3) || takeoff
+                || (!gapJump && p.horizontalCollision()) || hop);
         return new Controls(forward, jump, sprint, targetYaw, LOOK_PITCH);
+    }
+
+    /**
+     * True once the player's center has crossed the take-off edge toward {@code landing}: the hitbox still
+     * overhangs the block (it is 0.6 wide), so this is the latest tick to jump and gives the longest jump.
+     */
+    private boolean pastEdge(PlayerState p, long landing, int y) {
+        if (world == null) return false;
+        double dx = Pos.x(landing) + 0.5 - p.x(), dz = Pos.z(landing) + 0.5 - p.z();
+        double len = Math.hypot(dx, dz);
+        if (len < 1e-6) return false;
+        int bx = (int) Math.floor(p.x() + dx / len * 0.1), bz = (int) Math.floor(p.z() + dz / len * 0.1);
+        return !MoveGraph.floor(world.get(bx, y - 1, bz));
     }
 
     /** Index of the farthest path node on a clear flat straight line from the player; 1 if none beyond the next. */

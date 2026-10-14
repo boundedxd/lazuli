@@ -67,7 +67,8 @@ public final class PathingSession {
             this.goal = goal;
             this.fallback = fallback;
             this.player = playerPos;
-            this.graph = new MoveGraph(world, settings.maxFallHeight.get(), settings.allowSprint.get(), settings.heuristicWeight.get());
+            this.graph = new MoveGraph(world, settings.maxFallHeight.get(), settings.allowSprint.get(),
+                settings.heuristicWeight.get(), settings.allowParkour.get());
             createPlanner();
             messages.accept("Pathing to " + goal.describe());
             replan();
