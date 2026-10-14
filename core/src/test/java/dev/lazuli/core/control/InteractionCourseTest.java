@@ -154,6 +154,15 @@ class InteractionCourseTest {
     }
 
     @Test
+    void towersToAGoalInTheAir() {
+        for (int[] g : new int[][]{{0, 2, 0}, {0, 3, 0}, {3, 2, 1}, {4, 3, 0}}) {
+            GridWorld w = GridWorld.flatFloor(-5, -5, 10, 5);
+            Run r = drive(w, BOTH, 0, 1, 0, g[0], g[1], g[2], 600);
+            assertTrue(r.arrived(), java.util.Arrays.toString(g) + " " + r.log());
+        }
+    }
+
+    @Test
     void minesDownAShaft() {
         GridWorld w = GridWorld.flatFloor(-5, -5, 5, 5).fill(-5, -8, -5, 5, -1, 5, BlockKind.SOLID);
         Run r = drive(w, BREAK, 0, 1, 0, 0, -4, 0, 600);

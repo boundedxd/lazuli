@@ -16,6 +16,9 @@ import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.EmptyBlockGetter;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.Locale;
@@ -39,7 +42,7 @@ public final class Tools {
         boolean creative = p.getAbilities().instabuild;
         int throwaways = 0;
         Set<String> names = throwawayNames(settings);
-        for (ItemStack s : hotbar) if (isThrowaway(s, names)) throwaways += s.getCount();
+        for (ItemStack s : hotbar) if (throwawayRank(s, names) > 0) throwaways += s.getCount();
         Map<Short, Double> cache = new ConcurrentHashMap<>();
         Interaction.BreakTime time = phys -> cache.computeIfAbsent(phys.id, id -> {
             if (creative) return phys.hardness < 0 ? INF : 1.0;
@@ -85,19 +88,39 @@ public final class Tools {
         return best;
     }
 
-    /** Hotbar slot holding a throwaway block (the selected one if it does), or -1. */
+    /**
+     * Hotbar slot to place from, or -1: a listed throwaway block (the selected one if it is), else any plain full
+     * block nobody would miss.
+     */
     public static int throwaway(Player p, Settings settings) {
         Set<String> names = throwawayNames(settings);
         int sel = p.getInventory().getSelectedSlot();
-        if (isThrowaway(p.getInventory().getItem(sel), names)) return sel;
-        for (int i = 0; i < 9; i++) if (isThrowaway(p.getInventory().getItem(i), names)) return i;
-        return -1;
+        int best = -1, bestRank = 0;
+        for (int i = 0; i < 9; i++) {
+            int r = throwawayRank(p.getInventory().getItem(i), names) * 2 + (i == sel ? 1 : 0);
+            if (r > 1 && r > bestRank) {
+                bestRank = r;
+                best = i;
+            }
+        }
+        return best;
     }
 
-    private static boolean isThrowaway(ItemStack s, Set<String> names) {
-        if (s.isEmpty() || !(s.getItem() instanceof BlockItem)) return false;
+    /** Values that would hurt to place, bounce, burn, fall or open a menu. */
+    private static final Set<String> NOT_THROWAWAY = Set.of("tnt", "slime_block", "honey_block", "magma_block",
+        "soul_sand", "ancient_debris", "diamond_block", "emerald_block", "gold_block", "iron_block", "netherite_block",
+        "lapis_block", "redstone_block", "copper_block", "raw_iron_block", "raw_gold_block", "raw_copper_block",
+        "amethyst_block", "budding_amethyst", "spawner", "beacon", "crafting_table", "dragon_egg");
+
+    /** 2 for a listed throwaway, 1 for any other plain full block, 0 for anything else. */
+    private static int throwawayRank(ItemStack s, Set<String> names) {
+        if (s.isEmpty() || !(s.getItem() instanceof BlockItem bi)) return 0;
         var id = BuiltInRegistries.ITEM.getKey(s.getItem());
-        return names.contains(id.toString()) || names.contains(id.getPath());
+        if (names.contains(id.toString()) || names.contains(id.getPath())) return 2;
+        Block b = bi.getBlock();
+        String path = id.getPath();
+        if (b instanceof EntityBlock || b instanceof FallingBlock || path.contains("ore") || NOT_THROWAWAY.contains(path)) return 0;
+        return b.defaultBlockState().isCollisionShapeFullBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO) ? 1 : 0;
     }
 
     private static Set<String> throwawayNames(Settings settings) {

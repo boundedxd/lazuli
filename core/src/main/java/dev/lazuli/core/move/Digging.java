@@ -43,13 +43,42 @@ public final class Digging {
         return in.canPlace();
     }
 
-    /** What standing at u takes. */
+    private final java.util.HashMap<Long, Kind> kinds = new java.util.HashMap<>();
+
+    /** Forgets cached kinds after the world changed. */
+    public void invalidate() {
+        kinds.clear();
+    }
+
+    /** What standing at u takes (cached: the search asks about each cell dozens of times). */
     public Kind kind(int x, int y, int z) {
+        long key = Pos.pack(x, y, z);
+        Kind k = kinds.get(key);
+        if (k == null) {
+            k = computeKind(x, y, z);
+            kinds.put(key, k);
+        }
+        return k;
+    }
+
+    private Kind computeKind(int x, int y, int z) {
         if (Standing.standable(w, x, y, z)) return Kind.REAL;
         if (!enabled()) return Kind.NONE;
         if (clearCost(x, y + 1, z, false) == INF || clearCost(x, y, z, true) == INF) return Kind.NONE;
         if (fullFloor(x, y - 1, z)) return in.allowBreak() ? Kind.DIG : Kind.NONE;
         return placeable(x, y - 1, z) ? Kind.VIRTUAL : Kind.NONE;
+    }
+
+    /**
+     * Least any path must pay to end up standing at a node of this kind: its body's solid cells broken, and for a
+     * placed floor at least a pillar's placement. Standing nodes cost nothing to enter beyond moving.
+     */
+    public double entryCost(int x, int y, int z) {
+        return switch (kind(x, y, z)) {
+            case NONE, REAL -> 0;
+            case DIG -> clearCost(x, y, z, true) + clearCost(x, y + 1, z, true);
+            case VIRTUAL -> PILLAR + clearCost(x, y, z, true) + clearCost(x, y + 1, z, true);
+        };
     }
 
     /** Whether edges that break or place can start or end here: a full-block floor (or one to be placed). */

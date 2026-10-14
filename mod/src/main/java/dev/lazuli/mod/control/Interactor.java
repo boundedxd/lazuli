@@ -27,6 +27,8 @@ import java.util.function.Consumer;
 public final class Interactor {
     private static final long NONE = Long.MIN_VALUE;
     private static final double CENTER = 0.15;
+    /** Horizontal speed (blocks/tick) below which a pillar jump stays over its block. */
+    private static final double STILL_SPEED = 0.02;
     private static final int PLACE_COOLDOWN = 4;
     private static final int PILLAR_TIMEOUT = 40;
 
@@ -88,6 +90,9 @@ public final class Interactor {
         }
         if (!a.place()) return mine(p, a.pos());
         if (vertical) {
+            // a jump keeps its run-in speed (air drag only takes 9% a tick), so stop first or it lands beside the pillar
+            Vec3 dv = p.getDeltaMovement();
+            if (Math.hypot(dv.x, dv.z) > STILL_SPEED) return still(p, null);
             if (selectThrowaway(p) < 0) return outOfBlocks(p);
             pillar = a.pos();
             pillarTicks = 0;

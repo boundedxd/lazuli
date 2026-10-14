@@ -35,6 +35,7 @@ class MoveGraphTest {
         MoveGraph g = new MoveGraph(w, 3, true);
         assertEquals(Costs.SPRINT_ONE + Costs.JUMP_PENALTY, g.optimisticCost(O, Pos.pack(1, 2, 0)), 1e-9);
         w.set(0, 3, 0, BlockKind.SOLID);
+        g.invalidate(); // as the session does on every block change
         assertEquals(INF, g.optimisticCost(O, Pos.pack(1, 2, 0)));
     }
 

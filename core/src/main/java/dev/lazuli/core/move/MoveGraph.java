@@ -39,6 +39,7 @@ public final class MoveGraph implements Graph {
     private final java.util.Map<Long, Boolean> nearGap = new java.util.HashMap<>();
     private final java.util.Map<Edge, Double> jumpTicks = new java.util.HashMap<>();
     private final java.util.Map<Long, Double> feetCache = new java.util.HashMap<>();
+    private final java.util.Map<Edge, Double> costCache = new java.util.HashMap<>();
 
     private record Edge(long u, long v) {}
 
@@ -127,6 +128,16 @@ public final class MoveGraph implements Graph {
 
     @Override
     public double optimisticCost(long u, long v) {
+        // repairs re-price the same edges many times over; the world can't change without invalidate()
+        Edge e = new Edge(u, v);
+        Double cached = costCache.get(e);
+        if (cached != null) return cached;
+        double c = computeOptimistic(u, v);
+        costCache.put(e, c);
+        return c;
+    }
+
+    private double computeOptimistic(long u, long v) {
         double c = baseCost(u, v);
         return c < INF || !dig.enabled() ? c : Math.min(c, dig.cost(u, v, flat, maxFall));
     }
@@ -292,6 +303,8 @@ public final class MoveGraph implements Graph {
         nearGap.clear();
         jumpTicks.clear();
         feetCache.clear();
+        costCache.clear();
+        dig.invalidate();
     }
 
     /** Some block within jump range around u's floor level is not floor, so jumps from u could matter. */
@@ -343,11 +356,16 @@ public final class MoveGraph implements Graph {
     @Override
     public void successors(long u, LongConsumer out) {
         for (int[] d : DIRS) {
-            for (int dy = -maxFall - 1; dy <= 2; dy++) out.accept(Pos.offset(u, d[0], dy, d[1]));
+            for (int dy = -maxFall - 1; dy <= 2; dy++) {
+                long v = Pos.offset(u, d[0], dy, d[1]);
+                if (isNode(v)) out.accept(v); // most of the column is solid ground or open air: no edge to price
+            }
         }
         if (dig.enabled()) {
-            out.accept(Pos.offset(u, 0, 1, 0));
-            out.accept(Pos.offset(u, 0, -1, 0));
+            for (int dy = -1; dy <= 1; dy += 2) {
+                long v = Pos.offset(u, 0, dy, 0);
+                if (isNode(v)) out.accept(v);
+            }
         }
         if (!parkour || Double.isNaN(feet(u)) || !nearGap(u)) return;
         for (int[] o : JUMP_OFFSETS) {
@@ -361,17 +379,22 @@ public final class MoveGraph implements Graph {
     @Override
     public void predecessors(long v, LongConsumer out) {
         for (int[] d : DIRS) {
-            for (int dy = -2; dy <= maxFall + 1; dy++) out.accept(Pos.offset(v, d[0], dy, d[1]));
+            for (int dy = -2; dy <= maxFall + 1; dy++) {
+                long u = Pos.offset(v, d[0], dy, d[1]);
+                if (isNode(u)) out.accept(u);
+            }
         }
         if (dig.enabled()) {
-            out.accept(Pos.offset(v, 0, 1, 0));
-            out.accept(Pos.offset(v, 0, -1, 0));
+            for (int dy = -1; dy <= 1; dy += 2) {
+                long u = Pos.offset(v, 0, dy, 0);
+                if (isNode(u)) out.accept(u);
+            }
         }
         if (!parkour || Double.isNaN(feet(v))) return; // only real footing takes off or lands a jump
         for (int[] o : JUMP_OFFSETS) {
             for (int dy = -1; dy <= maxFall; dy++) {
                 long u = Pos.offset(v, -o[0], dy, -o[1]);
-                if (nearGap(u)) out.accept(u);
+                if (!Double.isNaN(feet(u)) && nearGap(u)) out.accept(u);
             }
         }
     }
@@ -379,7 +402,11 @@ public final class MoveGraph implements Graph {
     @Override
     public double heuristic(long a, long b) {
         int dx = Math.abs(Pos.x(a) - Pos.x(b)), dz = Math.abs(Pos.z(a) - Pos.z(b));
-        return heuristicWeight * flat * (Math.max(dx, dz) + (Costs.SQRT2 - 1) * Math.min(dx, dz));
+        double h = heuristicWeight * flat * (Math.max(dx, dz) + (Costs.SQRT2 - 1) * Math.min(dx, dz));
+        // Searching backward, a node inside the ground or in mid-air is as cheap to leave as the surface; what makes
+        // it expensive is getting into it. Counting that here keeps the search from flooding them around the player.
+        if (dig.enabled() && a != b) h += dig.entryCost(Pos.x(b), Pos.y(b), Pos.z(b));
+        return h;
     }
 
     @Override

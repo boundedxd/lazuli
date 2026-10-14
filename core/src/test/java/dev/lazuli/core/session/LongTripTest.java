@@ -52,4 +52,29 @@ class LongTripTest {
         assertEquals(PathingSession.State.PATHING, s.snapshot().state(), msgs.toString());
         assertTrue(ms < 3000, "took " + ms + " ms");
     }
+
+    /**
+     * A goal in mid-air with a fast pickaxe: searching backward, blocks inside the ground and in the air used to look
+     * as cheap as the surface, and with an inflated heuristic one corrected jump cost re-expanded them for a second.
+     */
+    @Test
+    void airGoalWithFastToolsPlansQuickly() {
+        GridWorld w = new GridWorld(BlockKind.AIR);
+        for (int x = -60; x <= 100; x++) for (int z = -60; z <= 60; z++) {
+            int h = hill(x, z);
+            w.fill(x, 0, z, x, h, z, BlockKind.SOLID);
+            if ((x * 31 + z * 17) % 53 == 0) w.fill(x, h + 1, z, x, h + 5, z, BlockKind.SOLID);
+        }
+        Interaction pickaxe = new Interaction(true, true, 64, p -> 4);
+        for (int up = 1; up <= 3; up += 2) {
+            List<String> msgs = new ArrayList<>();
+            PathingSession s = new PathingSession(w, () -> -64, () -> 319, new Settings(), Runnable::run, msgs::add, () -> pickaxe);
+            long t0 = System.nanoTime();
+            s.start(new GoalBlock(20, hill(20, 5) + 1 + up, 5), false, Pos.pack(1, hill(1, 0) + 1, 0));
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            System.out.println("AIRGOAL +" + up + " " + ms + " ms, msgs=" + msgs);
+            assertEquals(PathingSession.State.PATHING, s.snapshot().state(), msgs.toString());
+            assertTrue(ms < 400, "took " + ms + " ms");
+        }
+    }
 }
