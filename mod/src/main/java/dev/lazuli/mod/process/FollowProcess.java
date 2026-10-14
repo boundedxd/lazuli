@@ -26,9 +26,13 @@ public final class FollowProcess implements Process {
     public enum Mode { PLAYERS, ENTITIES, PLAYER, ENTITY }
 
     /** Ticks between re-plans while the target keeps moving. */
-    private static final int REPLAN_TICKS = 10;
-    /** How far (blocks) the target must move from where the trip was aimed before it's re-aimed. */
-    private static final double MOVED = 2.5;
+    private static final int REPLAN_TICKS = 4;
+    /** How far (blocks) the aim point must move from where the trip was aimed before it's re-aimed. */
+    private static final double MOVED = 1.5;
+    /** It aims where the target will be this many ticks on, at its current speed: chasing, not trailing. */
+    private static final int LEAD_TICKS = 10;
+    /** Slower than this (blocks a tick) the target counts as standing still: close enough is then close enough. */
+    private static final double STILL = 0.03;
     private static final double SEARCH = 128;
 
     private final Settings settings;
@@ -108,6 +112,7 @@ public final class FollowProcess implements Process {
     public void tick(Minecraft mc) {
         if (!active) return;
         LocalPlayer player = mc.player;
+        Trip.track(player);
         if (target == null || target.isRemoved() || target.level() != player.level() || !matches(target, player)
             || target.distanceTo(player) > SEARCH) {
             target = nearest(mc, player);
@@ -122,19 +127,27 @@ public final class FollowProcess implements Process {
         if (waiting) chat.accept(Chat.ok("Following {}", target.getName().getString()));
         waiting = false;
         int radius = settings.followRadius.get();
-        if (player.distanceTo(target) <= radius) {
-            trip.cancel(); // close enough: wait here
+        net.minecraft.world.phys.Vec3 tv = target.getDeltaMovement();
+        // entities' client-side motion is often zero (interpolated): use how far it moved since last tick instead
+        double mx = target.getX() - target.xo, mz = target.getZ() - target.zo;
+        if (Math.abs(mx) + Math.abs(mz) < 1e-4) {
+            mx = tv.x;
+            mz = tv.z;
+        }
+        boolean still = Math.hypot(mx, mz) < STILL;
+        if (still && player.distanceTo(target) <= radius) {
+            trip.cancel(); // close enough and it's not going anywhere: wait here
             aimedAt = null;
             return;
         }
-        BlockPos tp = target.blockPosition();
+        BlockPos tp = BlockPos.containing(target.getX() + mx * LEAD_TICKS, target.getY(), target.getZ() + mz * LEAD_TICKS);
         if (trip.ended() == PathingSession.State.FAILED) {
             trip.clear();
             retryAt = player.tickCount + 40; // can't get there right now (flying, across water...): try again soon
         }
         if (player.tickCount < retryAt) return;
         boolean moved = aimedAt == null || aimedAt.distSqr(tp) > MOVED * MOVED;
-        if (!trip.running() || moved && trip.age(player) >= REPLAN_TICKS) {
+        if (!trip.running() || trip.ended() == PathingSession.State.ARRIVED || moved && trip.age(player) >= REPLAN_TICKS) {
             aimedAt = tp;
             trip.go(new GoalNear(tp.getX(), tp.getY(), tp.getZ(), Math.max(1, radius - 1)), player);
         }

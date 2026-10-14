@@ -13,6 +13,8 @@ final class Trip {
     /** Snapshot version when the trip was asked for; -1 for none. */
     private long start = -1;
     private int startedTick;
+    /** Where the player last stood: mid-jump, the block they're in is air, and no trip can start from air. */
+    private static BlockPos lastGround;
 
     Trip(PathingSession session) {
         this.session = session;
@@ -21,8 +23,22 @@ final class Trip {
     void go(Goal goal, LocalPlayer player) {
         start = session.snapshot().version();
         startedTick = player.tickCount;
-        BlockPos f = player.blockPosition();
+        BlockPos f = start(player);
         session.start(goal, false, pack(f.getX(), f.getY(), f.getZ()), true);
+    }
+
+    /** The block to start from: under the player, or where they last stood while in the air. */
+    static BlockPos start(LocalPlayer player) {
+        if (player.onGround() || player.isInWater() || player.onClimbable() || lastGround == null
+            || lastGround.distSqr(player.blockPosition()) > 16) {
+            lastGround = player.blockPosition();
+        }
+        return lastGround;
+    }
+
+    /** Each tick: remembers where the player stands. */
+    static void track(LocalPlayer player) {
+        if (player.onGround()) lastGround = player.blockPosition();
     }
 
     /** Asked for and not finished (the session may not have picked it up yet). */
