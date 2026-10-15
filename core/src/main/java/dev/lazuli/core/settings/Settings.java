@@ -98,6 +98,8 @@ public final class Settings {
     public final Setting<Boolean> getItemMine = bool("getItemMine", true);
     /** Remember what's in each chest, barrel and shulker box opened ({@code #find}). */
     public final Setting<Boolean> chestMemory = bool("chestMemory", true);
+    /** #deposit without a container puts each item into a remembered chest that already holds it (else the nearest). */
+    public final Setting<Boolean> depositSorted = bool("depositSorted", true);
     /** #getitem takes what it needs from remembered chests within {@link #chestRange} before mining or crafting it. */
     public final Setting<Boolean> getItemChests = bool("getItemChests", true);
     public final Setting<Integer> chestRange = integer("chestRange", 128, 8, 2048);

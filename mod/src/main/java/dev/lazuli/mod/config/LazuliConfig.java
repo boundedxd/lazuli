@@ -159,6 +159,7 @@ public final class LazuliConfig implements WalksyLibApi {
                         .range(8, 2048, 8)
                         .description(OptionDescription.ofText(() -> "How far #getitem walks to a remembered chest, in blocks.")).build())
                     .option(bool(s.chestMemory, "Remember what's in every chest, barrel and shulker box opened (#find)."))
+                    .option(bool(s.depositSorted, "#deposit puts each item into a remembered chest that already has it (within chest range), else the nearest."))
                     .build())
                 .group(OptionGroup.builder("Trading")
                     .option(bool(s.tradeMemory, "Remember every villager's trades when you (or Lazuli) open its trading screen."))

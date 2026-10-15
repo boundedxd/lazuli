@@ -8,6 +8,7 @@ import dev.lazuli.core.inventory.Menu;
 import dev.lazuli.core.inventory.Moves;
 import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
+import dev.lazuli.core.storage.ChestMemory;
 import dev.lazuli.mod.control.Aim;
 import dev.lazuli.mod.control.InputDriver;
 import dev.lazuli.mod.inventory.ClickDriver;
@@ -53,6 +54,14 @@ public final class ContainerProcess implements Process {
     private List<Predicate<String>> matches;
     private int[] before;
     private int phaseStart, tries;
+    /** Sorted deposits: the containers still to visit after this one, each with its items. */
+    private final java.util.ArrayDeque<Group> queue = new java.util.ArrayDeque<>();
+    private boolean anyFailed, started;
+    private java.util.function.Function<Minecraft, ChestMemory> memory;
+    private java.util.function.Function<Minecraft, String> dimension;
+
+    /** Items for one container (null: the nearest). */
+    private record Group(BlockPos at, List<ItemCount> items) {}
 
     public ContainerProcess(PathingSession session, Settings settings, ClickDriver clicks, Consumer<String> chat) {
         this.settings = settings;
@@ -71,6 +80,12 @@ public final class ContainerProcess implements Process {
         return phase != Phase.IDLE;
     }
 
+    /** Remembered chests, for sorted deposits. */
+    public void useMemory(java.util.function.Function<Minecraft, ChestMemory> memory, java.util.function.Function<Minecraft, String> dimension) {
+        this.memory = memory;
+        this.dimension = dimension;
+    }
+
     /** How the last run ended. */
     public Outcome outcome() {
         return outcome;
@@ -83,12 +98,96 @@ public final class ContainerProcess implements Process {
      */
     public void start(Minecraft mc, boolean deposit, List<ItemCount> items, BlockPos at) {
         stop(false);
+        queue.clear();
+        anyFailed = started = false;
+        if (deposit && at == null && settings.depositSorted.get() && memory != null && settings.chestMemory.get()) {
+            queue.addAll(sorted(mc, mc.player, items));
+            next(mc);
+            return;
+        }
+        run(mc, deposit, items, at);
+    }
+
+    /** The next container of a sorted deposit (skipping groups with nothing left to put in), or the end. */
+    private void next(Minecraft mc) {
+        while (!queue.isEmpty()) {
+            Group g = queue.poll();
+            if (g.items().stream().anyMatch(i -> held(mc.player, i.item()) > 0)) {
+                started = true;
+                run(mc, true, g.items(), g.at());
+                return;
+            }
+        }
+        outcome = anyFailed ? Outcome.FAILED : Outcome.DONE;
+        if (!started) chat.accept(Chat.warn("Nothing of that to put away"));
+    }
+
+    /**
+     * Each item to the nearest remembered container (within chestRange) that already holds it; the rest (and "all"'s
+     * other items) to the nearest container.
+     */
+    private List<Group> sorted(Minecraft mc, LocalPlayer p, List<ItemCount> items) {
+        ChestMemory m = memory.apply(mc);
+        String dim = dimension.apply(mc);
+        BlockPos f = p.blockPosition();
+        java.util.Map<BlockPos, List<ItemCount>> to = new java.util.LinkedHashMap<>();
+        List<ItemCount> rest = new ArrayList<>();
+        for (ItemCount i : items) {
+            List<String> ids = new ArrayList<>();
+            if (i.item().equals("all")) {
+                for (int s = 0; s < 36; s++) {
+                    var st = p.getInventory().getItem(s);
+                    String id = st.isEmpty() ? null : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(st.getItem()).toString();
+                    if (id != null && !ids.contains(id)) ids.add(id);
+                }
+                rest.add(i); // whatever has no chest of its own
+            } else {
+                ids.add(Inventories.id(i.item()));
+            }
+            for (String id : ids) {
+                ChestMemory.Spot s = m == null ? null : m.nearest(id, dim, f.getX(), f.getY(), f.getZ(), settings.chestRange.get());
+                if (s != null && storageAt(mc, new BlockPos(s.x(), s.y(), s.z()))) {
+                    to.computeIfAbsent(new BlockPos(s.x(), s.y(), s.z()), k -> new ArrayList<>())
+                        .add(new ItemCount(id, i.item().equals("all") ? -1 : i.count()));
+                } else if (!i.item().equals("all")) {
+                    rest.add(i);
+                }
+            }
+        }
+        List<Group> out = new ArrayList<>();
+        to.forEach((at, list) -> out.add(new Group(at, list)));
+        if (!rest.isEmpty()) out.add(new Group(null, rest));
+        return out;
+    }
+
+    /** Still a storage block there (or not loaded, so unknown: trusted). */
+    private static boolean storageAt(Minecraft mc, BlockPos at) {
+        if (!mc.level.isLoaded(at)) return true;
+        BlockEntity be = mc.level.getBlockEntity(at);
+        return be != null && storage(be);
+    }
+
+    private static int held(LocalPlayer p, String item) {
+        Predicate<String> m = Inventories.matcher(item);
+        int n = 0;
+        for (int s = 0; s < 36; s++) {
+            var st = p.getInventory().getItem(s);
+            if (!st.isEmpty() && m.test(Inventories.key(st))) n += st.getCount();
+        }
+        return n;
+    }
+
+    private void run(Minecraft mc, boolean deposit, List<ItemCount> items, BlockPos at) {
         LocalPlayer p = mc.player;
         pos = at != null ? at : nearest(mc, p);
         outcome = Outcome.NONE;
         if (pos == null) {
             outcome = Outcome.FAILED;
             chat.accept(Chat.err("No chest, barrel, shulker box or ender chest nearby"));
+            if (!queue.isEmpty()) {
+                anyFailed = true;
+                next(mc);
+            }
             return;
         }
         this.deposit = deposit;
@@ -191,6 +290,14 @@ public final class ContainerProcess implements Process {
         trip.cancel();
         input.release();
         if (msg != null) chat.accept(msg);
+        if (how == Outcome.CANCELLED) {
+            queue.clear();
+        } else if (!queue.isEmpty()) {
+            // a sorted deposit: on to the next container
+            anyFailed |= how == Outcome.FAILED;
+            outcome = Outcome.NONE;
+            next(Minecraft.getInstance());
+        }
     }
 
     /** The nearest storage block in loaded chunks that can be opened (a chest's lid must be free), or null. */

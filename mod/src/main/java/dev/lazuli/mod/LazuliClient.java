@@ -132,6 +132,7 @@ public final class LazuliClient implements ClientModInitializer {
 		crafts = new CraftProcess(session, settings, clicks, this::chat);
 		smelts = new SmeltProcess(session, settings, clicks, crafts, this::chat);
 		getItem = new GetItemProcess(session, settings, mine, crafts, smelts, this::chat);
+		containers.useMemory(this::chests, LazuliClient::dimension);
 		getItem.useChests(containers, this::chests, LazuliClient::dimension);
 		chestWatcher = new dev.lazuli.mod.inventory.ChestWatcher(settings.chestMemory::get, this::chests, LazuliClient::dimension);
 		trades = new dev.lazuli.mod.process.TradeProcess(session, settings, clicks, mine, crafts, smelts, containers, this::tradeMemory,
