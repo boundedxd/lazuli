@@ -71,8 +71,8 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     private final Set<Long> known = new HashSet<>();
     private int lastScan;
     private static final int KEEP = 64;
-    /** Score penalty (blocks) for a target with no open side: dig to it only when nothing exposed is near. */
-    private static final double BURIED = 6;
+    /** Score penalty (blocks) for a target with no open side: about one block to dig through on the way. */
+    private static final double BURIED = 2;
     private static final int RESCAN_TICKS = 100;
     private final Set<Long> blacklist = new HashSet<>();
     private Phase phase = Phase.IDLE;
@@ -359,15 +359,23 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         pickupTicks++;
         List<ItemEntity> items = mc.level.getEntitiesOfClass(ItemEntity.class, new AABB(dropAt, dropAt).inflate(4),
             e -> e.isAlive());
-        if (items.isEmpty() && pickupTicks > 10 || pickupTicks > PICKUP_TICKS) {
+        if (items.isEmpty() && pickupTicks > 4 || pickupTicks > PICKUP_TICKS) {
             if (pickupTrip && session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
             phase = Phase.TRAVEL;
             tripStart = -1;
             return;
         }
         if (items.isEmpty()) return; // drops take a tick or two to show up
-        ItemEntity item = items.stream().min(Comparator.comparingDouble(player::distanceToSqr)).get();
-        if (player.distanceToSqr(item) < 0.25) return; // about to be picked up
+        ItemEntity item = items.stream().filter(e -> !inPickupRange(player, e))
+            .min(Comparator.comparingDouble(player::distanceToSqr)).orElse(null);
+        if (item == null) {
+            // all within the game's pickup range: they come in while standing here, so mine the next one meanwhile
+            if (reachable(mc, player) != null) {
+                phase = Phase.TRAVEL;
+                tripStart = -1;
+            }
+            return;
+        }
         PathingSession.Snapshot snap = session.snapshot();
         // close by on the same level with nothing in the way: walk straight onto it (a "near" goal counts as arrived a
         // block short of it)
@@ -400,6 +408,11 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         session.start(new GoalBlock(ip.getX(), ip.getY(), ip.getZ()), true, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
         pickupTrip = true;
         pickupTrips++;
+    }
+
+    /** The game picks up drops touching the player's box grown by 1 sideways and 0.5 up and down. */
+    private static boolean inPickupRange(LocalPlayer player, ItemEntity item) {
+        return player.getBoundingBox().inflate(1.0, 0.5, 1.0).intersects(item.getBoundingBox());
     }
 
     /** How close (horizontally) the body has to get for the game to pick a drop up: its reach is 1 block out. */
@@ -448,22 +461,39 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         return true;
     }
 
-    /** A target the eye can see within reach right now, nearest first. */
+    /**
+     * A target the eye can see within reach right now, nearest first: any of them in the world around, not just the
+     * cached best few, so the next block next to the last one is mined at once instead of after a trip.
+     */
     private BlockPos reachable(Minecraft mc, LocalPlayer player) {
         Vec3 eye = player.getEyePosition();
-        BlockPos best = null;
-        double bestD = Double.POSITIVE_INFINITY;
-        for (long p : known) {
-            if (blacklist.contains(p) || !safe(p)) continue;
-            double d = eye.distanceToSqr(Pos.x(p) + 0.5, Pos.y(p) + 0.5, Pos.z(p) + 0.5);
-            if (d > DIRECT * DIRECT || d >= bestD) continue;
+        int r = (int) Math.ceil(DIRECT);
+        BlockPos e = BlockPos.containing(eye), feet = player.blockPosition();
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        java.util.List<double[]> found = new java.util.ArrayList<>();
+        for (int dy = -r; dy <= r; dy++)
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++) {
+                    m.set(e.getX() + dx, e.getY() + dy, e.getZ() + dz);
+                    double d = eye.distanceToSqr(m.getX() + 0.5, m.getY() + 0.5, m.getZ() + 0.5);
+                    if (d > DIRECT * DIRECT || !targets.contains(mc.level.getBlockState(m).getBlock())) continue;
+                    long p = Pos.pack(m.getX(), m.getY(), m.getZ());
+                    if (blacklist.contains(p) || !safe(p)) continue;
+                    // the block underfoot only with solid ground right below it (a one-block drop, not a cave)
+                    if (m.getX() == feet.getX() && m.getZ() == feet.getZ() && m.getY() == feet.getY() - 1
+                        && world.get(m.getX(), m.getY() - 1, m.getZ()) != BlockKind.SOLID) continue;
+                    found.add(new double[]{d, p});
+                }
+        found.sort(Comparator.comparingDouble(f -> f[0]));
+        for (double[] f : found) {
+            long p = (long) f[1];
             BlockPos bp = new BlockPos(Pos.x(p), Pos.y(p), Pos.z(p));
             if (aimAt(mc, player, eye, bp) != null) {
-                best = bp;
-                bestD = d;
+                known.add(p);
+                return bp;
             }
         }
-        return best;
+        return null;
     }
 
     /** Yaw and pitch putting the crosshair on a visible part of the block within reach, or null. */

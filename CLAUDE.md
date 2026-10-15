@@ -9,7 +9,7 @@ export JAVA_HOME="/c/Program Files/Java/jdk-25.0.2"
 ./gradlew :core:test                 # full suite, ~2.5 min, must stay green
 ./gradlew :core:test --tests '*Name*' # one class
 ./gradlew :mod:build -x test
-cp mod/build/libs/lazuli-0.1.0.jar "/c/Users/colin/AppData/Roaming/PrismLauncher/instances/1.21.11(1)/minecraft/mods/"
+cp mod/build/libs/lazuli-0.1.0.jar "/c/Users/colin/AppData/Roaming/PrismLauncher/instances/1.21.11(2)/minecraft/mods/"
 ```
 ALWAYS copy the jar to the Prism mods folder after a build. Commit + push to `feat/lazuli-plan1` when a feature is done.
 Gradle prints "BUILD SUCCESSFUL" fast (warm daemon); check `core/build/test-results/test/TEST-*.xml` if unsure tests ran.

@@ -74,11 +74,7 @@ public final class PathExecutor {
             reset();
             return;
         }
-        if (settings.cancelOnUserInput.get() && input.userInterfering(mc)) {
-            session.stop();
-            reset();
-            return;
-        }
+        // moving to cancel is handled once for everything in LazuliClient
 
         BlockPos bp = player.blockPosition();
         // standing over an edge, the node is the block actually under the player, not the air beside it

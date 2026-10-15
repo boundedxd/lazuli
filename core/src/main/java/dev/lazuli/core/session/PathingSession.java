@@ -105,6 +105,13 @@ public final class PathingSession {
         return snapshot;
     }
 
+    /** A trip was asked for and its first path isn't out yet (still searching). */
+    private volatile boolean planning;
+
+    public boolean planning() {
+        return planning;
+    }
+
     public long start(Goal goal, boolean fallback, long playerPos) {
         return start(goal, fallback, playerPos, false);
     }
@@ -116,6 +123,7 @@ public final class PathingSession {
     public long start(Goal goal, boolean fallback, long playerPos, boolean quiet) {
         MoveGraph g = newGraph();
         long gen = generation.incrementAndGet();
+        planning = true;
         cancelSearch();
         worker.execute(() -> {
             if (generation.get() != gen) return; // stopped or replaced before it began
@@ -156,6 +164,7 @@ public final class PathingSession {
     /** Stops at once: the executor sees IDLE right away and any search under way is cut short. */
     public void stop(boolean quiet) {
         long gen = generation.incrementAndGet();
+        planning = false;
         cancelSearch();
         snapshot = new Snapshot(State.IDLE, List.of(), snapshot.goal(), versions.incrementAndGet(), gen);
         if (!quiet) messages.accept(Chat.warn("Stopped"));
@@ -349,5 +358,6 @@ public final class PathingSession {
     private void publish(State state, List<Long> path) {
         if (stale()) return;
         snapshot = new Snapshot(state, List.copyOf(path), goal, versions.incrementAndGet(), tripGeneration);
+        planning = false;
     }
 }

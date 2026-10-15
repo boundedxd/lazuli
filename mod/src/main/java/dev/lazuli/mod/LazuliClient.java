@@ -277,6 +277,8 @@ public final class LazuliClient implements ClientModInitializer {
 		// after the executor, which clears the mining target; nothing moves while eating
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
 			if (mc.player == null || mc.level == null) return;
+			// moving cancels everything Lazuli is doing, a path still being searched for included
+			if (settings.cancelOnUserInput.get() && mc.screen == null && busy() && userKeys.userInterfering(mc)) stopAll(true);
 			upkeep.tick(mc, busy());
 			if (Upkeep.eating()) return;
 			for (Process p : processes) p.tick(mc);
@@ -438,9 +440,20 @@ public final class LazuliClient implements ClientModInitializer {
 		for (Process p : processes) p.stop(announce);
 	}
 
+	private final dev.lazuli.mod.control.InputDriver userKeys = new dev.lazuli.mod.control.InputDriver();
+
+	/** Stops the job, every process and the trip (or the search for one). */
+	private void stopAll(boolean announce) {
+		tasks.cancel();
+		boolean any = busy();
+		stopProcesses(false);
+		if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
+		if (announce && any) chat(Chat.warn("Stopped"));
+	}
+
 	/** Pathing, or a process running. */
 	private boolean busy() {
-		if (session.snapshot().state() == PathingSession.State.PATHING) return true;
+		if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) return true;
 		for (Process p : processes) if (p.active()) return true;
 		return false;
 	}
@@ -454,11 +467,7 @@ public final class LazuliClient implements ClientModInitializer {
 		if (mc.player == null) FreeCam.off();
 		// the view (or, with free look, the server-side rotation) is Lazuli's for the whole trip, not just while keys are held
 		if (!busy()) RotationDriver.end();
-		while (LazuliConfig.STOP.consumeClick()) {
-			tasks.cancel();
-			stopProcesses(true);
-			if (session.snapshot().state() == PathingSession.State.PATHING) session.stop();
-		}
+		while (LazuliConfig.STOP.consumeClick()) stopAll(true);
 		boolean open = openConfigNextTick;
 		openConfigNextTick = false;
 		while (LazuliConfig.OPEN_CONFIG.consumeClick()) open = mc.screen == null;
