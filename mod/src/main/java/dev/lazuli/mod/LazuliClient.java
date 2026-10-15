@@ -1,6 +1,11 @@
 package dev.lazuli.mod;
 
+import dev.lazuli.api.Lazuli;
 import dev.lazuli.core.command.CommandHandler;
+import dev.lazuli.core.goal.Goal;
+import dev.lazuli.core.task.Task;
+import dev.lazuli.core.task.Tasks;
+import dev.lazuli.core.world.Pos;
 import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.world.BlockView;
@@ -69,11 +74,14 @@ public final class LazuliClient implements ClientModInitializer {
 	/** "[Lazuli] " in blue. */
 	private static final String PREFIX = Chat.fmt(Chat.DARK_GRAY, "[") + "\u00a79Lazuli" + Chat.DARK_GRAY + "] " + Chat.GRAY;
 	private ClientLevel lastLevel;
+	/** The job started through the API (see {@link Lazuli}). */
+	private final Tasks tasks = new Tasks();
 
 	@Override
 	public void onInitializeClient() {
 		instance = this;
 		LazuliConfig.stopAction = () -> {
+			tasks.cancel();
 			stopProcesses(false);
 			session.stop();
 		};
@@ -190,6 +198,7 @@ public final class LazuliClient implements ClientModInitializer {
 			stopProcesses(false);
 			commands.goTo(g, true);
 		}, this::chat);
+		Lazuli.Holder.set(new Api());
 		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal, cache);
 
 		ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
@@ -224,6 +233,60 @@ public final class LazuliClient implements ClientModInitializer {
 		});
 	}
 
+	private final class Api implements Lazuli {
+		@Override
+		public Settings settings() {
+			return settings;
+		}
+
+		@Override
+		public Task goTo(Goal goal, boolean fallback) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				BlockPos f = Minecraft.getInstance().player.blockPosition();
+				return Task.trip("go to " + goal.describe(), session, session.start(goal, fallback, Pos.pack(f.getX(), f.getY(), f.getZ())));
+			});
+		}
+
+		@Override
+		public Task mine(int quantity, String... blocks) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				mine.start(Minecraft.getInstance(), quantity, java.util.List.of(blocks));
+				boolean started = mine.active();
+				return new Task("mine " + String.join(", ", blocks), () -> {
+					if (!started) return Task.Result.FAILED; // unknown block
+					if (mine.active()) return null;
+					if (mine.cancelled()) return Task.Result.CANCELLED;
+					return mine.mined() > 0 ? Task.Result.DONE : Task.Result.FAILED;
+				}, () -> mine.stop(false));
+			});
+		}
+
+		@Override
+		public Task current() {
+			return tasks.current();
+		}
+
+		@Override
+		public boolean busy() {
+			return LazuliClient.this.busy();
+		}
+
+		@Override
+		public void stop() {
+			tasks.cancel();
+			stopProcesses(false);
+			session.stop(true);
+		}
+
+		@Override
+		public void command(String line) {
+			String prefix = settings.prefix.get();
+			commands.handle(line.startsWith(prefix) ? line : prefix + line);
+		}
+	}
+
 	private void stopProcesses(boolean announce) {
 		for (Process p : processes) p.stop(announce);
 	}
@@ -236,6 +299,7 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private void onTick(Minecraft mc) {
+		tasks.tick();
 		renderer.tick(mc);
 		FreeCam.tick(mc);
 		while (LazuliConfig.FREECAM.consumeClick()) toggleFreecam(mc);
@@ -243,6 +307,7 @@ public final class LazuliClient implements ClientModInitializer {
 		// the view (or, with free look, the server-side rotation) is Lazuli's for the whole trip, not just while keys are held
 		if (!busy()) RotationDriver.end();
 		while (LazuliConfig.STOP.consumeClick()) {
+			tasks.cancel();
 			stopProcesses(true);
 			if (session.snapshot().state() == PathingSession.State.PATHING) session.stop();
 		}

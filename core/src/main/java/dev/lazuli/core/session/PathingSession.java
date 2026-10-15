@@ -30,7 +30,8 @@ import java.util.function.Supplier;
 public final class PathingSession {
     public enum State { IDLE, PATHING, ARRIVED, FAILED }
 
-    public record Snapshot(State state, List<Long> path, Goal goal, long version) {}
+    /** @param trip the {@link #start} (or stop) this snapshot belongs to */
+    public record Snapshot(State state, List<Long> path, Goal goal, long version, long trip) {}
 
     public static final long MAX_EXPANSIONS = 1_000_000;
     public static final int MAX_PATH_LENGTH = 512;
@@ -59,7 +60,7 @@ public final class PathingSession {
     private final AtomicBoolean replanQueued = new AtomicBoolean();
     private final AtomicBoolean dirtyQueued = new AtomicBoolean();
     private final java.util.concurrent.ConcurrentLinkedQueue<int[]> dirty = new java.util.concurrent.ConcurrentLinkedQueue<>();
-    private volatile Snapshot snapshot = new Snapshot(State.IDLE, List.of(), null, 0);
+    private volatile Snapshot snapshot = new Snapshot(State.IDLE, List.of(), null, 0, 0);
     /** Bumped by every start and stop (on the caller's thread): work for an older trip is dropped. */
     private final java.util.concurrent.atomic.AtomicLong generation = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong versions = new java.util.concurrent.atomic.AtomicLong();
@@ -104,12 +105,15 @@ public final class PathingSession {
         return snapshot;
     }
 
-    public void start(Goal goal, boolean fallback, long playerPos) {
-        start(goal, fallback, playerPos, false);
+    public long start(Goal goal, boolean fallback, long playerPos) {
+        return start(goal, fallback, playerPos, false);
     }
 
-    /** @param quiet no "Pathing to" / "Arrived" chat (for trips a process makes on its own, like mining) */
-    public void start(Goal goal, boolean fallback, long playerPos, boolean quiet) {
+    /**
+     * @param quiet no "Pathing to" / "Arrived" chat (for trips a process makes on its own, like mining)
+     * @return the trip's number: its snapshots carry it, and a later start or stop gets a higher one
+     */
+    public long start(Goal goal, boolean fallback, long playerPos, boolean quiet) {
         MoveGraph g = newGraph();
         long gen = generation.incrementAndGet();
         cancelSearch();
@@ -124,6 +128,7 @@ public final class PathingSession {
             if (!quiet) messages.accept(Chat.info("Pathing to {}", goal.describe()));
             begin();
         });
+        return gen;
     }
 
     /** Re-plans the current trip from scratch with fresh settings and inventory (e.g. after running out of blocks). */
@@ -152,7 +157,7 @@ public final class PathingSession {
     public void stop(boolean quiet) {
         long gen = generation.incrementAndGet();
         cancelSearch();
-        snapshot = new Snapshot(State.IDLE, List.of(), snapshot.goal(), versions.incrementAndGet());
+        snapshot = new Snapshot(State.IDLE, List.of(), snapshot.goal(), versions.incrementAndGet(), gen);
         if (!quiet) messages.accept(Chat.warn("Stopped"));
         worker.execute(() -> {
             if (generation.get() != gen) return;
@@ -334,6 +339,6 @@ public final class PathingSession {
 
     private void publish(State state, List<Long> path) {
         if (stale()) return;
-        snapshot = new Snapshot(state, List.copyOf(path), goal, versions.incrementAndGet());
+        snapshot = new Snapshot(state, List.copyOf(path), goal, versions.incrementAndGet(), tripGeneration);
     }
 }

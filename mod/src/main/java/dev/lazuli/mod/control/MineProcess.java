@@ -94,6 +94,22 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         return phase != Phase.IDLE;
     }
 
+    /** How the last run ended: true if it was stopped rather than finishing (or running out of blocks to mine). */
+    private boolean cancelled;
+
+    public boolean cancelled() {
+        return cancelled;
+    }
+
+    public int mined() {
+        return mined;
+    }
+
+    /** What the last run was asked for: 0 means every one it could find. */
+    public int quantity() {
+        return quantity;
+    }
+
     /** Starts mining the named blocks; {@code quantity} 0 means every one that can be found. */
     public void start(Minecraft mc, int quantity, List<String> names) {
         Set<Block> blocks = new LinkedHashSet<>();
@@ -112,6 +128,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             }
         }
         stop(false);
+        cancelled = false;
         targets = Set.copyOf(blocks);
         what = String.join(", ", names);
         this.quantity = quantity;
@@ -127,6 +144,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     /** Stops mining (and the trip it started). */
     public void stop(boolean announce) {
         if (phase == Phase.IDLE) return;
+        cancelled = true;
         boolean wasTravelling = phase == Phase.TRAVEL || phase == Phase.PICKUP;
         phase = Phase.IDLE;
         release();
