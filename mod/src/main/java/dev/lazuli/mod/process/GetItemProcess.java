@@ -14,11 +14,14 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -251,7 +254,10 @@ public final class GetItemProcess implements Process {
             .batching(settings.getItemBatch.get());
         if (settings.getItemNearby.get()) planner.nearby(Nearby.scan(mc, settings.antiXray.get()));
         int range = settings.stationRange.get();
-        ItemPlanner.Plan plan = planner.plan(wants, Inventories.plainCounts(p), pickTier(p),
+        // what it wants and already has counts worn or used too (armor it put on, a damaged pickaxe): never made again
+        Map<String, Integer> have = new HashMap<>(Inventories.plainCounts(p));
+        for (ItemCount w : wants) have.merge(w.item(), count(p, w.item()), Math::max);
+        ItemPlanner.Plan plan = planner.plan(wants, have, pickTier(p),
             Station.nearest(mc, p, Blocks.CRAFTING_TABLE, range) != null, Station.nearest(mc, p, Blocks.FURNACE, range) != null);
         if (tradeFor(mc, p, need, plan, planner, recipes, drops)) return;
         if (!plan.ok()) {
@@ -432,11 +438,16 @@ public final class GetItemProcess implements Process {
         return best;
     }
 
-    /** Any of {@code item} in the main inventory and hotbar, enchanted or worn too. */
+    /** Any of {@code item} in the main inventory and hotbar, enchanted or worn too, and what's worn or in the offhand. */
     private static int count(LocalPlayer p, String item) {
         int n = 0;
         for (int i = 0; i < 36; i++) {
             ItemStack s = p.getInventory().getItem(i);
+            if (!s.isEmpty() && BuiltInRegistries.ITEM.getKey(s.getItem()).toString().equals(item)) n += s.getCount();
+        }
+        for (EquipmentSlot e : EquipmentSlot.values()) {
+            if (e == EquipmentSlot.MAINHAND) continue; // that's a hotbar slot, counted above
+            ItemStack s = p.getItemBySlot(e);
             if (!s.isEmpty() && BuiltInRegistries.ITEM.getKey(s.getItem()).toString().equals(item)) n += s.getCount();
         }
         return n;
