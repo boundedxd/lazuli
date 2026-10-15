@@ -4,6 +4,7 @@ import dev.lazuli.core.chat.Chat;
 import dev.lazuli.core.goal.GoalBlock;
 import dev.lazuli.core.goal.GoalXZ;
 import dev.lazuli.core.goal.GoalYLevel;
+import dev.lazuli.core.inventory.ItemCount;
 import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.testutil.GridWorld;
@@ -49,11 +50,11 @@ class CommandTest {
             public void farm(int range) {
                 mined.add("farm " + range);
             }
-            public void container(boolean deposit, String item, int count, int[] at) {
-                mined.add((deposit ? "deposit " : "withdraw ") + item + " " + count + (at == null ? "" : " at " + at[0] + " " + at[1] + " " + at[2]));
+            public void container(boolean deposit, List<ItemCount> items, int[] at) {
+                mined.add((deposit ? "deposit " : "withdraw ") + items + (at == null ? "" : " at " + at[0] + " " + at[1] + " " + at[2]));
             }
-            public void drop(String item, int count) {
-                mined.add("drop " + item + " " + count);
+            public void drop(List<ItemCount> items) {
+                mined.add("drop " + items);
             }
             public int[] cameraFeet() { return new int[]{12, 1, 7}; }
             public void toggleFreecam() { mined.add("freecam"); }
@@ -76,9 +77,21 @@ class CommandTest {
         for (String c : new String[]{"#deposit all", "#deposit Cobblestone 32", "#withdraw iron_ingot 5 10 64 ~-2",
             "#withdraw diamond ~ ~1 ~", "#drop dirt", "#drop dirt 3"}) h.handle(c);
         h.handle("#deposit");
-        assertEquals(List.of("deposit all -1", "deposit cobblestone 32", "withdraw iron_ingot 5 at 10 64 -2",
-            "withdraw diamond -1 at 0 2 0", "drop dirt -1", "drop dirt 3"), mined);
+        assertEquals(List.of("deposit [all -1]", "deposit [cobblestone 32]", "withdraw [iron_ingot 5] at 10 64 -2",
+            "withdraw [diamond -1] at 0 2 0", "drop [dirt -1]", "drop [dirt 3]"), mined);
         assertTrue(replies.get(replies.size() - 1).startsWith("Usage: deposit"), replies.toString());
+    }
+
+    @Test
+    void itemCommandsTakeSeveralItems() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#drop chest 1 oak_log 3", "#drop dirt sand 2 gravel", "#deposit dirt 5 cobblestone 10 64 ~-2",
+            "#withdraw iron_ingot 3 Gold_Ingot 1 2 3"}) h.handle(c);
+        assertEquals(List.of("drop [chest 1, oak_log 3]", "drop [dirt -1, sand 2, gravel -1]",
+            "deposit [dirt 5, cobblestone -1] at 10 64 -2", "withdraw [iron_ingot 3, gold_ingot -1] at 1 2 3"), mined);
+        h.handle("#drop 5 dirt");
+        h.handle("#drop");
+        assertEquals(2, replies.size(), replies.toString());
     }
 
     @Test

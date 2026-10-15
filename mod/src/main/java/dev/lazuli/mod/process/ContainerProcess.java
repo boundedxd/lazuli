@@ -2,6 +2,8 @@ package dev.lazuli.mod.process;
 
 import dev.lazuli.core.chat.Chat;
 import dev.lazuli.core.goal.GoalAdjacent;
+import dev.lazuli.core.inventory.Click;
+import dev.lazuli.core.inventory.ItemCount;
 import dev.lazuli.core.inventory.Menu;
 import dev.lazuli.core.inventory.Moves;
 import dev.lazuli.core.session.PathingSession;
@@ -21,6 +23,8 @@ import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -45,9 +49,10 @@ public final class ContainerProcess implements Process {
     private BlockPos pos;
     /** Into the container (else out of it); whether this phase's one-off step (the click, the plan) is done. */
     private boolean deposit, acted;
-    private String item;
-    private Predicate<String> match;
-    private int count, phaseStart, tries, before;
+    private List<ItemCount> items;
+    private List<Predicate<String>> matches;
+    private int[] before;
+    private int phaseStart, tries;
 
     public ContainerProcess(PathingSession session, Settings settings, ClickDriver clicks, Consumer<String> chat) {
         this.settings = settings;
@@ -68,11 +73,10 @@ public final class ContainerProcess implements Process {
 
     /**
      * @param deposit into the container (else out of it)
-     * @param item    an id, or "all"
-     * @param count   how many; negative: all of them
+     * @param items   ids (or "all") and how many; a negative count: all of them
      * @param at      the container, or null for the nearest storage
      */
-    public void start(Minecraft mc, boolean deposit, String item, int count, BlockPos at) {
+    public void start(Minecraft mc, boolean deposit, List<ItemCount> items, BlockPos at) {
         stop(false);
         LocalPlayer p = mc.player;
         pos = at != null ? at : nearest(mc, p);
@@ -83,13 +87,12 @@ public final class ContainerProcess implements Process {
             return;
         }
         this.deposit = deposit;
-        this.item = item;
-        this.match = Inventories.matcher(item);
-        this.count = count;
+        this.items = List.copyOf(items);
+        this.matches = items.stream().map(i -> Inventories.matcher(i.item())).toList();
         tries = 0;
         trip.clear();
         enter(Phase.TRAVEL, p);
-        chat.accept(Chat.ok("{} {} {} {} {} {} {}", deposit ? "Putting" : "Taking", count < 0 ? "all" : count, item,
+        chat.accept(Chat.ok("{} {} {} {} {} {}", deposit ? "Putting" : "Taking", ItemCount.describe(items),
             deposit ? "into" : "from", pos.getX(), pos.getY(), pos.getZ()));
     }
 
@@ -138,19 +141,34 @@ public final class ContainerProcess implements Process {
                 var menu = p.containerMenu;
                 int[] mine = Inventories.slots(menu, p, true), theirs = Inventories.slots(menu, p, false);
                 if (!acted) {
-                    Menu m = Inventories.read(menu, p);
-                    before = m.count(mine, match);
-                    clicks.play(menu.containerId, deposit ? Moves.transfer(m, mine, theirs, match, count)
-                        : Moves.transfer(m, theirs, mine, match, count));
+                    // one plan for every item, each checked on the menu as the ones before it leave it
+                    Menu sim = Inventories.read(menu, p);
+                    before = new int[items.size()];
+                    List<Click> plan = new ArrayList<>();
+                    for (int i = 0; i < items.size(); i++) {
+                        before[i] = sim.count(mine, matches.get(i));
+                        int count = items.get(i).count();
+                        List<Click> part = deposit ? Moves.transfer(sim, mine, theirs, matches.get(i), count)
+                            : Moves.transfer(sim, theirs, mine, matches.get(i), count);
+                        sim.applyAll(part);
+                        plan.addAll(part);
+                    }
+                    clicks.play(menu.containerId, plan);
                     acted = true;
                     return;
                 }
                 if (clicks.busy() && p.tickCount - phaseStart < MOVE_TICKS) return;
-                int moved = Math.abs(Inventories.read(menu, p).count(mine, match) - before);
+                Menu now = Inventories.read(menu, p);
+                List<ItemCount> moved = new ArrayList<>();
+                boolean ok = true;
+                for (int i = 0; i < items.size(); i++) {
+                    int n = Math.abs(now.count(mine, matches.get(i)) - before[i]), count = items.get(i).count();
+                    moved.add(new ItemCount(items.get(i).item(), n));
+                    ok &= n > 0 && (count < 0 || n >= count);
+                }
                 p.closeContainer();
-                boolean ok = moved > 0 && (count < 0 || moved >= count);
-                end(ok ? Outcome.DONE : Outcome.FAILED, ok ? Chat.ok("{} {} {}", deposit ? "Put away" : "Took", moved, item)
-                    : Chat.err("Moved {} of {} {}", moved, count < 0 ? "all" : count, item));
+                end(ok ? Outcome.DONE : Outcome.FAILED, ok ? Chat.ok("{} {}", deposit ? "Put away" : "Took", ItemCount.describe(moved))
+                    : Chat.err("Moved {} (asked for {})", ItemCount.describe(moved), ItemCount.describe(items)));
             }
             default -> {}
         }

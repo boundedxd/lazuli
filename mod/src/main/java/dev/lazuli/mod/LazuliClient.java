@@ -3,6 +3,7 @@ package dev.lazuli.mod;
 import dev.lazuli.api.Lazuli;
 import dev.lazuli.core.command.CommandHandler;
 import dev.lazuli.core.goal.Goal;
+import dev.lazuli.core.inventory.ItemCount;
 import dev.lazuli.core.inventory.Moves;
 import dev.lazuli.core.task.Task;
 import dev.lazuli.mod.inventory.ClickDriver;
@@ -182,14 +183,14 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
-			public void container(boolean deposit, String item, int count, int[] at) {
+			public void container(boolean deposit, java.util.List<ItemCount> items, int[] at) {
 				LazuliClient.this.stopProcesses(false);
-				containers.start(Minecraft.getInstance(), deposit, item, count, at == null ? null : new BlockPos(at[0], at[1], at[2]));
+				containers.start(Minecraft.getInstance(), deposit, items, at == null ? null : new BlockPos(at[0], at[1], at[2]));
 			}
 
 			@Override
-			public void drop(String item, int count) {
-				LazuliClient.this.drop(item, count);
+			public void drop(java.util.List<ItemCount> items) {
+				LazuliClient.this.drop(items);
 			}
 
 			@Override
@@ -282,11 +283,12 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 
 		@Override
-		public Task container(boolean deposit, String item, int count, int[] at) {
+		public Task container(boolean deposit, java.util.List<ItemCount> items, int[] at) {
 			return tasks.run(() -> {
 				stopProcesses(false);
-				containers.start(Minecraft.getInstance(), deposit, item, count, at == null ? null : new BlockPos(at[0], at[1], at[2]));
-				return new Task((deposit ? "deposit " : "withdraw ") + item, () -> switch (containers.outcome()) {
+				containers.start(Minecraft.getInstance(), deposit, items, at == null ? null : new BlockPos(at[0], at[1], at[2]));
+				String names = String.join(", ", items.stream().map(ItemCount::item).toList());
+				return new Task((deposit ? "deposit " : "withdraw ") + names, () -> switch (containers.outcome()) {
 					case NONE -> null;
 					case DONE -> Task.Result.DONE;
 					case FAILED -> Task.Result.FAILED;
@@ -296,8 +298,8 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 
 		@Override
-		public void drop(String item, int count) {
-			LazuliClient.this.drop(item, count);
+		public void drop(java.util.List<ItemCount> items) {
+			LazuliClient.this.drop(items);
 		}
 
 		@Override
@@ -324,25 +326,29 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 	}
 
-	/** Throws out {@code count} of {@code item} ("all": anything) from the main inventory and hotbar; negative: all of it. */
-	private void drop(String item, int count) {
+	/** Throws out items ("all": anything) from the main inventory and hotbar; a negative count: all of it. */
+	private void drop(java.util.List<ItemCount> items) {
 		var p = Minecraft.getInstance().player;
 		if (p == null) return;
 		if (p.containerMenu != p.inventoryMenu) {
 			chat(Chat.err("Close the open menu first"));
 			return;
 		}
-		var match = Inventories.matcher(item);
-		var menu = Inventories.read(p.inventoryMenu, p);
-		var plan = Moves.drop(menu, Inventories.PLAYER_MAIN, match, count);
-		if (plan.isEmpty()) {
-			chat(Chat.err("No {} to drop", item));
-			return;
+		// each item is planned on the menu as the ones before it leave it
+		var sim = Inventories.read(p.inventoryMenu, p);
+		var plan = new java.util.ArrayList<dev.lazuli.core.inventory.Click>();
+		var dropped = new java.util.ArrayList<ItemCount>();
+		for (ItemCount i : items) {
+			int before = sim.dropped();
+			var part = Moves.drop(sim, Inventories.PLAYER_MAIN, Inventories.matcher(i.item()), i.count());
+			sim.applyAll(part);
+			plan.addAll(part);
+			if (part.isEmpty()) chat(Chat.err("No {} to drop", i.item()));
+			else dropped.add(new ItemCount(i.item(), sim.dropped() - before));
 		}
-		var sim = menu.copy();
-		sim.applyAll(plan);
+		if (plan.isEmpty()) return;
 		clicks.play(p.inventoryMenu.containerId, plan);
-		chat(Chat.ok("Dropping {} {}", sim.dropped(), item));
+		chat(Chat.ok("Dropping {}", ItemCount.describe(dropped)));
 	}
 
 	private void stopProcesses(boolean announce) {

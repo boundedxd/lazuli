@@ -2,6 +2,7 @@ package dev.lazuli.core.command;
 
 import dev.lazuli.core.goal.Goal;
 import dev.lazuli.core.goal.GoalBlock;
+import dev.lazuli.core.inventory.ItemCount;
 import dev.lazuli.core.move.MoveGraph;
 import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Setting;
@@ -86,16 +87,16 @@ public final class CommandHandler {
             reply(Chat.err("Farming isn't available here"));
         }
 
-        /** Throws out {@code count} of an item (an id like {@code dirt}, or "all" for everything); negative: all of it. */
-        default void drop(String item, int count) {
+        /** Throws out items (ids like {@code dirt}, or "all" for everything); a negative count: all of it. */
+        default void drop(List<ItemCount> items) {
             reply(Chat.err("Dropping isn't available here"));
         }
 
         /**
          * Moves items between the inventory and a container: {@code at} {x, y, z}, or null for the nearest storage.
-         * {@code item} is an id or "all"; a negative count means all of it.
+         * Each item is an id or "all"; a negative count means all of it.
          */
-        default void container(boolean deposit, String item, int count, int[] at) {
+        default void container(boolean deposit, List<ItemCount> items, int[] at) {
             reply(Chat.err("Containers aren't available here"));
         }
 
@@ -184,9 +185,9 @@ public final class CommandHandler {
                 else ctx.reply(Chat.err("Usage: farm [range]"));
             }
             case "drop" -> {
-                if (args.length == 1) ctx.drop(args[0].toLowerCase(Locale.ROOT), -1);
-                else if (args.length == 2) ctx.drop(args[0].toLowerCase(Locale.ROOT), Math.max(1, integer(args[1])));
-                else ctx.reply(Chat.err("Usage: drop <item|all> [count]"));
+                List<ItemCount> items = items(args, 0, args.length);
+                if (items == null) ctx.reply(Chat.err("Usage: drop <item|all> [count] [item [count]...]"));
+                else ctx.drop(items);
             }
             case "deposit", "withdraw" -> container(cmd.equals("deposit"), args);
             case "help" -> help(prefix);
@@ -207,9 +208,9 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "explore [x z]", "walk into chunks never loaded, spiralling out"));
         ctx.reply(Chat.usage(p + "tunnel [height width depth]", "dig straight ahead (default 2x1, no end)"));
         ctx.reply(Chat.usage(p + "farm [range]", "harvest and replant crops around here"));
-        ctx.reply(Chat.usage(p + "drop <item|all> [count]", "throw items out of the inventory (all of them without a count)"));
-        ctx.reply(Chat.usage(p + "deposit <item|all> [count] [x y z]", "put items into a container (the nearest chest, barrel...)"));
-        ctx.reply(Chat.usage(p + "withdraw <item|all> [count] [x y z]", "take items out of a container"));
+        ctx.reply(Chat.usage(p + "drop <item|all> [count] [item [count]...]", "throw items out of the inventory (all of them without a count)"));
+        ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
+        ctx.reply(Chat.usage(p + "withdraw <item|all> [count] [item [count]...] [x y z]", "take items out of a container"));
         ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
         ctx.reply(Chat.usage(p + "set <name> [value]", "show or change a setting"));
         ctx.reply(Chat.usage(p + "settings", "list every setting"));
@@ -235,20 +236,40 @@ public final class CommandHandler {
         }
     }
 
-    /** deposit|withdraw <item|all> [count] [x y z]; coordinates may be relative (~). */
+    /** deposit|withdraw <item|all> [count] [item [count]...] [x y z]; coordinates may be relative (~). */
     private void container(boolean deposit, String[] args) {
-        if (args.length != 1 && args.length != 2 && args.length != 4 && args.length != 5) {
-            ctx.reply(Chat.err("Usage: {} <item|all> [count] [x y z]", deposit ? "deposit" : "withdraw"));
-            return;
-        }
-        int count = args.length == 2 || args.length == 5 ? Math.max(1, integer(args[1])) : -1;
+        int n = args.length;
         int[] at = null;
-        if (args.length >= 4) {
+        // items are never numbers, so three trailing coordinates can't be a count
+        if (n >= 4 && coordinate(args[n - 3]) && coordinate(args[n - 2]) && coordinate(args[n - 1])) {
             int[] f = ctx.playerFeet();
-            int o = args.length - 3;
-            at = new int[]{coord(args[o], f[0]), coord(args[o + 1], f[1]), coord(args[o + 2], f[2])};
+            at = new int[]{coord(args[n - 3], f[0]), coord(args[n - 2], f[1]), coord(args[n - 1], f[2])};
+            n -= 3;
         }
-        ctx.container(deposit, args[0].toLowerCase(Locale.ROOT), count, at);
+        List<ItemCount> items = items(args, 0, n);
+        if (items == null) ctx.reply(Chat.err("Usage: {} <item|all> [count] [item [count]...] [x y z]", deposit ? "deposit" : "withdraw"));
+        else ctx.container(deposit, items, at);
+    }
+
+    /** item [count] pairs from {@code args[from, to)}, a missing count meaning all (-1); null if empty or malformed. */
+    private static List<ItemCount> items(String[] args, int from, int to) {
+        List<ItemCount> out = new ArrayList<>();
+        for (int i = from; i < to; i++) {
+            if (number(args[i])) return null;
+            String item = args[i].toLowerCase(Locale.ROOT);
+            int count = -1;
+            if (i + 1 < to && number(args[i + 1])) count = Math.max(1, integer(args[++i]));
+            out.add(new ItemCount(item, count));
+        }
+        return out.isEmpty() ? null : out;
+    }
+
+    private static boolean number(String s) {
+        return s.matches("-?\\d+");
+    }
+
+    private static boolean coordinate(String s) {
+        return number(s) || s.matches("~(-?\\d+)?");
     }
 
     /** A coordinate: a number, or ~ / ~n relative to {@code here}. */

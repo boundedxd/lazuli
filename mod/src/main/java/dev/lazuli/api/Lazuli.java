@@ -1,8 +1,11 @@
 package dev.lazuli.api;
 
 import dev.lazuli.core.goal.Goal;
+import dev.lazuli.core.inventory.ItemCount;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.task.Task;
+
+import java.util.List;
 
 /**
  * Lazuli for other mods (and for Lazuli's own chains of work, like getting an item). Call it on the client thread.
@@ -40,10 +43,20 @@ public interface Lazuli {
      * @param item    an id like {@code iron_ingot}, or "all"
      * @param at      the container {x, y, z}, or null for the nearest chest, barrel, shulker box or ender chest
      */
-    Task container(boolean deposit, String item, int count, int[] at);
+    default Task container(boolean deposit, String item, int count, int[] at) {
+        return container(deposit, List.of(new ItemCount(item, count)), at);
+    }
+
+    /** Like {@link #container(boolean, String, int, int[])} for several items in one visit; done once every one moved. */
+    Task container(boolean deposit, List<ItemCount> items, int[] at);
 
     /** Throws out {@code count} of an item ("all": anything) from the inventory; negative: all of it. */
-    void drop(String item, int count);
+    default void drop(String item, int count) {
+        drop(List.of(new ItemCount(item, count)));
+    }
+
+    /** Throws out several items at once. */
+    void drop(List<ItemCount> items);
 
     /** The running job, or null. */
     Task current();
