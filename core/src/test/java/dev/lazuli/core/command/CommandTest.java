@@ -24,6 +24,7 @@ class CommandTest {
     private Settings settings;
     private PathingSession session;
     private final dev.lazuli.core.waypoint.Waypoints waypoints = new dev.lazuli.core.waypoint.Waypoints(null);
+    private final dev.lazuli.core.storage.ChestMemory chests = new dev.lazuli.core.storage.ChestMemory(null);
 
     private CommandHandler handler() {
         BlockView world = GridWorld.flatFloor(0, 0, 20, 20);
@@ -74,6 +75,7 @@ class CommandTest {
             public void sleep() { mined.add("sleep"); }
             public dev.lazuli.core.waypoint.Waypoints waypoints() { return waypoints; }
             public String dimension() { return "overworld"; }
+            public dev.lazuli.core.storage.ChestMemory chests() { return chests; }
         });
     }
 
@@ -103,6 +105,20 @@ class CommandTest {
         assertNull(waypoints.get("mine", "overworld"));
         h.handle("#goto nowhere");
         assertTrue(replies.get(replies.size() - 1).contains("nowhere"), replies.toString());
+    }
+
+    @Test
+    void findSaysWhichChestsHoldAnItem() {
+        CommandHandler h = handler();
+        chests.record("overworld", 5, 1, 5, java.util.Map.of("minecraft:diamond", 3));
+        chests.record("overworld", 40, 1, 0, java.util.Map.of("minecraft:diamond", 10));
+        h.handle("#find diamond");
+        String all = String.join("|", replies);
+        assertTrue(all.contains("13") && all.contains("5 1 5") && all.contains("40 1 0"), all);
+        assertTrue(all.indexOf("5 1 5") < all.indexOf("40 1 0"), all);
+        replies.clear();
+        h.handle("#find netherite_ingot");
+        assertTrue(replies.get(0).contains("netherite_ingot"), replies.toString());
     }
 
     @Test

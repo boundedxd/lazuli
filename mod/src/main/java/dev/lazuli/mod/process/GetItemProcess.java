@@ -37,6 +37,13 @@ public final class GetItemProcess implements Process {
     private final MineProcess mine;
     private final CraftProcess crafts;
     private final SmeltProcess smelts;
+    private ContainerProcess containers;
+    private java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests;
+    private java.util.function.Function<Minecraft, String> dimension;
+    /** Taking an item out of a remembered chest: where, what, and how many there were before. */
+    private net.minecraft.core.BlockPos withdrawAt;
+    private String withdrawItem;
+    private int withdrawBefore;
     private boolean running;
     private Outcome outcome = Outcome.NONE;
     private String target, lastStep;
@@ -56,6 +63,14 @@ public final class GetItemProcess implements Process {
         return running;
     }
 
+    /** Lets it take what it needs from chests opened before (getItemChests). */
+    public void useChests(ContainerProcess containers, java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests,
+                          java.util.function.Function<Minecraft, String> dimension) {
+        this.containers = containers;
+        this.chests = chests;
+        this.dimension = dimension;
+    }
+
     /** Steps finished, and steps the last plan still had (the HUD's bar). */
     private int done, planned;
 
@@ -63,7 +78,8 @@ public final class GetItemProcess implements Process {
     public String status() {
         if (!running) return null;
         String s = "Get " + want + " " + name(target);
-        if (current != null) s += "  step " + (done + 1) + "/" + (done + planned) + ": " + verb(current) + " " + current.count() + " " + name(current.item());
+        if (withdrawAt != null) s += "  taking " + name(withdrawItem) + " from a chest";
+        else if (current != null) s += "  step " + (done + 1) + "/" + (done + planned) + ": " + verb(current) + " " + current.count() + " " + name(current.item());
         return s;
     }
 
@@ -107,6 +123,7 @@ public final class GetItemProcess implements Process {
                 case SMELT -> smelts.stop(false);
             }
         }
+        if (withdrawAt != null) containers.stop(false);
         end(Outcome.CANCELLED, announce ? Chat.warn("Stopped") : null);
     }
 
@@ -114,6 +131,19 @@ public final class GetItemProcess implements Process {
     public void tick(Minecraft mc) {
         if (!running) return;
         LocalPlayer p = mc.player;
+        if (withdrawAt != null) {
+            if (containers.active()) return;
+            if (containers.outcome() == ContainerProcess.Outcome.CANCELLED) {
+                end(Outcome.CANCELLED, null);
+                return;
+            }
+            // couldn't get to it or open it: don't count on that chest again
+            if (count(p, withdrawItem) <= withdrawBefore && containers.outcome() == ContainerProcess.Outcome.FAILED) {
+                chests.apply(mc).forget(dimension.apply(mc), withdrawAt.getX(), withdrawAt.getY(), withdrawAt.getZ());
+            }
+            withdrawAt = null;
+            done++;
+        }
         if (current != null) {
             switch (status(current)) {
                 case RUNNING -> {
@@ -138,6 +168,7 @@ public final class GetItemProcess implements Process {
             return;
         }
         if (p.containerMenu != p.inventoryMenu) return; // a step's menu still closing
+        if (withdraw(mc, p, target, want - count(p, target))) return;
         Recipes recipes = RecipeData.get().getNow(null);
         Drops drops = RecipeData.drops().getNow(null);
         if (recipes == null || drops == null) return; // still reading the game's data
@@ -161,6 +192,8 @@ public final class GetItemProcess implements Process {
         }
         dev.lazuli.mod.control.Tools.keep("getitem", plan.keep());
         ItemPlanner.Action a = plan.actions().get(0);
+        // what the first step makes is lying in a chest: take it instead
+        if (withdraw(mc, p, a.item(), a.count())) return;
         String key = a.toString();
         repeats = key.equals(lastStep) ? repeats + 1 : 0;
         lastStep = key;
@@ -177,6 +210,26 @@ public final class GetItemProcess implements Process {
             case CRAFT -> crafts.start(mc, List.of(new ItemCount(a.item(), a.count())));
             case SMELT -> smelts.start(mc, new ItemCount(a.item(), a.count()), true);
         }
+    }
+
+    /** Starts taking {@code n} of {@code item} from the nearest remembered chest holding some; false if there's none. */
+    private boolean withdraw(Minecraft mc, LocalPlayer p, String item, int n) {
+        if (n <= 0 || containers == null || !settings.getItemChests.get() || !settings.chestMemory.get()) return false;
+        var mem = chests.apply(mc);
+        String id = Inventories.id(item);
+        var bp = p.blockPosition();
+        var spot = mem.nearest(id, dimension.apply(mc), bp.getX(), bp.getY(), bp.getZ(), settings.chestRange.get());
+        if (spot == null) return false;
+        withdrawAt = new net.minecraft.core.BlockPos(spot.x(), spot.y(), spot.z());
+        withdrawItem = id;
+        withdrawBefore = count(p, id);
+        containers.start(mc, false, List.of(new ItemCount(id, Math.min(n, spot.count()))), withdrawAt);
+        if (!containers.active()) {
+            mem.forget(spot.dim(), spot.x(), spot.y(), spot.z());
+            withdrawAt = null;
+            return false;
+        }
+        return true;
     }
 
     private Status status(ItemPlanner.Action a) {

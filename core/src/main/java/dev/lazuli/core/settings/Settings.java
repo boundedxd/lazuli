@@ -90,6 +90,11 @@ public final class Settings {
         s -> s.replace(" ", "").toLowerCase(java.util.Locale.ROOT)));
     /** #getitem may mine for what it needs. */
     public final Setting<Boolean> getItemMine = bool("getItemMine", true);
+    /** Remember what's in each chest, barrel and shulker box opened ({@code #find}). */
+    public final Setting<Boolean> chestMemory = bool("chestMemory", true);
+    /** #getitem takes what it needs from remembered chests within {@link #chestRange} before mining or crafting it. */
+    public final Setting<Boolean> getItemChests = bool("getItemChests", true);
+    public final Setting<Integer> chestRange = integer("chestRange", 128, 8, 2048);
     /** #getitem may smelt for what it needs. */
     public final Setting<Boolean> getItemSmelt = bool("getItemSmelt", true);
     /** #smelt waits at the furnace until it's done; off: loads it, leaves, and #smelt collect goes back. */

@@ -78,6 +78,8 @@ public final class LazuliClient implements ClientModInitializer {
 	private LazuliRenderer renderer;
 	private final java.util.Map<String, Waypoints> waypointsByWorld = new java.util.HashMap<>();
 	private boolean wasDead;
+	private final java.util.Map<String, dev.lazuli.core.storage.ChestMemory> chestsByWorld = new java.util.HashMap<>();
+	private dev.lazuli.mod.inventory.ChestWatcher chestWatcher;
 	private boolean openConfigNextTick;
 	private PathingSession session;
 	private CommandHandler commands;
@@ -127,6 +129,8 @@ public final class LazuliClient implements ClientModInitializer {
 		crafts = new CraftProcess(session, settings, clicks, this::chat);
 		smelts = new SmeltProcess(session, settings, clicks, crafts, this::chat);
 		getItem = new GetItemProcess(settings, mine, crafts, smelts, this::chat);
+		getItem.useChests(containers, this::chests, LazuliClient::dimension);
+		chestWatcher = new dev.lazuli.mod.inventory.ChestWatcher(settings.chestMemory::get, this::chests, LazuliClient::dimension);
 		RecipeData.drops();
 		RecipeData.get(); // read the recipes in the background now, not on the first #craft
 		upkeep = new Upkeep(settings, this::chat);
@@ -265,6 +269,11 @@ public final class LazuliClient implements ClientModInitializer {
 			public void sleep() {
 				LazuliClient.this.stopProcesses(false);
 				sleeps.start(Minecraft.getInstance());
+			}
+
+			@Override
+			public dev.lazuli.core.storage.ChestMemory chests() {
+				return settings.chestMemory.get() ? LazuliClient.this.chests(Minecraft.getInstance()) : null;
 			}
 
 			@Override
@@ -529,6 +538,7 @@ public final class LazuliClient implements ClientModInitializer {
 
 	private void onTick(Minecraft mc) {
 		tasks.tick();
+		chestWatcher.tick(mc);
 		boolean dead = mc.player != null && mc.player.isDeadOrDying();
 		if (dead && !wasDead && settings.deathWaypoint.get()) {
 			BlockPos b = mc.player.blockPosition();
@@ -553,13 +563,23 @@ public final class LazuliClient implements ClientModInitializer {
 
 	/** This server's (or singleplayer world's) waypoints, each in its own file. */
 	private Waypoints waypoints(Minecraft mc) {
+		return waypointsByWorld.computeIfAbsent(worldFile(mc), f -> new Waypoints(
+			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("waypoints").resolve(f)));
+	}
+
+	/** What's in this server's (or world's) chests, as last seen. */
+	private dev.lazuli.core.storage.ChestMemory chests(Minecraft mc) {
+		return chestsByWorld.computeIfAbsent(worldFile(mc), f -> new dev.lazuli.core.storage.ChestMemory(
+			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("chests").resolve(f)));
+	}
+
+	/** A file name for the server (or singleplayer world) being played on. */
+	private static String worldFile(Minecraft mc) {
 		String id;
 		if (mc.getCurrentServer() != null) id = "server-" + mc.getCurrentServer().ip;
 		else if (mc.getSingleplayerServer() != null) id = "world-" + mc.getSingleplayerServer().getWorldData().getLevelName();
 		else id = "unknown";
-		String file = id.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9._-]", "_") + ".txt";
-		return waypointsByWorld.computeIfAbsent(file, f -> new Waypoints(
-			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("waypoints").resolve(f)));
+		return id.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9._-]", "_") + ".txt";
 	}
 
 	private static String dimension(Minecraft mc) {

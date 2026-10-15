@@ -137,6 +137,11 @@ public final class CommandHandler {
             reply(Chat.err("Sleeping isn't available here"));
         }
 
+        /** What's in the containers opened so far ({@code #find}); null when not kept. */
+        default dev.lazuli.core.storage.ChestMemory chests() {
+            return null;
+        }
+
         /** Saved places ({@code #wp}); null when there are none here. */
         default dev.lazuli.core.waypoint.Waypoints waypoints() {
             return null;
@@ -191,6 +196,7 @@ public final class CommandHandler {
             }
             case "wp", "waypoint", "waypoints" -> waypoint(args);
             case "sleep" -> ctx.sleep();
+            case "find" -> find(args);
             case "back" -> goToWaypoint(dev.lazuli.core.waypoint.Waypoints.DEATH);
             case "stop", "cancel" -> {
                 ctx.stopProcesses();
@@ -281,6 +287,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "getitem <item> [count]", "get an item from scratch: mines, crafts and smelts what it takes (until you have count)"));
         ctx.reply(Chat.usage(p + "smelt <item> [count]", "cook items in a furnace (iron_ingot or raw_iron; blast furnace/smoker when there's one)"));
         ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
+        ctx.reply(Chat.usage(p + "find <item>", "which chests (opened before) hold an item"));
         ctx.reply(Chat.usage(p + "sleep", "sleep in the nearest bed (or one from the hotbar) until morning"));
         ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
         ctx.reply(Chat.usage(p + "kill", "when something's stuck: reset everything (planner thread, keys, jobs), then any command works again"));
@@ -439,6 +446,34 @@ public final class CommandHandler {
                 else goToWaypoint(args[1]);
             }
             default -> ctx.reply(Chat.err("Usage: wp add <name> [x y z] | del <name> | list | goto <name>"));
+        }
+    }
+
+    /** find <item>: the remembered containers holding it, nearest first. */
+    private void find(String[] args) {
+        var mem = ctx.chests();
+        if (mem == null) {
+            ctx.reply(Chat.err("Chest memory is off"));
+            return;
+        }
+        if (args.length != 1) {
+            ctx.reply(Chat.err("Usage: find <item>"));
+            return;
+        }
+        String item = args[0].toLowerCase(Locale.ROOT);
+        if (!item.contains(":")) item = "minecraft:" + item;
+        int[] f = ctx.playerFeet();
+        var spots = mem.find(item, ctx.dimension(), f[0], f[1], f[2]);
+        String name = item.substring(item.indexOf(':') + 1);
+        if (spots.isEmpty()) {
+            ctx.reply(Chat.info("No {} in any chest opened in this dimension", name));
+            return;
+        }
+        int total = spots.stream().mapToInt(s -> s.count()).sum();
+        ctx.reply(Chat.info("{} {} in {} container{}:", total, name, spots.size(), spots.size() == 1 ? "" : "s"));
+        for (int i = 0; i < Math.min(8, spots.size()); i++) {
+            var s = spots.get(i);
+            ctx.reply(Chat.pair(s.x() + " " + s.y() + " " + s.z(), s.count() + " (" + (int) Math.sqrt(s.distSq(f[0], f[1], f[2])) + "m)"));
         }
     }
 
