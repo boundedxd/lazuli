@@ -174,6 +174,7 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(Options.ofNumber("Evaluation horizon", s.evalHorizon::get, s.evalHorizon.defaultValue(), s.evalHorizon::set)
                         .range(4, 256, 4)
                         .description(OptionDescription.ofText(() -> "How many path edges ahead are physics-checked before moving.")).build())
+                    .option(bool(s.unstick, "Stuck for a few seconds mid-trip: plan it again from scratch."))
                     .option(Options.ofNumber("Heuristic weight", s.heuristicWeight::get, s.heuristicWeight.defaultValue(), s.heuristicWeight::set)
                         .range(1.0, 5.0, 0.1)
                         .description(OptionDescription.ofText(() -> "Above 1 trades path optimality for faster planning on long trips.")).build())

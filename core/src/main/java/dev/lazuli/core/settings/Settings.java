@@ -64,6 +64,8 @@ public final class Settings {
     /** While busy, at {@link #retreatHealth} or less: get away from monsters, eat and wait to heal (the job waits). */
     public final Setting<Boolean> lowHpRetreat = bool("lowHpRetreat", true);
     public final Setting<Integer> retreatHealth = integer("retreatHealth", 8, 1, 19);
+    /** A trip with nothing happening for ~6 seconds is planned again from scratch (what #kill and a rerun would do). */
+    public final Setting<Boolean> unstick = bool("unstick", true);
     /** Save a "death" waypoint where the player dies ({@code #back} goes there). */
     public final Setting<Boolean> deathWaypoint = bool("deathWaypoint", true);
     /** Draw this dimension's waypoints in the world. */

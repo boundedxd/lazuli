@@ -135,8 +135,8 @@ public final class PathingSession {
             tripGeneration = gen;
             this.goal = goal;
             this.fallback = fallback;
-            this.player = playerPos;
             this.graph = g;
+            this.player = snap(playerPos);
             this.quiet = quiet;
             if (!quiet) messages.accept(Chat.info("Pathing to {}", goal.describe()));
             begin();
@@ -150,6 +150,24 @@ public final class PathingSession {
         worker.execute(() -> {
             if (planner == null) return;
             this.graph = g;
+            begin();
+        });
+    }
+
+    /**
+     * The trip seems stuck (the player hasn't moved in a while): drop whatever is being searched and plan the same
+     * trip again from scratch from {@code playerPos}, keeping its number so whoever asked for it doesn't notice.
+     */
+    public void unstick(long playerPos) {
+        MoveGraph g = newGraph();
+        long gen = generation.get();
+        cancelSearch();
+        worker.execute(() -> {
+            if (gen != tripGeneration || generation.get() != gen || goal == null) return;
+            if (snapshot.state() != State.PATHING) return;
+            graph = g;
+            player = snap(playerPos);
+            invalidStartSince = -1;
             begin();
         });
     }
@@ -214,9 +232,9 @@ public final class PathingSession {
 
     public void playerMoved(long playerPos) {
         worker.execute(() -> {
-            player = playerPos;
+            player = graph == null ? playerPos : snap(playerPos);
             if (planner == null) return;
-            planner.moveStart(playerPos);
+            planner.moveStart(player);
             scheduleReplan();
         });
     }
@@ -356,6 +374,25 @@ public final class PathingSession {
         return y;
     }
 
+    /**
+     * The node the player stands at: the reported block, or when that isn't one (standing on the edge of a hole just
+     * mined, half over a slab...), the nearest node around it. Unchanged if there's none (mid-air: they'll land).
+     */
+    private long snap(long p) {
+        if (graph.isNode(p)) return p;
+        int x = Pos.x(p), y = Pos.y(p), z = Pos.z(p);
+        for (int dy : new int[]{0, -1, 1}) {
+            if (dy != 0 && graph.isNode(Pos.pack(x, y + dy, z))) return Pos.pack(x, y + dy, z);
+        }
+        for (int dy : new int[]{0, -1, 1}) {
+            for (int[] d : new int[][]{{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}}) {
+                long q = Pos.pack(x + d[0], y + dy, z + d[1]);
+                if (graph.isNode(q)) return q;
+            }
+        }
+        return p;
+    }
+
     private void createPlanner() {
         Goal goal = segment != null ? segment : this.goal;
         List<Long> candidates = new ArrayList<>();
@@ -380,7 +417,8 @@ public final class PathingSession {
             begin(); // the current path stays published while the next segment is planned
             return;
         }
-        if (!graph.isNode(player) && snapshot.state() == State.PATHING) {
+        if (!graph.isNode(player) && snapshot.state() == State.PATHING && snapshot.trip() == tripGeneration
+            && !snapshot.path().isEmpty()) {
             // the block just placed under the jumping player, or mined from under them: they'll land on a node soon
             long now = System.nanoTime();
             if (invalidStartSince < 0) invalidStartSince = now;

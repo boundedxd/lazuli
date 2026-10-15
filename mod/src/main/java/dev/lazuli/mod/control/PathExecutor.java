@@ -50,12 +50,20 @@ public final class PathExecutor {
     private final Swimmer swimmer;
     private final BoatRider boat;
     private final Torcher torcher;
+    private final java.util.function.Consumer<String> chat;
+    /** Watchdog: where the player was when nothing last happened, for how long, and the re-plans tried there. */
+    private Vec3 stallAt = Vec3.ZERO;
+    private long stallBlock = NONE;
+    private int stallTicks, unsticks;
+    /** Ticks of nothing happening before the trip is planned again from scratch (no path yet: the search may be long). */
+    private static final int STALL_TICKS = 120, STALL_NO_PATH_TICKS = 400, MAX_UNSTICKS = 3;
     private boolean driving;
     private long lastBlock = NONE;
     private int offPathTicks;
 
     public PathExecutor(PathingSession session, Settings settings, BlockView world, java.util.function.Consumer<String> chat) {
         this.interactor = new Interactor(world, settings, session, chat);
+        this.chat = chat;
         this.session = session;
         this.settings = settings;
         this.world = world;
@@ -154,6 +162,7 @@ public final class PathExecutor {
         }
         long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(v.x, v.z), building);
         if (failed != null) session.edgeFailed(failed[0], failed[1]);
+        if (settings.unstick.get()) watchdog(player, snap, block, eating);
         if (c == null) c = new Controls(false, false, false, curYaw, curPitch);
         if (!sprint && c.sprint()) c = new Controls(c.forward(), c.back(), c.jump(), false, c.targetYaw(), c.targetPitch(), c.strafe(), c.sneak());
         float yaw = InputPlanner.approach(curYaw, c.targetYaw(), maxTurn);
@@ -161,6 +170,37 @@ public final class PathExecutor {
         float pitch = curPitch + Math.max(-pitchSpeed, Math.min(pitchSpeed, c.targetPitch() - curPitch));
         input.apply(mc, c, yaw, pitch, settings.freeLook.get());
         driving = true;
+    }
+
+    /**
+     * A trip under way with nothing happening (not moving, not breaking a block, not eating) for a while: whatever
+     * got stuck (a search, a start that wasn't a node, a stale plan), it's planned again from scratch, the way #kill
+     * and running it again would. Still stuck after a few tries at the same block, the trip is given up.
+     */
+    private void watchdog(LocalPlayer player, PathingSession.Snapshot snap, long block, boolean eating) {
+        boolean busyHere = Interactor.mining() != null || eating || boat.active() || player.isUsingItem()
+            || dev.lazuli.mod.process.Guard.paused();
+        if (busyHere || player.position().distanceToSqr(stallAt) > 0.01) {
+            stallAt = player.position();
+            stallTicks = 0;
+        } else {
+            stallTicks++;
+        }
+        if (block != stallBlock) {
+            stallBlock = block;
+            unsticks = 0;
+        }
+        if (stallTicks < (snap.path().isEmpty() ? STALL_NO_PATH_TICKS : STALL_TICKS)) return;
+        stallTicks = 0;
+        if (++unsticks > MAX_UNSTICKS) {
+            unsticks = 0;
+            chat.accept(dev.lazuli.core.chat.Chat.err("Stuck at {}; gave up on this trip", Pos.toString(block)));
+            session.stop(true);
+            return;
+        }
+        chat.accept(dev.lazuli.core.chat.Chat.warn("Stuck; planning again ({}/{})", unsticks, MAX_UNSTICKS));
+        reset();
+        session.unstick(block);
     }
 
     /** The input planner's predicted motion (x, y, z triples), empty when not driving. */

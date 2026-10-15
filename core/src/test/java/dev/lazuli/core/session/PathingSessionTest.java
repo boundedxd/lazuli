@@ -32,6 +32,35 @@ class PathingSessionTest {
     }
 
     @Test
+    void aNewTripFromJustOffANodeStillGetsAPath() {
+        // standing on the edge of a hole just mined: the reported block is over the hole, not a node
+        GridWorld w = GridWorld.flatFloor(0, 0, 20, 20);
+        w.fill(5, 0, 5, 5, 0, 5, BlockKind.AIR).fill(5, -1, 5, 5, -1, 5, BlockKind.AIR).fill(5, -2, 5, 5, -2, 5, BlockKind.AIR);
+        PathingSession s = session(w);
+        s.start(new GoalBlock(15, 1, 15), false, Pos.pack(0, 1, 0)); // an earlier trip still under way
+        assertEquals(PathingSession.State.PATHING, s.snapshot().state());
+        long trip = s.start(new GoalBlock(12, 1, 3), false, Pos.pack(5, 1, 5), true);
+        PathingSession.Snapshot snap = s.snapshot();
+        assertEquals(trip, snap.trip());
+        assertEquals(PathingSession.State.PATHING, snap.state(), msgs.toString());
+        assertFalse(snap.path().isEmpty(), "sat with no path");
+        assertEquals(Pos.pack(12, 1, 3), snap.path().get(snap.path().size() - 1));
+    }
+
+    @Test
+    void unstickPlansTheSameTripAgainFromWhereThePlayerIs() {
+        GridWorld w = GridWorld.flatFloor(0, 0, 20, 20);
+        PathingSession s = session(w);
+        long trip = s.start(new GoalBlock(15, 1, 3), false, Pos.pack(0, 1, 0), true);
+        s.unstick(Pos.pack(6, 1, 6));
+        PathingSession.Snapshot snap = s.snapshot();
+        assertEquals(trip, snap.trip());
+        assertEquals(PathingSession.State.PATHING, snap.state());
+        assertEquals(Pos.pack(6, 1, 6), snap.path().get(0));
+        assertEquals(Pos.pack(15, 1, 3), snap.path().get(snap.path().size() - 1));
+    }
+
+    @Test
     void goalInUnknownTerrainIsPlanned() {
         GridWorld w = new GridWorld(BlockKind.UNKNOWN)
             .fill(-2, 0, -2, 2, 0, 2, BlockKind.SOLID).fill(-2, 1, -2, 2, 3, 2, BlockKind.AIR);
