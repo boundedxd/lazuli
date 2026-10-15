@@ -169,7 +169,8 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         tripStart = -1;
         Tools.keep("mine", null);
         release();
-        if (wasTravelling && session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
+        // a trip still being searched for too, or it'd be walked with nobody mining
+        if (wasTravelling && (session.snapshot().state() == PathingSession.State.PATHING || session.planning())) session.stop(true);
         if (announce) chat.accept(Chat.warn("Stopped mining ({} broken)", mined));
     }
 
@@ -177,7 +178,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         phase = Phase.IDLE;
         Tools.keep("mine", null);
         release();
-        if (session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
+        if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
         chat.accept(msg);
     }
 
@@ -262,10 +263,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             stop(false);
             return;
         }
-        if (settings.cancelOnUserInput.get() && input.userInterfering(mc)) {
-            stop(true);
-            return;
-        }
+        // moving to cancel is handled once for everything in LazuliClient (not while typing in chat)
         if (quantity > 0 && mined >= quantity && phase != Phase.PICKUP) {
             if (!nextDrop(mc, player)) {
                 finish(Chat.ok("Done: mined {} {}", mined, what));

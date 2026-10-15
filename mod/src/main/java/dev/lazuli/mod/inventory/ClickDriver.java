@@ -60,6 +60,12 @@ public final class ClickDriver {
         lease = 3;
     }
 
+    /** Drops the queued clicks (a stop): the screen it opened closes and the player is let go. */
+    public void cancel() {
+        queue.clear();
+        lease = 0;
+    }
+
     public boolean busy() {
         return !queue.isEmpty();
     }

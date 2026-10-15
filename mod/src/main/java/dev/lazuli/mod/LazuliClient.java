@@ -94,11 +94,7 @@ public final class LazuliClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		instance = this;
-		LazuliConfig.stopAction = () -> {
-			tasks.cancel();
-			stopProcesses(false);
-			session.stop();
-		};
+		LazuliConfig.stopAction = () -> stopAll(true);
 		recorder = new TraceRecorder(FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("traces"), this::chat);
 
 		session = new PathingSession(cache, cache::minY, cache::maxY, settings, worker, this::chat,
@@ -168,7 +164,10 @@ public final class LazuliClient implements ClientModInitializer {
 
 			@Override
 			public void stopProcesses() {
-				LazuliClient.this.stopProcesses(true);
+				// #stop and #come: the job, every process and its clicks (the trip is stopped by the command)
+				tasks.cancel();
+				clicks.cancel();
+				LazuliClient.this.stopProcesses(false);
 			}
 
 			@Override
@@ -399,9 +398,7 @@ public final class LazuliClient implements ClientModInitializer {
 
 		@Override
 		public void stop() {
-			tasks.cancel();
-			stopProcesses(false);
-			session.stop(true);
+			stopAll(false);
 		}
 
 		@Override
@@ -446,6 +443,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private void stopAll(boolean announce) {
 		tasks.cancel();
 		boolean any = busy();
+		clicks.cancel();
 		stopProcesses(false);
 		if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
 		if (announce && any) chat(Chat.warn("Stopped"));
