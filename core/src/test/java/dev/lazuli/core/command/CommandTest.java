@@ -23,6 +23,7 @@ class CommandTest {
     private final List<String> mined = new ArrayList<>();
     private Settings settings;
     private PathingSession session;
+    private final dev.lazuli.core.waypoint.Waypoints waypoints = new dev.lazuli.core.waypoint.Waypoints(null);
 
     private CommandHandler handler() {
         BlockView world = GridWorld.flatFloor(0, 0, 20, 20);
@@ -70,6 +71,8 @@ class CommandTest {
             }
             public int[] cameraFeet() { return new int[]{12, 1, 7}; }
             public void toggleFreecam() { mined.add("freecam"); }
+            public dev.lazuli.core.waypoint.Waypoints waypoints() { return waypoints; }
+            public String dimension() { return "overworld"; }
         });
     }
 
@@ -81,6 +84,43 @@ class CommandTest {
         assertEquals(Pos.pack(12, 1, 7), session.snapshot().path().get(session.snapshot().path().size() - 1));
         h.handle("#freecam");
         assertEquals(List.of("freecam"), mined);
+    }
+
+    @Test
+    void waypointsAreAddedListedAndGoneTo() {
+        CommandHandler h = handler();
+        h.handle("#wp add Home");
+        h.handle("#wp add mine 15 1 3");
+        assertEquals(new dev.lazuli.core.waypoint.Waypoints.Waypoint("home", "overworld", 0, 1, 0), waypoints.get("home", "overworld"));
+        h.handle("#wp list");
+        assertTrue(replies.stream().anyMatch(r -> r.contains("mine") && r.contains("15 1 3")), replies.toString());
+        h.handle("#goto mine");
+        assertEquals(PathingSession.State.PATHING, session.snapshot().state(), replies.toString());
+        assertEquals(Pos.pack(15, 1, 3), session.snapshot().path().get(session.snapshot().path().size() - 1));
+        h.handle("#wp del mine");
+        assertNull(waypoints.get("mine", "overworld"));
+        h.handle("#goto nowhere");
+        assertTrue(replies.get(replies.size() - 1).contains("nowhere"), replies.toString());
+    }
+
+    @Test
+    void backGoesWhereThePlayerDied() {
+        CommandHandler h = handler();
+        h.handle("#back");
+        assertTrue(replies.get(replies.size() - 1).toLowerCase().contains("death"), replies.toString());
+        waypoints.set(dev.lazuli.core.waypoint.Waypoints.DEATH, "overworld", 9, 1, 9);
+        h.handle("#back");
+        assertEquals(PathingSession.State.PATHING, session.snapshot().state(), replies.toString());
+        assertEquals(Pos.pack(9, 1, 9), session.snapshot().path().get(session.snapshot().path().size() - 1));
+    }
+
+    @Test
+    void waypointsSurviveARestart(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
+        java.nio.file.Path f = dir.resolve("waypoints.txt");
+        new dev.lazuli.core.waypoint.Waypoints(f).set("Base", "the_nether", 1, -2, 3);
+        assertEquals(new dev.lazuli.core.waypoint.Waypoints.Waypoint("base", "the_nether", 1, -2, 3),
+            new dev.lazuli.core.waypoint.Waypoints(f).get("BASE", "the_nether"));
+        assertTrue(new dev.lazuli.core.waypoint.Waypoints(f).list("overworld").isEmpty());
     }
 
     @Test

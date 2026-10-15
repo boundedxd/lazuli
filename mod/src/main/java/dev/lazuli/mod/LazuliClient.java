@@ -46,6 +46,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import dev.lazuli.core.waypoint.Waypoints;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -74,6 +75,8 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 	private TraceRecorder recorder;
 	private LazuliRenderer renderer;
+	private final java.util.Map<String, Waypoints> waypointsByWorld = new java.util.HashMap<>();
+	private boolean wasDead;
 	private boolean openConfigNextTick;
 	private PathingSession session;
 	private CommandHandler commands;
@@ -251,6 +254,16 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public Waypoints waypoints() {
+				return LazuliClient.this.waypoints(Minecraft.getInstance());
+			}
+
+			@Override
+			public String dimension() {
+				return LazuliClient.this.dimension(Minecraft.getInstance());
+			}
+
+			@Override
 			public void startClick() {
 				ClickGoal.arm();
 			}
@@ -267,6 +280,11 @@ public final class LazuliClient implements ClientModInitializer {
 		Lazuli.Holder.set(new Api());
 		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal, cache);
 		renderer.processes(processes);
+		renderer.waypoints(() -> {
+			Minecraft mc = Minecraft.getInstance();
+			Waypoints w = mc.level == null ? null : waypoints(mc);
+			return w == null || !settings.renderWaypoints.get() ? java.util.List.of() : w.list(dimension(mc));
+		});
 
 		ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
 			if (Minecraft.getInstance().player == null) return true;
@@ -496,6 +514,13 @@ public final class LazuliClient implements ClientModInitializer {
 
 	private void onTick(Minecraft mc) {
 		tasks.tick();
+		boolean dead = mc.player != null && mc.player.isDeadOrDying();
+		if (dead && !wasDead && settings.deathWaypoint.get()) {
+			BlockPos b = mc.player.blockPosition();
+			waypoints(mc).set(Waypoints.DEATH, dimension(mc), b.getX(), b.getY(), b.getZ());
+			chat(Chat.info("Died at {} ({}back to go there)", b.getX() + " " + b.getY() + " " + b.getZ(), settings.prefix.get()));
+		}
+		wasDead = dead;
 		clicks.tick(mc, settings.clicksPerTick.get());
 		renderer.tick(mc);
 		renderer.hudTick(mc);
@@ -509,6 +534,21 @@ public final class LazuliClient implements ClientModInitializer {
 		openConfigNextTick = false;
 		while (LazuliConfig.OPEN_CONFIG.consumeClick()) open = mc.screen == null;
 		if (open) mc.setScreen(new WalksyLibPanelScreen(mc.screen, LazuliConfig.ID));
+	}
+
+	/** This server's (or singleplayer world's) waypoints, each in its own file. */
+	private Waypoints waypoints(Minecraft mc) {
+		String id;
+		if (mc.getCurrentServer() != null) id = "server-" + mc.getCurrentServer().ip;
+		else if (mc.getSingleplayerServer() != null) id = "world-" + mc.getSingleplayerServer().getWorldData().getLevelName();
+		else id = "unknown";
+		String file = id.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9._-]", "_") + ".txt";
+		return waypointsByWorld.computeIfAbsent(file, f -> new Waypoints(
+			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("waypoints").resolve(f)));
+	}
+
+	private static String dimension(Minecraft mc) {
+		return mc.level == null ? "overworld" : mc.level.dimension().identifier().getPath();
 	}
 
 	private void toggleFreecam(Minecraft mc) {

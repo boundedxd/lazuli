@@ -51,6 +51,10 @@ public final class Settings {
     public final Setting<Integer> autoEatHunger = integer("autoEatHunger", 14, 1, 19);
     /** Put on better armor from the inventory. */
     public final Setting<Boolean> autoArmor = bool("autoArmor", true);
+    /** Save a "death" waypoint where the player dies ({@code #back} goes there). */
+    public final Setting<Boolean> deathWaypoint = bool("deathWaypoint", true);
+    /** Draw this dimension's waypoints in the world. */
+    public final Setting<Boolean> renderWaypoints = bool("renderWaypoints", true);
     /** Move the best tool from the inventory into the hotbar when mining. */
     public final Setting<Boolean> allowInventory = bool("allowInventory", true);
     /**

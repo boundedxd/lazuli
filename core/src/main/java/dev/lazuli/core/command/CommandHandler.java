@@ -132,6 +132,16 @@ public final class CommandHandler {
             return playerFeet();
         }
 
+        /** Saved places ({@code #wp}); null when there are none here. */
+        default dev.lazuli.core.waypoint.Waypoints waypoints() {
+            return null;
+        }
+
+        /** The player's dimension (overworld, the_nether...), for waypoints. */
+        default String dimension() {
+            return "overworld";
+        }
+
         /** Detaches the camera to fly around (or puts it back). */
         default void toggleFreecam() {
             reply(Chat.err("Freecam isn't available here"));
@@ -171,8 +181,11 @@ public final class CommandHandler {
             case "goal" -> setGoal(args);
             case "path" -> startPath();
             case "goto" -> {
-                if (setGoal(args)) startPath();
+                if (args.length == 1 && !looksLikeCoordinate(args[0])) goToWaypoint(args[0]);
+                else if (setGoal(args)) startPath();
             }
+            case "wp", "waypoint", "waypoints" -> waypoint(args);
+            case "back" -> goToWaypoint(dev.lazuli.core.waypoint.Waypoints.DEATH);
             case "stop", "cancel" -> {
                 ctx.stopProcesses();
                 ctx.session().stop();
@@ -244,6 +257,9 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "goal [x y z | x z | y | clear] [true|false]", "set the goal (true: fall back to the nearest safe spot)"));
         ctx.reply(Chat.usage(p + "path", "go to the goal"));
         ctx.reply(Chat.usage(p + "goto <goal>", "set the goal and go"));
+        ctx.reply(Chat.usage(p + "goto <waypoint>", "go to a saved place"));
+        ctx.reply(Chat.usage(p + "wp add <name> [x y z] | del <name> | list", "save places (here without coordinates)"));
+        ctx.reply(Chat.usage(p + "back", "go back where you last died"));
         ctx.reply(Chat.usage(p + "click", "left-click a block to make it the goal"));
         ctx.reply(Chat.usage(p + "come", "come to the camera (in freecam: wherever it is)"));
         ctx.reply(Chat.usage(p + "freecam", "fly the camera around; left-click a block to go there"));
@@ -375,6 +391,60 @@ public final class CommandHandler {
         goal = g;
         fallback = false;
         ctx.reply(Chat.ok("Goal set: {}", goal.describe()));
+    }
+
+    private static boolean looksLikeCoordinate(String s) {
+        return coordinate(s) || s.equalsIgnoreCase("clear");
+    }
+
+    /** wp add <name> [x y z] | del <name> | list */
+    private void waypoint(String[] args) {
+        var wps = ctx.waypoints();
+        if (wps == null) {
+            ctx.reply(Chat.err("Waypoints aren't available here"));
+            return;
+        }
+        String dim = ctx.dimension();
+        String sub = args.length == 0 ? "list" : args[0].toLowerCase(Locale.ROOT);
+        switch (sub) {
+            case "add", "set", "save" -> {
+                if (args.length != 2 && args.length != 5) {
+                    ctx.reply(Chat.err("Usage: wp add <name> [x y z]"));
+                    return;
+                }
+                int[] f = ctx.playerFeet();
+                int[] at = args.length == 5 ? new int[]{coord(args[2], f[0]), coord(args[3], f[1]), coord(args[4], f[2])} : f;
+                wps.set(args[1], dim, at[0], at[1], at[2]);
+                ctx.reply(Chat.ok("Waypoint {} at {}", args[1].toLowerCase(Locale.ROOT), at[0] + " " + at[1] + " " + at[2]));
+            }
+            case "del", "remove", "delete" -> {
+                if (args.length != 2) ctx.reply(Chat.err("Usage: wp del <name>"));
+                else if (wps.remove(args[1], dim)) ctx.reply(Chat.ok("Removed {}", args[1]));
+                else ctx.reply(Chat.err("No waypoint {} here", args[1]));
+            }
+            case "list" -> {
+                var list = wps.list(dim);
+                if (list.isEmpty()) ctx.reply(Chat.info("No waypoints in this dimension"));
+                for (var w : list) ctx.reply(Chat.pair(w.name(), w.x() + " " + w.y() + " " + w.z()));
+            }
+            case "goto" -> {
+                if (args.length != 2) ctx.reply(Chat.err("Usage: wp goto <name>"));
+                else goToWaypoint(args[1]);
+            }
+            default -> ctx.reply(Chat.err("Usage: wp add <name> [x y z] | del <name> | list | goto <name>"));
+        }
+    }
+
+    private void goToWaypoint(String name) {
+        var wps = ctx.waypoints();
+        var w = wps == null ? null : wps.get(name, ctx.dimension());
+        if (w == null) {
+            ctx.reply(Chat.err(name.equalsIgnoreCase(dev.lazuli.core.waypoint.Waypoints.DEATH)
+                ? "No death point in this dimension" : "No waypoint {} in this dimension", name));
+            return;
+        }
+        ctx.stopProcesses();
+        goTo(new GoalBlock(w.x(), w.y(), w.z()), true);
     }
 
     private boolean setGoal(String[] args) {

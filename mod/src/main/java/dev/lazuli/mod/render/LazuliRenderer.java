@@ -82,6 +82,22 @@ public final class LazuliRenderer {
         // a finished or failed trip keeps its goal in the snapshot; a newer #goal must still show
         Goal goal = pathing && snap.goal() != null ? snap.goal() : pendingGoal.get();
         if (goal != null && LazuliConfig.renderGoal) drawGoal(mc, goal, width);
+        for (var w : waypoints.get()) {
+            BlockPos b = new BlockPos(w.x(), w.y(), w.z());
+            boolean death = w.name().equals(dev.lazuli.core.waypoint.Waypoints.DEATH);
+            int color = death ? 0xFFFF5555 : 0xFFFFD040;
+            Gizmos.cuboid(b, GizmoStyle.stroke(color, width));
+            Gizmos.line(new Vec3(w.x() + 0.5, w.y() + 1, w.z() + 0.5), new Vec3(w.x() + 0.5, w.y() + 64, w.z() + 0.5), color, width);
+            int dist = (int) Math.sqrt(mc.player.blockPosition().distSqr(b));
+            Gizmos.billboardTextOverBlock(w.name() + " (" + dist + "m)", b, 0, color, 1.0f);
+        }
+    }
+
+    private Supplier<List<dev.lazuli.core.waypoint.Waypoints.Waypoint>> waypoints = List::of;
+
+    /** The waypoints to draw (this dimension's, or none when they're switched off). */
+    public void waypoints(Supplier<List<dev.lazuli.core.waypoint.Waypoints.Waypoint>> waypoints) {
+        this.waypoints = waypoints;
     }
 
     private static void drawGoal(Minecraft mc, Goal goal, float width) {
