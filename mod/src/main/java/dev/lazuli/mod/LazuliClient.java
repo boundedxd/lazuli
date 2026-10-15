@@ -21,6 +21,8 @@ import dev.lazuli.mod.control.FreeCam;
 import dev.lazuli.mod.control.MineProcess;
 import dev.lazuli.mod.process.ExploreProcess;
 import dev.lazuli.mod.process.ContainerProcess;
+import dev.lazuli.mod.process.CraftProcess;
+import dev.lazuli.mod.craft.RecipeData;
 import dev.lazuli.mod.process.FarmProcess;
 import dev.lazuli.mod.process.FollowProcess;
 import dev.lazuli.mod.process.Process;
@@ -74,6 +76,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private TunnelProcess tunnel;
 	private FarmProcess farm;
 	private ContainerProcess containers;
+	private CraftProcess crafts;
 	private Upkeep upkeep;
 	/** Every process; at most one runs at a time. */
 	private java.util.List<Process> processes;
@@ -103,8 +106,10 @@ public final class LazuliClient implements ClientModInitializer {
 		tunnel = new TunnelProcess(session, settings, this::chat);
 		farm = new FarmProcess(session, settings, this::chat);
 		containers = new ContainerProcess(session, settings, clicks, this::chat);
+		crafts = new CraftProcess(session, settings, clicks, this::chat);
+		RecipeData.get(); // read the recipes in the background now, not on the first #craft
 		upkeep = new Upkeep(settings, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -191,6 +196,12 @@ public final class LazuliClient implements ClientModInitializer {
 			@Override
 			public void drop(java.util.List<ItemCount> items) {
 				LazuliClient.this.drop(items);
+			}
+
+			@Override
+			public void craft(java.util.List<ItemCount> items) {
+				LazuliClient.this.stopProcesses(false);
+				crafts.start(Minecraft.getInstance(), items);
 			}
 
 			@Override
@@ -300,6 +311,21 @@ public final class LazuliClient implements ClientModInitializer {
 		@Override
 		public void drop(java.util.List<ItemCount> items) {
 			LazuliClient.this.drop(items);
+		}
+
+		@Override
+		public Task craft(java.util.List<ItemCount> items) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				crafts.start(Minecraft.getInstance(), items);
+				String names = String.join(", ", items.stream().map(ItemCount::item).toList());
+				return new Task("craft " + names, () -> switch (crafts.outcome()) {
+					case NONE -> null;
+					case DONE -> Task.Result.DONE;
+					case FAILED -> Task.Result.FAILED;
+					case CANCELLED -> Task.Result.CANCELLED;
+				}, () -> crafts.stop(false));
+			});
 		}
 
 		@Override

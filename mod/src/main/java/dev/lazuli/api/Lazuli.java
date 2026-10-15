@@ -58,6 +58,17 @@ public interface Lazuli {
     /** Throws out several items at once. */
     void drop(List<ItemCount> items);
 
+    /**
+     * Crafts {@code count} of an item (an id like {@code stick}), crafting the ingredients first if the
+     * craftIngredients setting allows, at a crafting table when it doesn't fit the inventory grid.
+     */
+    default Task craft(String item, int count) {
+        return craft(List.of(new ItemCount(item, count)));
+    }
+
+    /** Crafts several items, one after another. */
+    Task craft(List<ItemCount> items);
+
     /** The running job, or null. */
     Task current();
 

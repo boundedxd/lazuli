@@ -56,6 +56,9 @@ class CommandTest {
             public void drop(List<ItemCount> items) {
                 mined.add("drop " + items);
             }
+            public void craft(List<ItemCount> items) {
+                mined.add("craft " + items);
+            }
             public int[] cameraFeet() { return new int[]{12, 1, 7}; }
             public void toggleFreecam() { mined.add("freecam"); }
         });
@@ -92,6 +95,16 @@ class CommandTest {
         h.handle("#drop 5 dirt");
         h.handle("#drop");
         assertEquals(2, replies.size(), replies.toString());
+    }
+
+    @Test
+    void craftTakesItemsAndCounts() {
+        CommandHandler h = handler();
+        h.handle("#craft crafting_table");
+        h.handle("#craft stick 8 Torch 4");
+        h.handle("#craft");
+        assertEquals(List.of("craft [crafting_table -1]", "craft [stick 8, torch 4]"), mined);
+        assertTrue(replies.get(0).startsWith("Usage: craft"), replies.toString());
     }
 
     @Test

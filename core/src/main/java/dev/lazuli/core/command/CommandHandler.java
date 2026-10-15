@@ -100,6 +100,11 @@ public final class CommandHandler {
             reply(Chat.err("Containers aren't available here"));
         }
 
+        /** Crafts items (ids like {@code stick}), their ingredients first if need be; a negative count: one craft. */
+        default void craft(List<ItemCount> items) {
+            reply(Chat.err("Crafting isn't available here"));
+        }
+
         /** The block the camera is in {x, y, z}: the freecam's when it's on, otherwise the player's feet. */
         default int[] cameraFeet() {
             return playerFeet();
@@ -190,6 +195,11 @@ public final class CommandHandler {
                 else ctx.drop(items);
             }
             case "deposit", "withdraw" -> container(cmd.equals("deposit"), args);
+            case "craft" -> {
+                List<ItemCount> items = items(args, 0, args.length);
+                if (items == null) ctx.reply(Chat.err("Usage: craft <item> [count] [item [count]...]"));
+                else ctx.craft(items);
+            }
             case "help" -> help(prefix);
             default -> ctx.reply(Chat.err("Unknown command: {}. Try {}help", cmd, prefix));
         }
@@ -211,6 +221,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "drop <item|all> [count] [item [count]...]", "throw items out of the inventory (all of them without a count)"));
         ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
         ctx.reply(Chat.usage(p + "withdraw <item|all> [count] [item [count]...] [x y z]", "take items out of a container"));
+        ctx.reply(Chat.usage(p + "craft <item> [count] [item [count]...]", "craft items, making the ingredients too (logs into planks...)"));
         ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
         ctx.reply(Chat.usage(p + "set <name> [value]", "show or change a setting"));
         ctx.reply(Chat.usage(p + "settings", "list every setting"));

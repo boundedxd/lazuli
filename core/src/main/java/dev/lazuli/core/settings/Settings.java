@@ -43,6 +43,12 @@ public final class Settings {
     public final Setting<Boolean> allowInventory = bool("allowInventory", true);
     /** Inventory clicks (moving, dropping items) sent per tick: more is faster, fewer looks less like a bot. */
     public final Setting<Integer> clicksPerTick = integer("clicksPerTick", 2, 1, 20);
+    /** #craft also crafts the ingredients it lacks (logs into planks, planks into sticks...). */
+    public final Setting<Boolean> craftIngredients = bool("craftIngredients", true);
+    /** #craft places a crafting table (crafting one if need be) when a recipe needs one and none is near. */
+    public final Setting<Boolean> craftPlaceTable = bool("craftPlaceTable", true);
+    /** How far (blocks) #craft looks for a crafting table. */
+    public final Setting<Integer> craftTableRange = integer("craftTableRange", 32, 4, 64);
     /** Never use a tool's last few points of durability. */
     public final Setting<Boolean> saveTools = bool("saveTools", true);
     public final Setting<Integer> evalHorizon = integer("evalHorizon", 32, 1, 4096);
