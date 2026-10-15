@@ -28,7 +28,7 @@ final class BoatRider {
 
     private static final double WATER_TOP = 8.0 / 9.0;
     /** Ticks each step may take before the boat is given up on. */
-    private static final int PLACE_TICKS = 40, MOUNT_TICKS = 40, DISMOUNT_TICKS = 20, BREAK_TICKS = 60;
+    private static final int PLACE_TICKS = 40, MOUNT_TICKS = 80, DISMOUNT_TICKS = 20, BREAK_TICKS = 60;
     /** Ticks of hardly moving while riding before it's taken as stuck. */
     private static final int STUCK_TICKS = 60;
     /** Path nodes ahead it steers for. */
@@ -40,7 +40,9 @@ final class BoatRider {
     private AbstractBoat boat;
     /** The water nodes being crossed (path positions), where along them the boat is, and the node to land on. */
     private List<Long> run = List.of();
-    private int progress, ticks, slow;
+    private int progress, ticks, slow, usedAt;
+    /** Boats that were around before placing ours: never taken for the one just placed. */
+    private final java.util.Set<Integer> before = new java.util.HashSet<>();
     private long landing;
     /** The last node of a crossing given up on or done: not tried again from there. */
     private long skipUntil = Long.MIN_VALUE;
@@ -88,7 +90,12 @@ final class BoatRider {
         landing = path.get(end + 1);
         progress = 0;
         ticks = slow = 0;
+        usedAt = -100;
         boat = null;
+        before.clear();
+        for (AbstractBoat b : Minecraft.getInstance().level.getEntitiesOfClass(AbstractBoat.class, p.getBoundingBox().inflate(16))) {
+            before.add(b.getId());
+        }
         phase = Phase.PLACE;
         return true;
     }
@@ -104,13 +111,18 @@ final class BoatRider {
             return still(yaw0, p.getXRot());
         }
         p.getInventory().setSelectedSlot(slot);
-        // on the water a step or two out, aiming at its surface
-        long cell = run.get(Math.min(1, run.size() - 1));
+        // the boat this placed: any new one near (it shows up a tick or two after the click)
+        AbstractBoat b = newBoat(mc, p);
+        // on the first water block, right next to the shore, aiming at its surface
+        long cell = run.get(0);
         Vec3 at = new Vec3(Pos.x(cell) + 0.5, Pos.y(cell) + WATER_TOP, Pos.z(cell) + 0.5);
         float[] aim = angles(p, at);
         boolean onIt = Math.abs(Mth.wrapDegrees(aim[0] - RotationDriver.yaw(p))) < 3 && Math.abs(aim[1] - RotationDriver.pitch(p)) < 3;
-        if (onIt && ticks % 4 == 0) mc.gameMode.useItem(p, InteractionHand.MAIN_HAND);
-        AbstractBoat b = nearestBoat(mc, p, at, 2.5);
+        // one click, then time for the boat to appear: clicking on would put down a row of boats
+        if (b == null && onIt && ticks - usedAt > 12) {
+            mc.gameMode.useItem(p, InteractionHand.MAIN_HAND);
+            usedAt = ticks;
+        }
         if (b != null) {
             boat = b;
             phase = Phase.MOUNT;
@@ -127,9 +139,13 @@ final class BoatRider {
         }
         if (ticks > MOUNT_TICKS || boat.isRemoved()) return giveUp();
         float[] aim = angles(p, boat.position().add(0, 0.3, 0));
-        // walk up to it when it drifted off, else get in
-        boolean near = p.distanceTo(boat) < 2.5;
-        if (near && ticks % 5 == 0) mc.gameMode.interact(p, boat, InteractionHand.MAIN_HAND);
+        // in reach (with a little to spare): look at it and right-click it, as a player would; else walk up to it
+        boolean near = p.isWithinEntityInteractionRange(boat, -0.3);
+        boolean onIt = Math.abs(Mth.wrapDegrees(aim[0] - RotationDriver.yaw(p))) < 10 && Math.abs(aim[1] - RotationDriver.pitch(p)) < 10;
+        if (near && onIt && ticks % 4 == 0) {
+            mc.gameMode.interact(p, boat, InteractionHand.MAIN_HAND);
+            p.swing(InteractionHand.MAIN_HAND);
+        }
         return new Controls(!near, false, false, false, aim[0], aim[1]);
     }
 
@@ -209,12 +225,13 @@ final class BoatRider {
         return new Controls(false, false, false, false, yaw, pitch);
     }
 
-    private AbstractBoat nearestBoat(Minecraft mc, LocalPlayer p, Vec3 at, double range) {
+    /** The nearest empty boat within a few blocks that wasn't there before placing, or null. */
+    private AbstractBoat newBoat(Minecraft mc, LocalPlayer p) {
         AbstractBoat best = null;
-        double bd = range * range;
+        double bd = 6 * 6;
         for (AbstractBoat b : mc.level.getEntitiesOfClass(AbstractBoat.class, p.getBoundingBox().inflate(6))) {
-            if (b.isVehicle()) continue;
-            double d = b.position().distanceToSqr(at);
+            if (b.isVehicle() || before.contains(b.getId())) continue;
+            double d = b.distanceToSqr(p);
             if (d < bd) {
                 bd = d;
                 best = b;
