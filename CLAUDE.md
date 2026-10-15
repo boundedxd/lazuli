@@ -116,3 +116,33 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
 Backlog: neo rework (double/triple neos, edge/run-up starts), parkour onto open trapdoors/fence 3-gap,
 TraceRecorder should record sneak/pitch. Known bug (skipped, user thinks other mods): changing config sometimes stops
 pathing from starting until restart.
+
+## Handoff (2026-10-15, last commit 020274c)
+Everything below is built, deployed to Prism, pushed, core suite green (288) — but **none of it tested in game yet**.
+Ask the user how it went before building more on top.
+
+Recent work, newest first:
+- **Trading** (020274c) — `#trade sharpness 5 mending bread 20` (roman numerals ok), `#trade list|scan|forget`.
+  Client can't read a villager's offers from NBT; only when its trading screen opens. `TradeWatcher` records every
+  open (hand or bot) via `UseEntityCallback` + `MerchantMenu.getOffers()` into `TradeMemory`
+  (`config/lazuli/trades/<world>.txt`). `TradeProcess` phases: PLAN → GATHER (own inner `GetItemProcess`) / LOOT
+  (quiet inner `ContainerProcess` opens unknown chests ≤16 blocks of buyers) / GO → OPEN (aim + `gameMode.interact`)
+  → TRADE (select = `setSelectionHint` + `tryMoveItems` + `ServerboundSelectTradePacket`, then `Click.left(2)` to
+  cursor and `Click.left(slot)` to put down; done counted from inventory gain). Replans after each step.
+  `GetItemProcess.tradeFor` hands an item to `TradeProcess` when making it fails or costs more
+  (`ItemPlanner.cost` vs `TradeProcess.cost`); failed trades go in `noTrade` and it falls back to making.
+  **Riskiest part: the trade clicks** (result slot refill timing, `reselects` giving up after 3).
+- **Boats** — `core/move/Boating`: `fits` (water/air in the 3x3 at water level, air above: the boat is 1.375 wide),
+  `route` (A* on the water surface, +5 per tight cell), `steer` (counter-steers since spin coasts 9x the last turn).
+  `BoatRider` places on `placeSpot` (nearest fitting cell in reach, else swims), follows the route.
+- **Swim air** — `Swimmer`: goes up below 45% air, stays until full + 15 ticks with the head out; bobbing out of the
+  water no longer resets `breathing`.
+- **Stuck fix** (1fb826b) — `PathExecutor.watchdog` also runs while a search is out; progress = ~1 block sideways
+  or a block up/down. `unstickRestart`: `LazuliClient.restartJob` quietly `#kill`s and reruns `lastJob`
+  (chat muted 2s). Known limit: a restarted `#mine 64` restarts its count.
+- **#getitem extras** (d4fef74) — several items/sets, `then back|<waypoint> [deposit]`, `getItemBatch`,
+  `getItemNearby`, `mineSearch` (strip mine at `OreDepth` best Y / explore), `antiXray`.
+
+Next up (user's list): test the above in game, then the trading "chat/command use" part, water bucket clutch,
+boat-aware *pathing* (planner cost for boat crossings), smarter #farm, mob farming, `#sel fill/clear`.
+Vanilla source when needed: decompile from the loom jar with vineflower (in `~/.gradle/caches/modules-2`).
