@@ -82,6 +82,11 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     private BlockPos breaking;
     private int breakTicks;
     private Vec3 dropAt;
+    /** Where broken blocks' drops are still lying: picked up once nothing else is in reach (not one by one). */
+    private final List<Drop> drops = new ArrayList<>();
+
+    /** Where a block broke and when (drops show up a tick or two later). */
+    private record Drop(Vec3 at, int tick) {}
     private int pickupTicks, pickupTrips, bumps;
     /** Ticks of walking straight into something before the drop is walked to by path instead. */
     private static final int BUMPS = 4;
@@ -145,6 +150,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         mined = 0;
         known.clear();
         blacklist.clear();
+        drops.clear();
         rescan(mc);
         phase = Phase.TRAVEL;
         chat.accept(quantity > 0 ? Chat.ok("Mining {} x{}", what, quantity) : Chat.ok("Mining {}", what));
@@ -257,8 +263,10 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             return;
         }
         if (quantity > 0 && mined >= quantity && phase != Phase.PICKUP) {
-            finish(Chat.ok("Done: mined {} {}", mined, what));
-            return;
+            if (!nextDrop(mc, player)) {
+                finish(Chat.ok("Done: mined {} {}", mined, what));
+                return;
+            }
         }
         switch (phase) {
             case BREAK -> breakTick(mc, player);
@@ -280,6 +288,8 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             }
         }
         PathingSession.Snapshot snap = session.snapshot();
+        // nothing more in reach from here: collect what's lying around before walking off
+        if (tripStart < 0 && nextDrop(mc, player)) return;
         if (tripStart >= 0) {
             if (snap.version() == tripStart || snap.state() == PathingSession.State.PATHING) return; // under way
             // the trip ended without a target coming into sight: don't head for it (or them, if it failed) again
@@ -316,14 +326,8 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             known.remove(Pos.pack(breaking.getX(), breaking.getY(), breaking.getZ()));
             if (quantity > 0) chat.accept(Chat.info("Mined {}/{}", mined, quantity));
             tripStart = -1;
-            if (settings.minePickup.get()) {
-                phase = Phase.PICKUP;
-                dropAt = Vec3.atCenterOf(breaking);
-                pickupTicks = pickupTrips = bumps = 0;
-                pickupTrip = false;
-            } else {
-                phase = Phase.TRAVEL;
-            }
+            if (settings.minePickup.get()) drops.add(new Drop(Vec3.atCenterOf(breaking), player.tickCount));
+            phase = Phase.TRAVEL;
             breaking = null;
             release();
             return;
@@ -361,6 +365,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             e -> e.isAlive());
         if (items.isEmpty() && pickupTicks > 4 || pickupTicks > PICKUP_TICKS) {
             if (pickupTrip && session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
+            drops.removeIf(d -> d.at().equals(dropAt));
             phase = Phase.TRAVEL;
             tripStart = -1;
             return;
@@ -396,6 +401,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         if (pickupTrip) {
             if (snap.version() == tripStart || snap.state() == PathingSession.State.PATHING) return;
             if (snap.state() != PathingSession.State.ARRIVED || pickupTrips >= PICKUP_TRIPS) {
+                drops.removeIf(d -> d.at().equals(dropAt));
                 phase = Phase.TRAVEL; // can't get to it: leave it
                 tripStart = -1;
                 return;
@@ -408,6 +414,26 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         session.start(new GoalBlock(ip.getX(), ip.getY(), ip.getZ()), true, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
         pickupTrip = true;
         pickupTrips++;
+    }
+
+    /**
+     * Goes for the nearest drop still lying where a block was broken (forgetting ones that are gone or far behind).
+     * @return whether it went into picking up
+     */
+    private boolean nextDrop(Minecraft mc, LocalPlayer player) {
+        if (!settings.minePickup.get()) {
+            drops.clear();
+            return false;
+        }
+        drops.removeIf(d -> d.at().distanceToSqr(player.position()) > 24 * 24 || player.tickCount - d.tick() > 4
+            && mc.level.getEntitiesOfClass(ItemEntity.class, new AABB(d.at(), d.at()).inflate(2), e -> e.isAlive()).isEmpty());
+        if (drops.isEmpty()) return false;
+        dropAt = drops.stream().map(Drop::at).min(Comparator.comparingDouble(d -> d.distanceToSqr(player.position()))).get();
+        phase = Phase.PICKUP;
+        pickupTicks = pickupTrips = bumps = 0;
+        pickupTrip = false;
+        tripStart = -1;
+        return true;
     }
 
     /** The game picks up drops touching the player's box grown by 1 sideways and 0.5 up and down. */

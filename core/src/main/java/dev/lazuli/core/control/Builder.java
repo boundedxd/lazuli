@@ -141,7 +141,7 @@ public final class Builder {
             float yaw = PathFollower.yawTo(p.x(), p.z(), cx, cz);
             return new Controls(true, false, false, false, yaw, 60f, 0, true);
         }
-        if (!a.place()) return mine(p, a.pos());
+        if (!a.place()) return mineOrClear(p, a.pos());
         if (!hands.selectThrowaway()) {
             if (outU != u || outV != v) {
                 outU = u;
@@ -167,6 +167,24 @@ public final class Builder {
             return new Controls(false, false, true, false, p.yaw(), 90f, 0, true);
         }
         return bridge(p, a);
+    }
+
+    /**
+     * Break {@code pos}; if no part of it is in sight, first break whatever block is in the way to it (never one at or
+     * below the feet), the way a player digs through to a block behind another.
+     */
+    Controls mineOrClear(PlayerState p, long pos) {
+        double eye = p.y() + hands.eyeHeight();
+        int x = Pos.x(pos), y = Pos.y(pos), z = Pos.z(pos);
+        if (aimAt(p.x(), eye, p.z(), x, y, z, -1) == null) {
+            float[] ang = Raycast.angles(p.x(), eye, p.z(), x + 0.5, y + 0.5, z + 0.5);
+            Raycast.Hit h = Raycast.cast(world, p.x(), eye, p.z(), ang[0], ang[1], Raycast.REACH);
+            if (h != null && h.y() >= Math.floor(p.y() + 1e-6) && !(h.x() == x && h.y() == y && h.z() == z)) {
+                long in = Pos.pack(h.x(), h.y(), h.z());
+                if (hands.breakable(in)) return mine(p, in);
+            }
+        }
+        return mine(p, pos);
     }
 
     /** Break {@code pos} once the crosshair is on it; until then turn to a part of it the eye can see. */
