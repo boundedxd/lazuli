@@ -41,7 +41,7 @@ public final class SmeltProcess implements Process {
     /** Ticks with the furnace out and nothing happening before it gives up. */
     private static final int STALL_TICKS = 100;
 
-    private enum Phase { IDLE, MAKE_FURNACE, STATION, LOAD, LEAVE, WAIT }
+    private enum Phase { IDLE, MAKE_FURNACE, STATION, LOAD, LEAVE, WAIT, PICKUP }
 
     public enum Outcome { NONE, DONE, FAILED, CANCELLED }
 
@@ -63,6 +63,7 @@ public final class SmeltProcess implements Process {
     private final Station station;
     private final List<Job> left = new ArrayList<>();
     private Phase phase = Phase.IDLE;
+    private String pickedMsg;
     private Outcome outcome = Outcome.NONE;
     private Job job;
     private ItemCount asked;
@@ -86,6 +87,7 @@ public final class SmeltProcess implements Process {
             case STATION -> "going to the furnace";
             case LOAD -> "loading";
             case LEAVE, WAIT -> "cooking";
+            case PICKUP -> "picking up the furnace";
             case IDLE -> "";
         };
         return "Smelt " + asked.count() + " " + asked.item().replace("minecraft:", "") + "  (" + doing + ")";
@@ -236,6 +238,9 @@ public final class SmeltProcess implements Process {
                 }
             }
             case LOAD, LEAVE, WAIT -> furnace(mc, p);
+            case PICKUP -> {
+                if (station.pickUp(mc, p)) end(Outcome.DONE, pickedMsg);
+            }
             default -> {}
         }
     }
@@ -254,6 +259,10 @@ public final class SmeltProcess implements Process {
                 end(Outcome.DONE, Chat.ok("Left {} {} cooking at {} {} {}, ready in about {} s: {}smelt collect", job.toTake,
                     short_(job.input), job.pos.getX(), job.pos.getY(), job.pos.getZ(), (job.readyAt - mc.level.getGameTime()) / 20,
                     settings.prefix.get()));
+            } else if (station.startPickUp(p)) {
+                // nothing left in the furnace it placed itself: take it along
+                pickedMsg = Chat.ok("Smelted {} {}", taken, short_(job.result));
+                phase = Phase.PICKUP;
             } else {
                 end(Outcome.DONE, Chat.ok("Smelted {} {}", taken, short_(job.result)));
             }

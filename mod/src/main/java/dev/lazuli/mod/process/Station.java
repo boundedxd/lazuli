@@ -14,6 +14,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
@@ -34,6 +35,8 @@ final class Station {
     private enum Phase { FIND, TRAVEL, OPEN, PLACE, MOVE }
 
     private static final int OPEN_TICKS = 60, PLACE_TICKS = 100, TRIES = 2, MOVES = 3;
+    /** With one to place: farther than this (blocks), or a walk longer than TRAVEL_TICKS, places its own instead. */
+    private static final int NEAR = 8, TRAVEL_TICKS = 300, BREAK_TICKS = 200, COLLECT_TICKS = 80;
 
     private final Settings settings;
     private final ClickDriver clicks;
@@ -44,7 +47,7 @@ final class Station {
     private String item, name, error;
     private Predicate<AbstractContainerMenu> menu;
     private boolean mayPlace, acted;
-    private BlockPos pos;
+    private BlockPos pos, placed, skip;
     private PlaceSpots.Spot spot;
     private List<int[]> stands;
     private int phaseStart, tries, usedAt, moves;
@@ -67,6 +70,9 @@ final class Station {
         this.menu = menu;
         this.mayPlace = mayPlace;
         pos = at;
+        skip = null;
+        // one it placed earlier and hasn't picked up yet stays its own
+        if (placed != null && !Minecraft.getInstance().level.getBlockState(placed).is(block)) placed = null;
         spot = null;
         stands = null;
         error = null;
@@ -77,6 +83,11 @@ final class Station {
 
     BlockPos pos() {
         return pos;
+    }
+
+    /** The block this placed itself (for picking it up again after), or null. */
+    BlockPos placed() {
+        return placed;
     }
 
     String error() {
@@ -96,7 +107,11 @@ final class Station {
         switch (phase) {
             case FIND -> {
                 if (pos != null && !mc.level.getBlockState(pos).is(block)) pos = null; // broken meanwhile
-                if (pos == null) pos = nearest(mc, p, block, settings.stationRange.get());
+                if (pos == null) {
+                    pos = nearest(mc, p, s -> s.is(block), settings.stationRange.get(), skip);
+                    // carrying one: placing it beats a long walk to another
+                    if (pos != null && mayPlace && has(p) && pos.distSqr(p.blockPosition()) > NEAR * NEAR) pos = null;
+                }
                 if (pos == null) {
                     if (mayPlace) enter(Phase.PLACE, p);
                     else return fail("No " + name + " within " + settings.stationRange.get() + " blocks, and placing one is off");
@@ -114,8 +129,16 @@ final class Station {
                     enter(Phase.OPEN, p);
                     return State.WORKING;
                 }
-                if (trip.running()) return State.WORKING;
-                if (++tries > TRIES) return fail("Can't get to the " + name);
+                boolean slow = p.tickCount - phaseStart > TRAVEL_TICKS;
+                if (trip.running() && !slow) return State.WORKING;
+                if (++tries > TRIES || slow) {
+                    if (!(mayPlace && has(p))) return fail("Can't get to the " + name);
+                    trip.cancel();
+                    skip = pos; // carrying one: put it down here instead
+                    pos = null;
+                    enter(Phase.PLACE, p);
+                    return State.WORKING;
+                }
                 trip.go(new GoalAdjacent(pos.getX(), pos.getY(), pos.getZ()), p);
             }
             case OPEN -> {
@@ -134,7 +157,7 @@ final class Station {
 
     private State place(Minecraft mc, LocalPlayer p) {
         if (spot != null && mc.level.getBlockState(at(spot)).is(block)) {
-            pos = at(spot);
+            pos = placed = at(spot);
             spot = null;
             tries = 0;
             enter(Phase.TRAVEL, p);
@@ -156,6 +179,64 @@ final class Station {
         if (p.tickCount - usedAt < 10) return State.WORKING; // give the last try time to show up
         if (Aim.useOn(mc, p, against(spot), face(spot), input, settings)) usedAt = p.tickCount;
         return State.WORKING;
+    }
+
+    private boolean has(LocalPlayer p) {
+        for (int i = 0; i < 36; i++) if (Inventories.key(p.getInventory().getItem(i)).equals(item)) return true;
+        return false;
+    }
+
+    private int pickTicks;
+    private boolean broken;
+
+    /** Starts picking up the block this placed (see {@link #pickUp}); false if it placed none. */
+    boolean startPickUp(LocalPlayer p) {
+        cancel();
+        if (placed == null || !placed.equals(pos) || !settings.pickupStations.get()) return false;
+        // a furnace broken without a pickaxe is gone: leave it then
+        var state = Minecraft.getInstance().level.getBlockState(placed);
+        if (state.requiresCorrectToolForDrops()) {
+            boolean tool = false;
+            for (int i = 0; i < 36 && !tool; i++) tool = p.getInventory().getItem(i).isCorrectToolForDrops(state);
+            if (!tool) return false;
+        }
+        pickTicks = 0;
+        broken = false;
+        return true;
+    }
+
+    /** One tick of breaking the placed block and collecting its drop: true once done (or given up). */
+    boolean pickUp(Minecraft mc, LocalPlayer p) {
+        if (p.containerMenu != p.inventoryMenu) p.closeContainer();
+        pickTicks++;
+        if (!broken) {
+            if (!mc.level.getBlockState(placed).is(block)) {
+                broken = true;
+                pickTicks = 0;
+                input.release();
+                return false;
+            }
+            if (pickTicks > BREAK_TICKS) return endPickUp();
+            if (Aim.breakTick(mc, p, placed, input, settings) == Aim.Result.BLOCKED && !trip.running()) {
+                trip.go(new GoalAdjacent(placed.getX(), placed.getY(), placed.getZ()), p);
+            }
+            return false;
+        }
+        // its drop: walk over it until it's picked up
+        var drops = mc.level.getEntitiesOfClass(ItemEntity.class, new AABB(placed).inflate(4),
+            e -> e.isAlive() && Inventories.key(e.getItem()).equals(item));
+        if (drops.isEmpty() || pickTicks > COLLECT_TICKS) return endPickUp();
+        if (!trip.running()) {
+            BlockPos at = drops.get(0).blockPosition();
+            trip.go(new GoalBlock(at.getX(), at.getY(), at.getZ()), p);
+        }
+        return false;
+    }
+
+    private boolean endPickUp() {
+        placed = null;
+        cancel();
+        return true;
     }
 
     /** Nowhere to place it from here: walk to the nearest roomier place and try again (a few times). */
@@ -237,6 +318,11 @@ final class Station {
 
     /** The nearest block matching {@code test} within {@code r} blocks (half that up and down), or null. */
     static BlockPos nearest(Minecraft mc, LocalPlayer p, Predicate<net.minecraft.world.level.block.state.BlockState> test, int r) {
+        return nearest(mc, p, test, r, null);
+    }
+
+    private static BlockPos nearest(Minecraft mc, LocalPlayer p, Predicate<net.minecraft.world.level.block.state.BlockState> test,
+                                    int r, BlockPos skip) {
         BlockPos feet = p.blockPosition(), best = null;
         double bestD = Double.MAX_VALUE;
         BlockPos.MutableBlockPos at = new BlockPos.MutableBlockPos();
@@ -245,7 +331,7 @@ final class Station {
             for (int x = feet.getX() - r; x <= feet.getX() + r; x++)
                 for (int z = feet.getZ() - r; z <= feet.getZ() + r; z++) {
                     at.set(x, y, z);
-                    if (!test.test(mc.level.getBlockState(at))) continue;
+                    if (!test.test(mc.level.getBlockState(at)) || at.equals(skip)) continue;
                     double d = at.distSqr(feet);
                     if (d < bestD) {
                         bestD = d;

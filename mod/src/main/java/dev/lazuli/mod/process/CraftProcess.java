@@ -35,7 +35,7 @@ public final class CraftProcess implements Process {
     private static final String TABLE = "minecraft:crafting_table";
     private static final int RESULT_TICKS = 40, TAKE_TICKS = 20, CLEAR_TICKS = 100;
 
-    private enum Phase { IDLE, CRAFT, TABLE }
+    private enum Phase { IDLE, CRAFT, TABLE, PICKUP }
 
     /** The steps of one batch in the grid: empty it, lay out the ingredients, wait for the result, take it. */
     private enum Batch { CLEAR, FILL, RESULT, TAKE }
@@ -49,6 +49,9 @@ public final class CraftProcess implements Process {
     private Phase phase = Phase.IDLE;
     private Batch batchStep;
     private Outcome outcome = Outcome.NONE;
+    /** How it ended, while picking up the table it placed. */
+    private Outcome pendingHow;
+    private String pendingMsg;
     private final Deque<CraftTree.Step> steps = new ArrayDeque<>();
     private List<ItemCount> asked = List.of();
     /** Crafts left in the current step, crafts in this batch, the result count before it. */
@@ -65,7 +68,7 @@ public final class CraftProcess implements Process {
     public String status() {
         if (phase == Phase.IDLE) return null;
         return "Craft " + String.join(", ", asked.stream().map(i -> i.count() + " " + i.item().replace("minecraft:", "")).toList())
-            + (phase == Phase.TABLE ? "  (going to a table)" : "");
+            + (phase == Phase.TABLE ? "  (going to a table)" : phase == Phase.PICKUP ? "  (picking up the table)" : "");
     }
 
     @Override
@@ -188,6 +191,9 @@ public final class CraftProcess implements Process {
                     case WORKING -> {}
                 }
             }
+            case PICKUP -> {
+                if (station.pickUp(mc, p)) end(pendingHow, pendingMsg);
+            }
             default -> {}
         }
     }
@@ -296,6 +302,14 @@ public final class CraftProcess implements Process {
     }
 
     private void end(Outcome how, String msg) {
+        // done (or stuck) with a table it placed itself: take it along first
+        if (how != Outcome.CANCELLED && phase != Phase.IDLE && phase != Phase.PICKUP && station.startPickUp(Minecraft.getInstance().player)) {
+            phase = Phase.PICKUP;
+            pendingHow = how;
+            pendingMsg = msg;
+            steps.clear();
+            return;
+        }
         boolean was = phase != Phase.IDLE;
         phase = Phase.IDLE;
         outcome = how;

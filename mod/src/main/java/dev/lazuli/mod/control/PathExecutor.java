@@ -171,6 +171,13 @@ public final class PathExecutor {
                 }
             }
         }
+        if (!interacting && c != null && idx >= 0 && idx + 1 < path.size()) {
+            // dropping down a hole it's digging: keep looking down (the next block to mine is right below)
+            long u = path.get(idx), w = path.get(idx + 1);
+            if (Pos.x(u) == Pos.x(w) && Pos.z(u) == Pos.z(w) && Pos.y(w) < Pos.y(u) && c.targetPitch() < curPitch) {
+                c = new Controls(c.forward(), c.back(), c.jump(), c.sprint(), c.targetYaw(), curPitch, c.strafe(), c.sneak());
+            }
+        }
         long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(v.x, v.z), building);
         if (failed != null) session.edgeFailed(failed[0], failed[1]);
         if (settings.unstick.get()) watchdog(player, snap, block, eating, false);

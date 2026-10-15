@@ -102,6 +102,7 @@ public final class LazuliConfig implements WalksyLibApi {
                 .group(OptionGroup.builder("Crafting")
                     .option(bool(s.craftIngredients, "#craft also crafts the ingredients it lacks first (logs into planks, planks into sticks...)."))
                     .option(bool(s.craftPlaceTable, "#craft places a crafting table (crafting one if need be) when a recipe needs one and none is near."))
+                    .option(bool(s.pickupStations, "Pick up a crafting table or furnace it placed itself once #craft / #smelt is done."))
                     .option(Options.ofNumber("Station range", s.stationRange::get, s.stationRange.defaultValue(), s.stationRange::set)
                         .range(4, 64, 1)
                         .description(OptionDescription.ofText(() -> "How far (blocks) #craft and #smelt look for a crafting table or furnace.")).build())

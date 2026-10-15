@@ -137,9 +137,9 @@ public final class Builder {
         boolean vertical = Pos.x(u) == Pos.x(v) && Pos.z(u) == Pos.z(v);
         double cx = Pos.x(u) + 0.5, cz = Pos.z(u) + 0.5;
         if (vertical && Math.hypot(p.x() - cx, p.z() - cz) > CENTER) {
-            // mining down or pillaring: sneak to the middle of the block first
+            // mining down or pillaring: sneak to the middle of the block first (never looking up from straight down)
             float yaw = PathFollower.yawTo(p.x(), p.z(), cx, cz);
-            return new Controls(true, false, false, false, yaw, 60f, 0, true);
+            return new Controls(true, false, false, false, yaw, Math.max(60f, p.pitch()), 0, true);
         }
         if (!a.place()) return mineOrClear(p, a.pos());
         if (!hands.selectThrowaway()) {

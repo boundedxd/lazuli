@@ -85,6 +85,8 @@ public final class Settings {
     public final Setting<Boolean> craftIngredients = bool("craftIngredients", true);
     /** #craft places a crafting table (crafting one if need be) when a recipe needs one and none is near. */
     public final Setting<Boolean> craftPlaceTable = bool("craftPlaceTable", true);
+    /** #craft / #smelt break a crafting table or furnace they placed themselves once done, and pick it up. */
+    public final Setting<Boolean> pickupStations = bool("pickupStations", true);
     /** How far (blocks) #craft and #smelt look for a crafting table or furnace. */
     public final Setting<Integer> stationRange = integer("stationRange", 32, 4, 64);
     /** Fuel #smelt may burn, best first (item ids, namespace optional). */
