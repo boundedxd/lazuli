@@ -77,7 +77,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     private final Set<Long> blacklist = new HashSet<>();
     private Phase phase = Phase.IDLE;
     private List<Long> tripTargets = List.of();
-    /** Snapshot version when the current trip was asked for (-1: no trip); a newer one means the session took it. */
+    /** The trip number of the trip this process asked for (-1: none); its snapshots carry it once the session takes it. */
     private long tripStart = -1;
     private BlockPos breaking;
     private int breakTicks;
@@ -151,6 +151,9 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         known.clear();
         blacklist.clear();
         drops.clear();
+        tripStart = -1;
+        tripTargets = List.of();
+        pickupTrip = false;
         rescan(mc);
         phase = Phase.TRAVEL;
         chat.accept(quantity > 0 ? Chat.ok("Mining {} x{}", what, quantity) : Chat.ok("Mining {}", what));
@@ -163,6 +166,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         cancelled = true;
         boolean wasTravelling = phase == Phase.TRAVEL || phase == Phase.PICKUP;
         phase = Phase.IDLE;
+        tripStart = -1;
         Tools.keep("mine", null);
         release();
         if (wasTravelling && session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
@@ -291,9 +295,9 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         // nothing more in reach from here: collect what's lying around before walking off
         if (tripStart < 0 && nextDrop(mc, player)) return;
         if (tripStart >= 0) {
-            if (snap.version() == tripStart || snap.state() == PathingSession.State.PATHING) return; // under way
+            if (underWay(snap)) return;
             // the trip ended without a target coming into sight: don't head for it (or them, if it failed) again
-            if (snap.state() == PathingSession.State.ARRIVED) blacklist.add(tripTargets.get(0));
+            if (snap.trip() == tripStart && snap.state() == PathingSession.State.ARRIVED) blacklist.add(tripTargets.get(0));
             else blacklist.addAll(tripTargets);
             tripStart = -1;
         }
@@ -309,8 +313,12 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         for (long p : next) goals.add(new GoalAdjacent(Pos.x(p), Pos.y(p), Pos.z(p)));
         tripTargets = next;
         BlockPos f = player.blockPosition();
-        tripStart = snap.version();
-        session.start(new GoalAny(goals, what), false, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
+        tripStart = session.start(new GoalAny(goals, what), false, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
+    }
+
+    /** Our trip is still being searched for, or walked (a later trip, someone else's or a stop, ends it). */
+    private boolean underWay(PathingSession.Snapshot snap) {
+        return snap.trip() < tripStart || snap.trip() == tripStart && snap.state() == PathingSession.State.PATHING;
     }
 
     private void beginBreak(BlockPos pos) {
@@ -399,8 +407,8 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             return;
         }
         if (pickupTrip) {
-            if (snap.version() == tripStart || snap.state() == PathingSession.State.PATHING) return;
-            if (snap.state() != PathingSession.State.ARRIVED || pickupTrips >= PICKUP_TRIPS) {
+            if (underWay(snap)) return;
+            if (snap.trip() != tripStart || snap.state() != PathingSession.State.ARRIVED || pickupTrips >= PICKUP_TRIPS) {
                 drops.removeIf(d -> d.at().equals(dropAt));
                 phase = Phase.TRAVEL; // can't get to it: leave it
                 tripStart = -1;
@@ -409,9 +417,8 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         }
         // a first trip, or arrived and the item rolled on: go (again) to where it is now
         BlockPos ip = item.blockPosition(), f = player.blockPosition();
-        tripStart = snap.version();
         // onto its block (the nearest safe spot if that can't be stood in); the last bit is walked straight, above
-        session.start(new GoalBlock(ip.getX(), ip.getY(), ip.getZ()), true, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
+        tripStart = session.start(new GoalBlock(ip.getX(), ip.getY(), ip.getZ()), true, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
         pickupTrip = true;
         pickupTrips++;
     }

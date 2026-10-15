@@ -10,7 +10,7 @@ import static dev.lazuli.core.world.Pos.pack;
 /** One quiet trip a process asked the session for, and whether it's still going. */
 final class Trip {
     private final PathingSession session;
-    /** Snapshot version when the trip was asked for; -1 for none. */
+    /** The trip's number from the session; -1 for none. */
     private long start = -1;
     private int startedTick;
     /** Where the player last stood: mid-jump, the block they're in is air, and no trip can start from air. */
@@ -21,10 +21,9 @@ final class Trip {
     }
 
     void go(Goal goal, LocalPlayer player) {
-        start = session.snapshot().version();
         startedTick = player.tickCount;
         BlockPos f = start(player);
-        session.start(goal, false, pack(f.getX(), f.getY(), f.getZ()), true);
+        start = session.start(goal, false, pack(f.getX(), f.getY(), f.getZ()), true);
     }
 
     /** The block to start from: under the player, or where they last stood while in the air. */
@@ -45,13 +44,14 @@ final class Trip {
     boolean running() {
         if (start < 0) return false;
         PathingSession.Snapshot s = session.snapshot();
-        return s.version() == start || s.state() == PathingSession.State.PATHING;
+        return s.trip() < start || s.trip() == start && s.state() == PathingSession.State.PATHING;
     }
 
     /** How the last trip ended (ARRIVED, FAILED or IDLE), or null while one is running or none was made. */
     PathingSession.State ended() {
         if (start < 0 || running()) return null;
-        return session.snapshot().state();
+        PathingSession.Snapshot s = session.snapshot();
+        return s.trip() == start ? s.state() : PathingSession.State.IDLE; // replaced or stopped
     }
 
     int age(LocalPlayer player) {

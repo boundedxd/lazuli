@@ -163,10 +163,13 @@ public final class PathingSession {
 
     /** Stops at once: the executor sees IDLE right away and any search under way is cut short. */
     public void stop(boolean quiet) {
-        long gen = generation.incrementAndGet();
-        planning = false;
+        long gen;
+        synchronized (this) { // with publish: a path found just as the stop came can't be published after it
+            gen = generation.incrementAndGet();
+            planning = false;
+            snapshot = new Snapshot(State.IDLE, List.of(), snapshot.goal(), versions.incrementAndGet(), gen);
+        }
         cancelSearch();
-        snapshot = new Snapshot(State.IDLE, List.of(), snapshot.goal(), versions.incrementAndGet(), gen);
         if (!quiet) messages.accept(Chat.warn("Stopped"));
         worker.execute(() -> {
             if (generation.get() != gen) return;
@@ -355,7 +358,7 @@ public final class PathingSession {
         }
     }
 
-    private void publish(State state, List<Long> path) {
+    private synchronized void publish(State state, List<Long> path) {
         if (stale()) return;
         snapshot = new Snapshot(state, List.copyOf(path), goal, versions.incrementAndGet(), tripGeneration);
         planning = false;
