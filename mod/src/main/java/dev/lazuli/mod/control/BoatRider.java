@@ -29,7 +29,7 @@ final class BoatRider {
 
     private static final double WATER_TOP = 8.0 / 9.0;
     /** Ticks each step may take before the boat is given up on. */
-    private static final int PLACE_TICKS = 40, MOUNT_TICKS = 80, DISMOUNT_TICKS = 20, BREAK_TICKS = 60;
+    private static final int PLACE_TICKS = 40, SURFACE_TICKS = 100, MOUNT_TICKS = 80, DISMOUNT_TICKS = 20, BREAK_TICKS = 60;
     /** Ticks of hardly moving while riding before it's taken as stuck. */
     private static final int STUCK_TICKS = 60;
     /** Path nodes ahead it steers for. */
@@ -45,7 +45,7 @@ final class BoatRider {
     private AbstractBoat boat;
     /** The water nodes being crossed (path positions), where along them the boat is, and the node to land on. */
     private List<Long> run = List.of();
-    private int progress, ticks, slow, usedAt;
+    private int progress, ticks, slow, usedAt, surfacing;
     /** Boats that were around before placing ours: never taken for the one just placed. */
     private final java.util.Set<Integer> before = new java.util.HashSet<>();
     private long landing;
@@ -107,6 +107,7 @@ final class BoatRider {
         progress = 0;
         ticks = slow = 0;
         usedAt = -100;
+        surfacing = 0;
         boat = null;
         before.clear();
         for (AbstractBoat b : Minecraft.getInstance().level.getEntitiesOfClass(AbstractBoat.class, p.getBoundingBox().inflate(16))) {
@@ -117,7 +118,7 @@ final class BoatRider {
     }
 
     private Controls place(Minecraft mc, LocalPlayer p, float yaw0) {
-        if (ticks > PLACE_TICKS) return giveUp();
+        if (ticks - surfacing > PLACE_TICKS || surfacing > SURFACE_TICKS) return giveUp();
         int slot = boatSlot(p, settings.allowInventory.get() && mc.screen == null ? 36 : 9);
         if (slot < 0) return giveUp();
         if (slot >= 9) {
@@ -134,8 +135,11 @@ final class BoatRider {
         Vec3 at = new Vec3(Pos.x(cell) + 0.5, Pos.y(cell) + WATER_TOP, Pos.z(cell) + 0.5);
         float[] aim = angles(p, at);
         boolean onIt = Math.abs(Mth.wrapDegrees(aim[0] - RotationDriver.yaw(p))) < 3 && Math.abs(aim[1] - RotationDriver.pitch(p)) < 3;
+        // a boat can't be put down from under the water: swim up until the eyes are above its surface (and stay up)
+        boolean under = p.isUnderWater() || p.getEyeY() < at.y + 0.05;
+        if (under && b == null) surfacing++;
         // one click, then time for the boat to appear: clicking on would put down a row of boats
-        if (b == null && onIt && ticks - usedAt > 12) {
+        if (b == null && onIt && !under && ticks - usedAt > 12) {
             mc.gameMode.useItem(p, InteractionHand.MAIN_HAND);
             usedAt = ticks;
         }
@@ -144,7 +148,7 @@ final class BoatRider {
             phase = Phase.MOUNT;
             ticks = 0;
         }
-        return new Controls(false, false, false, false, aim[0], aim[1]);
+        return new Controls(false, false, p.isInWater(), false, aim[0], aim[1]);
     }
 
     private Controls mount(Minecraft mc, LocalPlayer p, float yaw0, float pitch0) {
