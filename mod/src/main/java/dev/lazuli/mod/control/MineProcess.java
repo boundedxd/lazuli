@@ -6,7 +6,7 @@ import dev.lazuli.core.control.InputPlanner;
 import dev.lazuli.core.goal.Goal;
 import dev.lazuli.core.goal.GoalAdjacent;
 import dev.lazuli.core.goal.GoalAny;
-import dev.lazuli.core.goal.GoalNear;
+import dev.lazuli.core.goal.GoalBlock;
 import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.world.BlockKind;
@@ -355,8 +355,20 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         }
         if (items.isEmpty()) return; // drops take a tick or two to show up
         ItemEntity item = items.stream().min(Comparator.comparingDouble(player::distanceToSqr)).get();
-        if (player.distanceToSqr(item) < 1.0) return; // about to be picked up
+        if (player.distanceToSqr(item) < 0.25) return; // about to be picked up
         PathingSession.Snapshot snap = session.snapshot();
+        // close by on the same level: walk straight onto it (a "near" goal counts as arrived a block short of it)
+        double dx = item.getX() - player.getX(), dz = item.getZ() - player.getZ();
+        if (player.onGround() && dx * dx + dz * dz < 9 && Math.abs(item.getY() - player.getY()) < 1.2) {
+            if (pickupTrip && snap.state() == PathingSession.State.PATHING) session.stop(true);
+            pickupTrip = false;
+            float yaw0 = RotationDriver.yaw(player), pitch0 = RotationDriver.pitch(player);
+            float want = (float) Math.toDegrees(Math.atan2(-dx, dz));
+            float yaw = InputPlanner.approach(yaw0, want, settings.rotationSpeed.get().floatValue());
+            input.apply(mc, new Controls(true, false, false, false, want, pitch0), yaw, pitch0, settings.freeLook.get());
+            driving = true;
+            return;
+        }
         if (pickupTrip) {
             if (snap.version() == tripStart || snap.state() == PathingSession.State.PATHING) return;
             if (snap.state() != PathingSession.State.ARRIVED) {
@@ -368,7 +380,8 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         // a first trip, or arrived and the item rolled on: go (again) to where it is now
         BlockPos ip = item.blockPosition(), f = player.blockPosition();
         tripStart = snap.version();
-        session.start(new GoalNear(ip.getX(), ip.getY(), ip.getZ(), 1), false, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
+        // onto its block (the nearest safe spot if that can't be stood in); the last bit is walked straight, above
+        session.start(new GoalBlock(ip.getX(), ip.getY(), ip.getZ()), true, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
         pickupTrip = true;
     }
 
