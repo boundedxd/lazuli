@@ -49,6 +49,11 @@ public final class PathingSession {
     public static final int DIRECT = 96;
     public static final long SEGMENT_NANOS = 1_500_000_000L;
     private static final int SEGMENT_RADIUS = 4;
+    /**
+     * Digging, goals further than this up or down are also reached in segments, this far at a time: through solid
+     * ground every cell is a node and one search all the way (surface to diamonds) floods the rock.
+     */
+    public static final int DEEP = 32;
 
     private final BlockView world;
     private final IntSupplier minY;
@@ -269,8 +274,50 @@ public final class PathingSession {
                 segment = null; // nothing ahead worked; search the whole way and report honestly
             }
         }
+        int[] p = goalPoint(goal);
+        if (p != null && graph.digs() && Math.abs(p[1] - Pos.y(player)) > DEEP) {
+            // a dig toward it, DEEP blocks up or down at a time
+            double f = (double) DEEP / Math.abs(p[1] - Pos.y(player));
+            segment = new GoalNear((int) Math.round(Pos.x(player) + (p[0] - Pos.x(player)) * f),
+                (int) Math.round(Pos.y(player) + (p[1] - Pos.y(player)) * f),
+                (int) Math.round(Pos.z(player) + (p[2] - Pos.z(player)) * f), SEGMENT_RADIUS);
+            createPlanner();
+            PlanResult r = search(SEGMENT_NANOS);
+            if (stale()) return;
+            if (r.status() == PlanResult.Status.FOUND) {
+                publish(State.PATHING, r.path());
+                return;
+            }
+            segment = null;
+        }
         createPlanner();
         replan();
+    }
+
+    /** Where a goal is (the nearest of several), or null for goals without a point (y levels, x/z). */
+    private int[] goalPoint(Goal g) {
+        if (g instanceof GoalBlock b) return new int[]{b.x(), b.y(), b.z()};
+        if (g instanceof GoalNear n) return new int[]{n.x(), n.y(), n.z()};
+        if (g instanceof dev.lazuli.core.goal.GoalAdjacent a) return new int[]{a.x(), a.y(), a.z()};
+        if (g instanceof dev.lazuli.core.goal.GoalAny any) {
+            int[] best = null;
+            double bd = Double.POSITIVE_INFINITY;
+            for (Goal sub : any.goals()) {
+                int[] q = goalPoint(sub);
+                if (q == null) continue;
+                double d = sq(q[0] - Pos.x(player)) + sq(q[1] - Pos.y(player)) + sq(q[2] - Pos.z(player));
+                if (d < bd) {
+                    bd = d;
+                    best = q;
+                }
+            }
+            return best;
+        }
+        return null;
+    }
+
+    private static double sq(double d) {
+        return d * d;
     }
 
     /** The goal's horizontal target, or null for goals without one (y levels). */
@@ -308,7 +355,8 @@ public final class PathingSession {
             if (!quiet) messages.accept(Chat.ok("Arrived at {}", goal.describe()));
             return;
         }
-        if (segment != null && Math.hypot(segment.x() - Pos.x(player), segment.z() - Pos.z(player)) <= HANDOFF
+        if (segment != null && Math.sqrt(sq(segment.x() - Pos.x(player)) + sq(segment.y() - Pos.y(player))
+            + sq(segment.z() - Pos.z(player))) <= HANDOFF
             && graph.isNode(player)) {
             begin(); // the current path stays published while the next segment is planned
             return;

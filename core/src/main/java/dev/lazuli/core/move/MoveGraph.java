@@ -89,6 +89,11 @@ public final class MoveGraph implements Graph {
         return f;
     }
 
+    /** Whether moves may break blocks (every cell of solid ground is then a node). */
+    public boolean digs() {
+        return dig.enabled();
+    }
+
     @Override
     public boolean isNode(long u) {
         return !Double.isNaN(feet(u)) || swims(u) || Climbing.node(w, u) || dig.kind(Pos.x(u), Pos.y(u), Pos.z(u)) != Digging.Kind.NONE;

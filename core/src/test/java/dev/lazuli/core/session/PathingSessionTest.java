@@ -111,6 +111,22 @@ class PathingSessionTest {
     }
 
     @Test
+    void deepGoalUnderSolidGroundIsDugToInSegments() {
+        // diamonds from the surface: 120 blocks of stone straight down; searched for whole, that floods the rock
+        GridWorld w = new GridWorld(BlockKind.SOLID).fill(-20, 64, -20, 20, 68, 20, BlockKind.AIR);
+        dev.lazuli.core.move.Interaction in = new dev.lazuli.core.move.Interaction(true, true, 64, p -> 8);
+        PathingSession s = new PathingSession(w, () -> -64, () -> 319, new Settings(), Runnable::run, msgs::add, () -> in);
+        long t0 = System.nanoTime();
+        s.start(new GoalAny(List.of(new GoalAdjacent(10, -56, 5), new GoalAdjacent(-20, -58, 30)), "diamonds"), false,
+            Pos.pack(0, 64, 0), true);
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        assertEquals(PathingSession.State.PATHING, s.snapshot().state(), msgs.toString());
+        assertTrue(ms < 2000, "took " + ms + " ms");
+        long end = s.snapshot().path().get(s.snapshot().path().size() - 1);
+        assertTrue(Pos.y(end) < 50, "heads down: " + Pos.toString(end));
+    }
+
+    @Test
     void stopIsImmediateEvenWhileTheWorkerIsSearching() throws Exception {
         // a huge open world and a goal walled off: the search runs until its time budget
         GridWorld w = GridWorld.flatFloor(-300, -300, 300, 300).fill(250, 1, 250, 252, 4, 252, BlockKind.SOLID);
