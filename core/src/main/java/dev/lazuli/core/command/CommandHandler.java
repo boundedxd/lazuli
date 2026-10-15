@@ -105,6 +105,16 @@ public final class CommandHandler {
             reply(Chat.err("Crafting isn't available here"));
         }
 
+        /** Smelts an item (what comes out, like iron_ingot, or what goes in); a negative count: all it can. */
+        default void smelt(ItemCount item) {
+            reply(Chat.err("Smelting isn't available here"));
+        }
+
+        /** Goes back to the furnaces it left cooking and takes what's done. */
+        default void smeltCollect() {
+            reply(Chat.err("Smelting isn't available here"));
+        }
+
         /** The block the camera is in {x, y, z}: the freecam's when it's on, otherwise the player's feet. */
         default int[] cameraFeet() {
             return playerFeet();
@@ -195,6 +205,12 @@ public final class CommandHandler {
                 else ctx.drop(items);
             }
             case "deposit", "withdraw" -> container(cmd.equals("deposit"), args);
+            case "smelt" -> {
+                List<ItemCount> items = args.length == 1 && args[0].equalsIgnoreCase("collect") ? null : items(args, 0, args.length);
+                if (args.length == 1 && args[0].equalsIgnoreCase("collect")) ctx.smeltCollect();
+                else if (items == null || items.size() != 1) ctx.reply(Chat.err("Usage: smelt <item> [count] | smelt collect"));
+                else ctx.smelt(items.get(0));
+            }
             case "craft" -> {
                 List<ItemCount> items = items(args, 0, args.length);
                 if (items == null) ctx.reply(Chat.err("Usage: craft <item> [count] [item [count]...]"));
@@ -222,6 +238,8 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
         ctx.reply(Chat.usage(p + "withdraw <item|all> [count] [item [count]...] [x y z]", "take items out of a container"));
         ctx.reply(Chat.usage(p + "craft <item> [count] [item [count]...]", "craft items, making the ingredients too (logs into planks...)"));
+        ctx.reply(Chat.usage(p + "smelt <item> [count]", "cook items in a furnace (iron_ingot or raw_iron; blast furnace/smoker when there's one)"));
+        ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
         ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
         ctx.reply(Chat.usage(p + "set <name> [value]", "show or change a setting"));
         ctx.reply(Chat.usage(p + "settings", "list every setting"));

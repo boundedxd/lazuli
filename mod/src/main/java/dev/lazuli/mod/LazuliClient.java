@@ -22,6 +22,7 @@ import dev.lazuli.mod.control.MineProcess;
 import dev.lazuli.mod.process.ExploreProcess;
 import dev.lazuli.mod.process.ContainerProcess;
 import dev.lazuli.mod.process.CraftProcess;
+import dev.lazuli.mod.process.SmeltProcess;
 import dev.lazuli.mod.craft.RecipeData;
 import dev.lazuli.mod.process.FarmProcess;
 import dev.lazuli.mod.process.FollowProcess;
@@ -77,6 +78,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private FarmProcess farm;
 	private ContainerProcess containers;
 	private CraftProcess crafts;
+	private SmeltProcess smelts;
 	private Upkeep upkeep;
 	/** Every process; at most one runs at a time. */
 	private java.util.List<Process> processes;
@@ -108,9 +110,10 @@ public final class LazuliClient implements ClientModInitializer {
 		clicks = new ClickDriver(settings);
 		containers = new ContainerProcess(session, settings, clicks, this::chat);
 		crafts = new CraftProcess(session, settings, clicks, this::chat);
+		smelts = new SmeltProcess(session, settings, clicks, crafts, this::chat);
 		RecipeData.get(); // read the recipes in the background now, not on the first #craft
 		upkeep = new Upkeep(settings, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -203,6 +206,18 @@ public final class LazuliClient implements ClientModInitializer {
 			public void craft(java.util.List<ItemCount> items) {
 				LazuliClient.this.stopProcesses(false);
 				crafts.start(Minecraft.getInstance(), items);
+			}
+
+			@Override
+			public void smelt(ItemCount item) {
+				LazuliClient.this.stopProcesses(false);
+				smelts.start(Minecraft.getInstance(), item);
+			}
+
+			@Override
+			public void smeltCollect() {
+				LazuliClient.this.stopProcesses(false);
+				smelts.collect(Minecraft.getInstance());
 			}
 
 			@Override
@@ -329,6 +344,20 @@ public final class LazuliClient implements ClientModInitializer {
 					case FAILED -> Task.Result.FAILED;
 					case CANCELLED -> Task.Result.CANCELLED;
 				}, () -> crafts.stop(false));
+			});
+		}
+
+		@Override
+		public Task smelt(String item, int count) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				smelts.start(Minecraft.getInstance(), new ItemCount(item, count));
+				return new Task("smelt " + item, () -> switch (smelts.outcome()) {
+					case NONE -> null;
+					case DONE -> Task.Result.DONE;
+					case FAILED -> Task.Result.FAILED;
+					case CANCELLED -> Task.Result.CANCELLED;
+				}, () -> smelts.stop(false));
 			});
 		}
 

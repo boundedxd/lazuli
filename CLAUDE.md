@@ -56,9 +56,9 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
 
 ## Key mod pieces
 - `LazuliClient` — wires everything: session, executor, processes, commands context, tick order, the API impl (`Api`).
-- `dev/lazuli/api/Lazuli` — public API for other mods: `Lazuli.get().goTo/mine/container/drop/craft/stop/busy/command`.
+- `dev/lazuli/api/Lazuli` — public API for other mods: `Lazuli.get().goTo/mine/container/drop/craft/smelt/stop/busy/command`.
 - `process/*` — `Process` = something running on top of pathing (one at a time): MineProcess (in control/),
-  Follow, Explore, Tunnel, Farm, ContainerProcess (#deposit/#withdraw), CraftProcess (#craft), Upkeep (auto eat/armor). `Trip` = a quiet trip.
+  Follow, Explore, Tunnel, Farm, ContainerProcess (#deposit/#withdraw), CraftProcess (#craft), SmeltProcess (#smelt), Upkeep (auto eat/armor). `Trip` = a quiet trip.
 - `inventory/Inventories` (game menu → core `Menu`, item keys like `minecraft:dirt#<componentsHash>`),
   `ClickDriver` (sends planned clicks, `clicksPerTick` per tick).
 - `control/Aim` — legit looking: find a visible point, turn at rotationSpeed, act only when the crosshair is on it
@@ -91,7 +91,10 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
 2. Crafting — DONE, **not yet tested in game**: `#craft item [count]...`. Vanilla recipes + item tags are read from
    the game jar (`mod/craft/RecipeData`, `VanillaPackResources`; servers only send unlocked recipes). `CraftProcess`:
    2x2 in the inventory (clicks on menu 0, no screen), else walks to / places a crafting table.
-   NEXT: smelting (all furnace types, reuse ContainerProcess/ClickDriver; smelting JSON is in the same recipe folder).
+   Smelting — DONE, **not yet tested in game**: `#smelt item [count]`, `#smelt collect`. `core/craft/Smelting`
+   (job: input/fast furnace, fuel plan from the `smeltFuels` list), `mod/process/SmeltProcess`; `Station` = shared
+   find/place/walk/open for crafting tables and furnaces. `openInventory` toggle: `ClickDriver` stands still and opens
+   the inventory screen for own-inventory clicks (tool/armor swaps, #drop, 2x2 crafting).
 3. `#getitem <item>`: resolve item → mine/craft/smelt tree, subtract current inventory (has stone pick → skip ahead),
    run as a chain of Tasks.
 4. Water bucket clutch, boat clutch, auto boats over X water blocks (needs boat physics), minecarts.

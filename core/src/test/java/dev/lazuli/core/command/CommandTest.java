@@ -59,6 +59,12 @@ class CommandTest {
             public void craft(List<ItemCount> items) {
                 mined.add("craft " + items);
             }
+            public void smelt(ItemCount item) {
+                mined.add("smelt " + item);
+            }
+            public void smeltCollect() {
+                mined.add("collect");
+            }
             public int[] cameraFeet() { return new int[]{12, 1, 7}; }
             public void toggleFreecam() { mined.add("freecam"); }
         });
@@ -105,6 +111,14 @@ class CommandTest {
         h.handle("#craft");
         assertEquals(List.of("craft [crafting_table -1]", "craft [stick 8, torch 4]"), mined);
         assertTrue(replies.get(0).startsWith("Usage: craft"), replies.toString());
+    }
+
+    @Test
+    void smeltTakesOneItemOrCollect() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#smelt iron_ingot 16", "#smelt Raw_Iron", "#smelt collect", "#smelt", "#smelt a 1 b 2"}) h.handle(c);
+        assertEquals(List.of("smelt iron_ingot 16", "smelt raw_iron -1", "collect"), mined);
+        assertEquals(2, replies.size(), replies.toString());
     }
 
     @Test

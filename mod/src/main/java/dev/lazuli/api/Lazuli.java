@@ -69,6 +69,12 @@ public interface Lazuli {
     /** Crafts several items, one after another. */
     Task craft(List<ItemCount> items);
 
+    /**
+     * Smelts {@code count} of an item: what comes out (iron_ingot) or what goes in (raw_iron); negative: all the
+     * input it has. With the smeltWait setting off it's done once the furnace is loaded (#smelt collect goes back).
+     */
+    Task smelt(String item, int count);
+
     /** The running job, or null. */
     Task current();
 

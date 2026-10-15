@@ -44,6 +44,44 @@ public final class Moves {
         return out;
     }
 
+    /**
+     * Clicks putting exactly {@code n} of {@code item} (an exact item key) from the {@code from} slots into {@code slot}
+     * (empty, or holding that item): whole stacks while they fit, then one by one, and the rest goes back.
+     *
+     * @throws IllegalStateException if the {@code from} slots don't hold enough
+     */
+    public static List<Click> put(Menu menu, int[] from, int slot, String item, int n) {
+        Menu sim = menu.copy();
+        List<Click> out = new ArrayList<>();
+        int source = -1, left = n;
+        while (left > 0) {
+            if (sim.cursor().empty()) {
+                source = -1;
+                for (int s : from) if (item.equals(sim.get(s).item()) && (source < 0 || sim.get(s).count() > sim.get(source).count())) source = s;
+                if (source < 0) throw new IllegalStateException("Not enough " + item);
+                add(sim, out, Click.left(source));
+            }
+            int c = sim.cursor().count();
+            if (c <= left) {
+                int before = sim.get(slot).count();
+                add(sim, out, Click.left(slot));
+                int moved = sim.get(slot).count() - before;
+                if (moved <= 0) throw new IllegalStateException("No room for " + item);
+                left -= moved;
+            } else {
+                for (int i = 0; i < left; i++) add(sim, out, Click.right(slot));
+                left = 0;
+            }
+        }
+        if (!sim.cursor().empty()) add(sim, out, Click.left(source));
+        return out;
+    }
+
+    private static void add(Menu sim, List<Click> out, Click c) {
+        sim.apply(c);
+        out.add(c);
+    }
+
     /** A slot in {@code to} that can take {@code n} more of {@code s}: a stack of it with room, else an empty one; or -1. */
     private static int room(Menu m, int[] to, Stack s, int n) {
         for (int t : to) if (m.get(t).stacksWith(s) && s.max() - m.get(t).count() >= n) return t;

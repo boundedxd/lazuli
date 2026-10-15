@@ -33,6 +33,24 @@ public final class Inventories {
         return k -> k.equals(id) || k.startsWith(id + "#");
     }
 
+    /** A full item id: "Raw_Iron" -> "minecraft:raw_iron". */
+    public static String id(String name) {
+        String n = name.toLowerCase(Locale.ROOT);
+        return n.contains(":") ? n : "minecraft:" + n;
+    }
+
+    /** Plain items (nothing enchanted, named or damaged) in the main inventory and hotbar, by id. */
+    public static java.util.Map<String, Integer> plainCounts(Player p) {
+        java.util.Map<String, Integer> out = new java.util.HashMap<>();
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = p.getInventory().getItem(i);
+            if (s.isEmpty()) continue;
+            String k = key(s);
+            if (!k.contains("#")) out.merge(k, s.getCount(), Integer::sum);
+        }
+        return out;
+    }
+
     public static Stack stack(ItemStack s) {
         return s.isEmpty() ? Stack.EMPTY : new Stack(key(s), s.getCount(), s.getMaxStackSize());
     }

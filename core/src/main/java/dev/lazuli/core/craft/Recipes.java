@@ -9,9 +9,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Every crafting recipe, read from the game's data files, by what it makes. */
+/** Every crafting and furnace recipe, read from the game's data files, by what it makes. */
 public final class Recipes {
     private final Map<String, List<Recipe>> byResult = new HashMap<>();
+    private final Map<String, List<SmeltRecipe>> smeltByResult = new HashMap<>(), smeltByInput = new HashMap<>();
 
     private Recipes() {}
 
@@ -23,13 +24,19 @@ public final class Recipes {
         Recipes r = new Recipes();
         Map<String, Set<String>> resolved = new HashMap<>();
         recipes.keySet().stream().sorted().forEach(id -> {
-            Recipe recipe;
+            java.util.function.Function<String, Set<String>> tag = t -> tag(t, tags, resolved, new HashSet<>());
             try {
-                recipe = read(id, Json.parse(recipes.get(id)), tag -> tag(tag, tags, resolved, new HashSet<>()));
+                Object json = Json.parse(recipes.get(id));
+                Recipe recipe = read(id, json, tag);
+                if (recipe != null) r.byResult.computeIfAbsent(recipe.result(), k -> new ArrayList<>()).add(recipe);
+                SmeltRecipe smelt = readSmelt(id, json, tag);
+                if (smelt != null) {
+                    r.smeltByResult.computeIfAbsent(smelt.result(), k -> new ArrayList<>()).add(smelt);
+                    for (String in : smelt.input()) r.smeltByInput.computeIfAbsent(in, k -> new ArrayList<>()).add(smelt);
+                }
             } catch (RuntimeException e) {
-                return; // a format it doesn't know: skip that one recipe
+                // a format it doesn't know: skip that one recipe
             }
-            if (recipe != null) r.byResult.computeIfAbsent(recipe.result(), k -> new ArrayList<>()).add(recipe);
         });
         return r;
     }
@@ -37,6 +44,16 @@ public final class Recipes {
     /** The recipes making {@code item} (a full id like minecraft:stick). */
     public List<Recipe> producing(String item) {
         return byResult.getOrDefault(item, List.of());
+    }
+
+    /** The furnace recipes making {@code item} (all furnace kinds). */
+    public List<SmeltRecipe> smelting(String item) {
+        return smeltByResult.getOrDefault(item, List.of());
+    }
+
+    /** The furnace recipes cooking {@code item}. */
+    public List<SmeltRecipe> smeltingFrom(String item) {
+        return smeltByInput.getOrDefault(item, List.of());
     }
 
     public int size() {
@@ -76,6 +93,21 @@ public final class Recipes {
                 return null;
             }
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static SmeltRecipe readSmelt(String id, Object json, java.util.function.Function<String, Set<String>> tag) {
+        Map<String, Object> o = (Map<String, Object>) json;
+        SmeltRecipe.Furnace f = switch (String.valueOf(o.get("type"))) {
+            case "minecraft:smelting" -> SmeltRecipe.Furnace.FURNACE;
+            case "minecraft:blasting" -> SmeltRecipe.Furnace.BLAST_FURNACE;
+            case "minecraft:smoking" -> SmeltRecipe.Furnace.SMOKER;
+            default -> null;
+        };
+        if (f == null) return null;
+        Map<String, Object> result = (Map<String, Object>) o.get("result");
+        int ticks = o.get("cookingtime") instanceof Double d ? d.intValue() : f == SmeltRecipe.Furnace.FURNACE ? 200 : 100;
+        return new SmeltRecipe(id, (String) result.get("id"), ingredient(o.get("ingredient"), tag), f, ticks);
     }
 
     /** "minecraft:x", "#minecraft:tag" or a list of those. */

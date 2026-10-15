@@ -10,6 +10,7 @@ import main.walksy.lib.api.config.option.Option;
 import main.walksy.lib.api.config.option.OptionDescription;
 import main.walksy.lib.api.config.option.OptionGroup;
 import main.walksy.lib.api.config.option.Options;
+import main.walksy.lib.api.config.value.ListEntries;
 import main.walksy.lib.api.config.value.WLColor;
 import main.walksy.lib.api.config.value.WLKeyMapping;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -68,9 +69,7 @@ public final class LazuliConfig implements WalksyLibApi {
                 .group(OptionGroup.builder("Placing")
                     .option(bool(s.allowPlace, "Bridge gaps and pillar up with throwaway blocks from the hotbar."))
                     .option(bool(s.eagleBridge, "Eagle bridge: walk back without sneaking and only crouch at the edge to place (faster). Off: ninja bridge, sneaking the whole way."))
-                    .option(Options.ofString("Throwaway blocks", s.throwawayBlocks::get, s.throwawayBlocks.defaultValue(),
-                        v -> s.throwawayBlocks.parse(v))
-                        .description(OptionDescription.ofText(() -> "Comma-separated block ids it may place.")).build())
+                    .option(idList("Throwaway blocks", s.throwawayBlocks, ListEntries.blocks(), "Blocks it may place for bridging and pillaring."))
                     .build())
                 .group(OptionGroup.builder("Mining")
                     .option(bool(s.allowBreak, "Mine through blocks in the way, with the best tool in the hotbar."))
@@ -86,9 +85,15 @@ public final class LazuliConfig implements WalksyLibApi {
                 .group(OptionGroup.builder("Crafting")
                     .option(bool(s.craftIngredients, "#craft also crafts the ingredients it lacks first (logs into planks, planks into sticks...)."))
                     .option(bool(s.craftPlaceTable, "#craft places a crafting table (crafting one if need be) when a recipe needs one and none is near."))
-                    .option(Options.ofNumber("Crafting table range", s.craftTableRange::get, s.craftTableRange.defaultValue(), s.craftTableRange::set)
+                    .option(Options.ofNumber("Station range", s.stationRange::get, s.stationRange.defaultValue(), s.stationRange::set)
                         .range(4, 64, 1)
-                        .description(OptionDescription.ofText(() -> "How far (blocks) #craft looks for a crafting table.")).build())
+                        .description(OptionDescription.ofText(() -> "How far (blocks) #craft and #smelt look for a crafting table or furnace.")).build())
+                    .build())
+                .group(OptionGroup.builder("Smelting")
+                    .option(idList("Fuel", s.smeltFuels, ListEntries.items(), "What #smelt may burn, best first (drag to reorder). It never burns what it's cooking."))
+                    .option(bool(s.smeltWait, "#smelt waits at the furnace and takes everything out. Off: loads it, leaves, says when it's done; #smelt collect goes back."))
+                    .option(bool(s.smeltFastFurnaces, "#smelt uses a blast furnace (ores) or smoker (food), twice as fast, when there's one near or in the inventory."))
+                    .option(bool(s.smeltPlaceFurnace, "#smelt places a furnace (crafting one from cobblestone if need be) when none is near."))
                     .build())
                 .group(OptionGroup.builder("Clicking")
                     .option(bool(s.openInventory, "Open the inventory screen and stand still for inventory clicks (tool and armor swaps, #drop, 2x2 crafting), like a player: anticheats flag clicks with no screen open or while moving (InvMove). Off: click straight away, faster."))
@@ -160,6 +165,19 @@ public final class LazuliConfig implements WalksyLibApi {
                     .build())
                 .build())
             .build();
+    }
+
+    /** A comma-separated id setting as a picker list (ids get their namespace so the picker knows them). */
+    private static Option<java.util.List<String>> idList(String name, Setting<String> setting, ListEntries entries, String description) {
+        return Options.ofSelectionList(name, () -> ids(setting.get()), ids(setting.defaultValue()),
+                v -> setting.parse(String.join(",", v)), entries)
+            .reorderable()
+            .description(OptionDescription.ofText(() -> description)).build();
+    }
+
+    private static java.util.List<String> ids(String csv) {
+        return java.util.Arrays.stream(csv.split(",")).filter(x -> !x.isBlank())
+            .map(x -> x.contains(":") ? x : "minecraft:" + x).toList();
     }
 
     private static Option<Boolean> bool(Setting<Boolean> setting, String description) {

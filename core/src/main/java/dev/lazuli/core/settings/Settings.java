@@ -52,8 +52,19 @@ public final class Settings {
     public final Setting<Boolean> craftIngredients = bool("craftIngredients", true);
     /** #craft places a crafting table (crafting one if need be) when a recipe needs one and none is near. */
     public final Setting<Boolean> craftPlaceTable = bool("craftPlaceTable", true);
-    /** How far (blocks) #craft looks for a crafting table. */
-    public final Setting<Integer> craftTableRange = integer("craftTableRange", 32, 4, 64);
+    /** How far (blocks) #craft and #smelt look for a crafting table or furnace. */
+    public final Setting<Integer> stationRange = integer("stationRange", 32, 4, 64);
+    /** Fuel #smelt may burn, best first (item ids, namespace optional). */
+    public final Setting<String> smeltFuels = register(new Setting<>("smeltFuels",
+        "coal,charcoal,coal_block,dried_kelp_block,blaze_rod,oak_planks,spruce_planks,birch_planks,jungle_planks,acacia_planks,"
+            + "dark_oak_planks,mangrove_planks,cherry_planks,pale_oak_planks,bamboo_planks,crimson_planks,warped_planks,stick",
+        s -> s.replace(" ", "").toLowerCase(java.util.Locale.ROOT)));
+    /** #smelt waits at the furnace until it's done; off: loads it, leaves, and #smelt collect goes back. */
+    public final Setting<Boolean> smeltWait = bool("smeltWait", true);
+    /** #smelt uses a blast furnace (ores) or smoker (food), twice as fast, when there's one near or in the inventory. */
+    public final Setting<Boolean> smeltFastFurnaces = bool("smeltFastFurnaces", true);
+    /** #smelt places a furnace (crafting one if need be) when none is near. */
+    public final Setting<Boolean> smeltPlaceFurnace = bool("smeltPlaceFurnace", true);
     /** Never use a tool's last few points of durability. */
     public final Setting<Boolean> saveTools = bool("saveTools", true);
     public final Setting<Integer> evalHorizon = integer("evalHorizon", 32, 1, 4096);
