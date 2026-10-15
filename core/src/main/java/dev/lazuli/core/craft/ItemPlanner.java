@@ -25,8 +25,15 @@ public final class ItemPlanner {
         }
     }
 
-    /** The steps in order, or why it can't be done. */
-    public record Plan(List<Action> actions, String problem) {
+    /**
+     * The steps in order, or why it can't be done; {@code keep}: how many of each item the plan uses, so nothing else
+     * spends them (bridging with the cobblestone it's collecting...).
+     */
+    public record Plan(List<Action> actions, String problem, Map<String, Integer> keep) {
+        public Plan(List<Action> actions, String problem) {
+            this(actions, problem, Map.of());
+        }
+
         public boolean ok() {
             return problem == null;
         }
@@ -77,7 +84,7 @@ public final class ItemPlanner {
         Run r = new Run(have, pickTier, tableNear, furnaceNear);
         try {
             r.get(item, count, 0);
-            return new Plan(List.copyOf(r.actions), null);
+            return new Plan(List.copyOf(r.actions), null, Map.copyOf(r.keep));
         } catch (Stuck e) {
             return new Plan(List.of(), e.getMessage());
         }
@@ -97,6 +104,8 @@ public final class ItemPlanner {
     private final class Run {
         final Map<String, Integer> have, reserved = new HashMap<>(), startHave;
         final Map<String, Double> costs = new HashMap<>();
+        /** Every item a step asked for, and how many (see {@link Plan#keep}). */
+        final Map<String, Integer> keep = new HashMap<>();
         final Set<String> making = new HashSet<>(), costing = new HashSet<>();
         final List<Action> actions = new ArrayList<>();
         int pickTier;
@@ -122,17 +131,38 @@ public final class ItemPlanner {
 
         /** Makes sure at least {@code n} of {@code item} are free (not set aside for a step being planned). */
         void get(String item, int n, int depth) {
+            keep.merge(item, n, Integer::sum);
             int need = n - free(item);
             if (need <= 0) return;
             if (depth > DEPTH) throw new Stuck("Too many steps to get " + name(item));
             if (!making.add(item)) throw new Stuck("Going round in circles on " + name(item));
             try {
-                double mine = mineCost(item, 0), smelt = smeltCost(item, 0), craft = craftCost(item, 0);
-                double best = Math.min(mine, Math.min(smelt, craft));
-                if (best >= INF) throw new Stuck("No way to get " + name(item) + why(item));
-                if (best == craft) craft(item, need, depth);
-                else if (best == smelt) smelt(item, need, depth);
-                else mine(item, need, depth);
+                // cheapest way first; one that comes back round to this item (raw iron from a raw iron block made of
+                // raw iron) or can't be done: the next way
+                double[] cost = {mineCost(item, 0), smeltCost(item, 0), craftCost(item, 0)};
+                Integer[] order = {0, 1, 2};
+                java.util.Arrays.sort(order, java.util.Comparator.comparingDouble(i -> cost[i]));
+                if (cost[order[0]] >= INF) throw new Stuck("No way to get " + name(item) + why(item));
+                Stuck first = null;
+                for (int k = 0; k < 3; k++) {
+                    int way = order[k];
+                    if (cost[way] >= INF) break;
+                    Snap before = save();
+                    try {
+                        switch (way) {
+                            case 0 -> mine(item, need, depth);
+                            case 1 -> smelt(item, need, depth);
+                            // only recipes cheaper than the next way (a few nuggets don't make digging for an iron block
+                            // worth it over smelting)
+                            default -> craft(item, need, depth, k < 2 ? cost[order[k + 1]] : INF);
+                        }
+                        return;
+                    } catch (Stuck e) {
+                        restore(before);
+                        if (first == null) first = e;
+                    }
+                }
+                throw first;
             } finally {
                 making.remove(item);
             }
@@ -208,8 +238,27 @@ public final class ItemPlanner {
             actions.add(new Action(Kind.SMELT, item, n, List.of()));
         }
 
-        void craft(String item, int n, int depth) {
-            Recipe r = bestRecipe(item, depth);
+        /** Crafts with the cheapest recipe that works, of those costing under {@code limit}. */
+        void craft(String item, int n, int depth, double limit) {
+            List<Recipe> rs = new ArrayList<>(recipes.producing(item));
+            rs.sort(java.util.Comparator.comparingDouble(r -> recipeCost(r, depth)));
+            Stuck first = null;
+            for (Recipe r : rs) {
+                double c = recipeCost(r, depth);
+                if (c >= INF || c > limit && first != null) break;
+                Snap before = save();
+                try {
+                    craft(item, n, r, depth);
+                    return;
+                } catch (Stuck e) {
+                    restore(before);
+                    if (first == null) first = e;
+                }
+            }
+            throw first != null ? first : new Stuck("No way to craft " + name(item));
+        }
+
+        void craft(String item, int n, Recipe r, int depth) {
             if (!r.fits(2) && !tableNear) station(TABLE, rules.placeTable(), "crafting table", depth);
             int crafts = (n + r.count() - 1) / r.count();
             Map<Set<String>, Integer> groups = new LinkedHashMap<>();
@@ -283,11 +332,11 @@ public final class ItemPlanner {
 
         /** Everything a plan changes, to try something and go back. */
         record Snap(Map<String, Integer> have, Map<String, Integer> reserved, List<Action> actions, Map<String, Double> costs,
-                    int pickTier, boolean tableNear, boolean furnaceNear) {}
+                    int pickTier, boolean tableNear, boolean furnaceNear, Map<String, Integer> keep) {}
 
         Snap save() {
             return new Snap(new HashMap<>(have), new HashMap<>(reserved), new ArrayList<>(actions), new HashMap<>(costs),
-                pickTier, tableNear, furnaceNear);
+                pickTier, tableNear, furnaceNear, new HashMap<>(keep));
         }
 
         void restore(Snap s) {
@@ -302,6 +351,8 @@ public final class ItemPlanner {
             pickTier = s.pickTier();
             tableNear = s.tableNear();
             furnaceNear = s.furnaceNear();
+            keep.clear();
+            keep.putAll(s.keep());
         }
 
         /** A crafting table or furnace to place, made if it has none. */
@@ -338,28 +389,18 @@ public final class ItemPlanner {
             return best;
         }
 
-        Recipe bestRecipe(String item, int depth) {
-            Recipe best = null;
-            double bestCost = INF;
-            for (Recipe r : recipes.producing(item)) {
-                double c = recipeCost(r, depth);
-                if (best == null || c < bestCost) {
-                    bestCost = c;
-                    best = r;
-                }
-            }
-            return best;
-        }
-
         // ---- costs: rough work per item, to choose between ways ----
 
         double cost(String item, int depth) {
-            if (startHave.getOrDefault(item, 0) > 0) return 0;
+            if (making.contains(item)) return INF; // what's being made can't go into making itself
             Double known = costs.get(item);
             if (known != null) return known;
             if (depth > DEPTH || !costing.add(item)) return INF;
             double c = Math.min(mineCost(item, depth), Math.min(smeltCost(item, depth), craftCost(item, depth)));
             costing.remove(item);
+            // some in the inventory: cheaper (use what it has), but not free, or a few nuggets look like a way to make
+            // ingots and it ends up digging for an iron block to make the rest
+            if (startHave.getOrDefault(item, 0) > 0) c = c >= INF ? 1 : c / 4;
             costs.put(item, c);
             return c;
         }

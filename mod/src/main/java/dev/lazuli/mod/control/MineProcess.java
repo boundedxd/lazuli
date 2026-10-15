@@ -49,6 +49,10 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     private static final double DIRECT = 5.0;
     /** Ticks to wait for drops to appear and be picked up after a break. */
     private static final int PICKUP_TICKS = 100;
+    /** Trips toward a drop before leaving it (one it can't get to, behind a wall...). */
+    private static final int PICKUP_TRIPS = 2;
+    /** Walk forward only when facing within this many degrees of the drop (else it circles round it). */
+    private static final float FACING = 30;
     /** Ticks breaking may take before the block counts as unbreakable from here. */
     private static final int BREAK_TIMEOUT = 600;
 
@@ -78,7 +82,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     private BlockPos breaking;
     private int breakTicks;
     private Vec3 dropAt;
-    private int pickupTicks;
+    private int pickupTicks, pickupTrips;
     private boolean pickupTrip;
     private boolean driving;
 
@@ -130,6 +134,10 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         stop(false);
         cancelled = false;
         targets = Set.copyOf(blocks);
+        // don't bridge with what it's mining
+        java.util.Map<String, Integer> keep = new java.util.HashMap<>();
+        for (Block b : blocks) if (b.asItem() != net.minecraft.world.item.Items.AIR) keep.put(BuiltInRegistries.ITEM.getKey(b.asItem()).toString(), Integer.MAX_VALUE);
+        Tools.keep("mine", keep);
         what = String.join(", ", names);
         this.quantity = quantity;
         mined = 0;
@@ -147,6 +155,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         cancelled = true;
         boolean wasTravelling = phase == Phase.TRAVEL || phase == Phase.PICKUP;
         phase = Phase.IDLE;
+        Tools.keep("mine", null);
         release();
         if (wasTravelling && session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
         if (announce) chat.accept(Chat.warn("Stopped mining ({} broken)", mined));
@@ -154,6 +163,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
 
     private void finish(String msg) {
         phase = Phase.IDLE;
+        Tools.keep("mine", null);
         release();
         if (session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
         chat.accept(msg);
@@ -307,7 +317,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             if (settings.minePickup.get()) {
                 phase = Phase.PICKUP;
                 dropAt = Vec3.atCenterOf(breaking);
-                pickupTicks = 0;
+                pickupTicks = pickupTrips = 0;
                 pickupTrip = false;
             } else {
                 phase = Phase.TRAVEL;
@@ -357,21 +367,24 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         ItemEntity item = items.stream().min(Comparator.comparingDouble(player::distanceToSqr)).get();
         if (player.distanceToSqr(item) < 0.25) return; // about to be picked up
         PathingSession.Snapshot snap = session.snapshot();
-        // close by on the same level: walk straight onto it (a "near" goal counts as arrived a block short of it)
+        // close by on the same level with nothing in the way: walk straight onto it (a "near" goal counts as arrived a
+        // block short of it)
         double dx = item.getX() - player.getX(), dz = item.getZ() - player.getZ();
-        if (player.onGround() && dx * dx + dz * dz < 9 && Math.abs(item.getY() - player.getY()) < 1.2) {
+        if (player.onGround() && dx * dx + dz * dz < 9 && Math.abs(item.getY() - player.getY()) < 1.2 && clear(mc, player, item)) {
             if (pickupTrip && snap.state() == PathingSession.State.PATHING) session.stop(true);
             pickupTrip = false;
             float yaw0 = RotationDriver.yaw(player), pitch0 = RotationDriver.pitch(player);
             float want = (float) Math.toDegrees(Math.atan2(-dx, dz));
             float yaw = InputPlanner.approach(yaw0, want, settings.rotationSpeed.get().floatValue());
-            input.apply(mc, new Controls(true, false, false, false, want, pitch0), yaw, pitch0, settings.freeLook.get());
+            // turn first, then walk: walking while still turning circles round it
+            boolean facing = Math.abs(net.minecraft.util.Mth.wrapDegrees(want - yaw)) < FACING;
+            input.apply(mc, new Controls(facing, false, false, false, want, pitch0), yaw, pitch0, settings.freeLook.get());
             driving = true;
             return;
         }
         if (pickupTrip) {
             if (snap.version() == tripStart || snap.state() == PathingSession.State.PATHING) return;
-            if (snap.state() != PathingSession.State.ARRIVED) {
+            if (snap.state() != PathingSession.State.ARRIVED || pickupTrips >= PICKUP_TRIPS) {
                 phase = Phase.TRAVEL; // can't get to it: leave it
                 tripStart = -1;
                 return;
@@ -383,6 +396,19 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         // onto its block (the nearest safe spot if that can't be stood in); the last bit is walked straight, above
         session.start(new GoalBlock(ip.getX(), ip.getY(), ip.getZ()), true, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
         pickupTrip = true;
+        pickupTrips++;
+    }
+
+    /** Nothing solid between the player and the drop, at foot and eye height: it can be walked straight onto. */
+    private static boolean clear(Minecraft mc, LocalPlayer player, ItemEntity item) {
+        Vec3 to = item.position();
+        for (double h : new double[]{0.3, player.getEyeHeight()}) {
+            Vec3 a = player.position().add(0, h, 0), b = new Vec3(to.x, Math.max(to.y + 0.1, player.getY() + h - 0.6), to.z);
+            if (h > 1) b = new Vec3(to.x, player.getY() + h, to.z);
+            HitResult hit = mc.level.clip(new ClipContext(a, b, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+            if (hit.getType() != HitResult.Type.MISS) return false;
+        }
+        return true;
     }
 
     // ---- choosing and aiming ----

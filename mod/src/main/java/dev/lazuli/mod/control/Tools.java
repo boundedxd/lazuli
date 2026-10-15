@@ -42,7 +42,14 @@ public final class Tools {
         boolean creative = p.getAbilities().instabuild;
         int throwaways = 0;
         Set<String> names = throwawayNames(settings);
-        for (ItemStack s : hotbar) if (throwawayRank(s, names) > 0) throwaways += s.getCount();
+        Map<String, Integer> spare = spares(p, settings);
+        for (ItemStack s : hotbar) {
+            if (throwawayRank(s, names) <= 0) continue;
+            String id = BuiltInRegistries.ITEM.getKey(s.getItem()).toString();
+            int left = spare.getOrDefault(id, Integer.MAX_VALUE), use = Math.min(s.getCount(), left);
+            throwaways += use;
+            if (spare.containsKey(id)) spare.put(id, left - use);
+        }
         Map<Short, Double> cache = new ConcurrentHashMap<>();
         Interaction.BreakTime time = phys -> cache.computeIfAbsent(phys.id, id -> {
             if (creative) return phys.hardness < 0 ? INF : 1.0;
@@ -138,16 +145,42 @@ public final class Tools {
      */
     public static int throwaway(Player p, Settings settings) {
         Set<String> names = throwawayNames(settings);
+        Map<String, Integer> spare = spares(p, settings);
         int sel = p.getInventory().getSelectedSlot();
         int best = -1, bestRank = 0;
         for (int i = 0; i < 9; i++) {
-            int r = throwawayRank(p.getInventory().getItem(i), names) * 2 + (i == sel ? 1 : 0);
+            ItemStack s = p.getInventory().getItem(i);
+            if (s.isEmpty() || spare.getOrDefault(BuiltInRegistries.ITEM.getKey(s.getItem()).toString(), 1) <= 0) continue;
+            int r = throwawayRank(s, names) * 2 + (i == sel ? 1 : 0);
             if (r > 1 && r > bestRank) {
                 bestRank = r;
                 best = i;
             }
         }
         return best;
+    }
+
+    /** Items processes are collecting, by process: how many of each it needs (Integer.MAX_VALUE: all). */
+    private static final Map<String, Map<String, Integer>> KEEP = new ConcurrentHashMap<>();
+
+    /** {@code who} is collecting these (an empty map: nothing any more); see keepCollected. */
+    public static void keep(String who, Map<String, Integer> items) {
+        if (items == null || items.isEmpty()) KEEP.remove(who);
+        else KEEP.put(who, Map.copyOf(items));
+    }
+
+    /** For each kept item: how many beyond what's kept the inventory holds (may be 0 or less); others unlimited. */
+    private static Map<String, Integer> spares(Player p, Settings settings) {
+        Map<String, Integer> spare = new java.util.HashMap<>();
+        if (!settings.keepCollected.get() || KEEP.isEmpty()) return spare;
+        for (Map<String, Integer> m : KEEP.values()) m.forEach((k, v) -> spare.merge(k, -v, Math::min));
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = p.getInventory().getItem(i);
+            if (s.isEmpty()) continue;
+            String id = BuiltInRegistries.ITEM.getKey(s.getItem()).toString();
+            spare.computeIfPresent(id, (k, v) -> v + s.getCount());
+        }
+        return spare;
     }
 
     /** Values that would hurt to place, bounce, burn, fall or open a menu. */

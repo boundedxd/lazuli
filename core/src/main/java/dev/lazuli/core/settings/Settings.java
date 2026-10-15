@@ -20,6 +20,8 @@ public final class Settings {
     public final Setting<String> throwawayBlocks = register(new Setting<>("throwawayBlocks",
         "dirt,cobblestone,cobbled_deepslate,netherrack,stone,andesite,diorite,granite,tuff,deepslate,blackstone,end_stone",
         s -> s.replace(" ", "")));
+    /** Don't place blocks it's collecting (#mine's blocks, what #getitem needs) for bridging and pillaring. */
+    public final Setting<Boolean> keepCollected = bool("keepCollected", true);
     public final Setting<Boolean> cancelOnUserInput = bool("cancelOnUserInput", true);
     public final Setting<Double> rotationSpeed = decimal("rotationSpeed", 45.0, 1.0, 180.0);
     /** Sneak to stop dead before a long or curved jump (off: eases to a stop walking). */

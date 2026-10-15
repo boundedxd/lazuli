@@ -139,6 +139,7 @@ public final class GetItemProcess implements Process {
             end(Outcome.FAILED, Chat.err("Nothing left to do, but there's no {} (only enchanted or damaged ones?)", name(target)));
             return;
         }
+        dev.lazuli.mod.control.Tools.keep("getitem", plan.keep());
         ItemPlanner.Action a = plan.actions().get(0);
         String key = a.toString();
         repeats = key.equals(lastStep) ? repeats + 1 : 0;
@@ -177,6 +178,7 @@ public final class GetItemProcess implements Process {
     }
 
     private void end(Outcome how, String msg) {
+        dev.lazuli.mod.control.Tools.keep("getitem", null);
         running = false;
         outcome = how;
         current = null;

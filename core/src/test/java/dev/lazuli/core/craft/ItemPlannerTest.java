@@ -34,6 +34,8 @@ class ItemPlannerTest {
         loot.put("minecraft:iron_ore", ore("minecraft:iron_ore", "minecraft:raw_iron"));
         loot.put("minecraft:deepslate_iron_ore", ore("minecraft:deepslate_iron_ore", "minecraft:raw_iron"));
         loot.put("minecraft:coal_ore", ore("minecraft:coal_ore", "minecraft:coal"));
+        loot.put("minecraft:raw_iron_block", self("minecraft:raw_iron_block"));
+        loot.put("minecraft:iron_block", self("minecraft:iron_block"));
         loot.put("minecraft:glass", "{\"type\": \"minecraft:block\", \"pools\": [{\"rolls\": 1.0, \"entries\": [{\"type\": \"minecraft:item\", \"conditions\": ["
             + SILK + "], \"name\": \"minecraft:glass\"}]}]}");
         loot.put("minecraft:dead_bush", "{\"type\": \"minecraft:block\", \"pools\": [{\"rolls\": 1.0, \"entries\": [{\"type\": \"minecraft:item\", \"name\": \"minecraft:stick\"}]}]}");
@@ -61,6 +63,17 @@ class ItemPlannerTest {
                 {"type": "minecraft:smelting", "cookingtime": 200, "ingredient": "minecraft:raw_iron", "result": {"id": "minecraft:iron_ingot"}}""",
             "minecraft:glass", """
                 {"type": "minecraft:smelting", "cookingtime": 200, "ingredient": "minecraft:sand", "result": {"id": "minecraft:glass"}}"""));
+        // raw iron <-> its block: a loop when it has some raw iron but not enough
+        r.put("minecraft:raw_iron_block", """
+            {"type": "minecraft:crafting_shaped", "key": {"#": "minecraft:raw_iron"}, "pattern": ["###", "###", "###"], "result": {"id": "minecraft:raw_iron_block"}}""");
+        r.put("minecraft:raw_iron", """
+            {"type": "minecraft:crafting_shapeless", "ingredients": ["minecraft:raw_iron_block"], "result": {"count": 9, "id": "minecraft:raw_iron"}}""");
+        r.put("minecraft:iron_ingot_from_nuggets", """
+            {"type": "minecraft:crafting_shaped", "key": {"#": "minecraft:iron_nugget"}, "pattern": ["###", "###", "###"], "result": {"id": "minecraft:iron_ingot"}}""");
+        r.put("minecraft:iron_ingot_from_iron_block", """
+            {"type": "minecraft:crafting_shapeless", "ingredients": ["minecraft:iron_block"], "result": {"count": 9, "id": "minecraft:iron_ingot"}}""");
+        r.put("minecraft:iron_nugget", """
+            {"type": "minecraft:crafting_shapeless", "ingredients": ["minecraft:iron_ingot"], "result": {"count": 9, "id": "minecraft:iron_nugget"}}""");
         r.put("minecraft:birch_planks", """
             {"type": "minecraft:crafting_shapeless", "ingredients": ["#minecraft:birch_logs"], "result": {"count": 4, "id": "minecraft:birch_planks"}}""");
         tags.put("minecraft:planks", "{\"values\": [\"minecraft:oak_planks\", \"minecraft:birch_planks\"]}");
@@ -124,6 +137,35 @@ class ItemPlannerTest {
         ItemPlanner.Action mineIron = p.actions().get(iron);
         assertEquals(3, mineIron.count());
         assertEquals(List.of("minecraft:deepslate_iron_ore", "minecraft:iron_ore"), mineIron.blocks());
+    }
+
+    @Test
+    void someRawIronIsNotACircle() {
+        // 2 raw iron: 1 more to mine, not "craft raw iron from a raw iron block from raw iron"
+        Map<String, Integer> have = Map.of("minecraft:raw_iron", 2, "minecraft:stick", 2, "minecraft:coal", 1);
+        ItemPlanner.Plan p = planner().plan("minecraft:iron_pickaxe", 1, have, 2, true, true);
+        assertTrue(p.ok(), p.toString());
+        assertEquals(new ItemPlanner.Action(ItemPlanner.Kind.MINE, "minecraft:raw_iron", 1,
+            List.of("minecraft:deepslate_iron_ore", "minecraft:iron_ore")), p.actions().get(0), p.toString());
+    }
+
+    @Test
+    void aFewNuggetsDontMeanDiggingForAnIronBlock() {
+        Map<String, Integer> have = Map.of("minecraft:iron_nugget", 3, "minecraft:stick", 2, "minecraft:coal", 1);
+        ItemPlanner.Plan p = planner().plan("minecraft:iron_pickaxe", 1, have, 2, true, true);
+        assertTrue(p.ok(), p.toString());
+        assertTrue(p.actions().stream().noneMatch(a -> a.blocks().contains("minecraft:iron_block")), p.toString());
+        assertEquals("minecraft:raw_iron", p.actions().get(0).item(), p.toString());
+    }
+
+    @Test
+    void keepsWhatThePlanUses() {
+        Map<String, Integer> have = Map.of("minecraft:cobblestone", 64, "minecraft:stick", 2);
+        ItemPlanner.Plan p = planner().plan("minecraft:stone_pickaxe", 1, have, 1, true, true);
+        assertTrue(p.ok(), p.toString());
+        assertEquals(3, p.keep().get("minecraft:cobblestone"), p.toString());
+        assertEquals(2, p.keep().get("minecraft:stick"), p.toString());
+        assertNull(p.keep().get("minecraft:dirt"));
     }
 
     @Test
