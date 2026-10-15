@@ -88,6 +88,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private TunnelProcess tunnel;
 	private FarmProcess farm;
 	private SleepProcess sleeps;
+	private dev.lazuli.mod.process.Guard guard;
 	private ContainerProcess containers;
 	private CraftProcess crafts;
 	private SmeltProcess smelts;
@@ -117,6 +118,10 @@ public final class LazuliClient implements ClientModInitializer {
 		tunnel = new TunnelProcess(session, settings, this::chat);
 		farm = new FarmProcess(session, settings, this::chat);
 		sleeps = new SleepProcess(session, settings, this::chat);
+		guard = new dev.lazuli.mod.process.Guard(session, settings, this::chat, () -> {
+			for (Process p : processes) if (p != guard && p.active()) return true;
+			return false;
+		});
 		clicks = new ClickDriver(settings);
 		containers = new ContainerProcess(session, settings, clicks, this::chat);
 		crafts = new CraftProcess(session, settings, clicks, this::chat);
@@ -125,7 +130,7 @@ public final class LazuliClient implements ClientModInitializer {
 		RecipeData.drops();
 		RecipeData.get(); // read the recipes in the background now, not on the first #craft
 		upkeep = new Upkeep(settings, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, getItem, sleeps);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, getItem, sleeps, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -319,7 +324,8 @@ public final class LazuliClient implements ClientModInitializer {
 			if (settings.cancelOnUserInput.get() && mc.screen == null && busy() && userKeys.userInterfering(mc)) stopAll(true);
 			upkeep.tick(mc, busy());
 			if (Upkeep.eating()) return;
-			for (Process p : processes) p.tick(mc);
+			// the guard dodging or healing: the job waits
+			for (Process p : processes) if (p == guard || !dev.lazuli.mod.process.Guard.paused()) p.tick(mc);
 		});
 		ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("lazuli", "status"), renderer::renderHud);

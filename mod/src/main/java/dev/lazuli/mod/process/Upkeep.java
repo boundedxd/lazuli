@@ -84,7 +84,7 @@ public final class Upkeep {
             mc.options.keyUse.setDown(true); // vanilla stops eating the moment use isn't held
             return;
         }
-        if (!busy || !settings.autoEat.get() || food > settings.autoEatHunger.get() || mc.screen != null || p.isUsingItem()) return;
+        if (!busy || !settings.autoEat.get() || food > (Guard.healing() ? 19 : settings.autoEatHunger.get()) || mc.screen != null || p.isUsingItem()) return;
         int slot = bestFood(p);
         if (slot < 0) return;
         prevSlot = p.getInventory().getSelectedSlot();

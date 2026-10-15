@@ -59,6 +59,11 @@ public final class Settings {
     public final Setting<Boolean> sleepPlaceBed = bool("sleepPlaceBed", true);
     /** #sleep breaks the bed it placed in the morning, to take it along. */
     public final Setting<Boolean> sleepPickupBed = bool("sleepPickupBed", true);
+    /** While busy, run from a creeper that starts hissing close by (the job waits). */
+    public final Setting<Boolean> dodgeCreepers = bool("dodgeCreepers", true);
+    /** While busy, at {@link #retreatHealth} or less: get away from monsters, eat and wait to heal (the job waits). */
+    public final Setting<Boolean> lowHpRetreat = bool("lowHpRetreat", true);
+    public final Setting<Integer> retreatHealth = integer("retreatHealth", 8, 1, 19);
     /** Save a "death" waypoint where the player dies ({@code #back} goes there). */
     public final Setting<Boolean> deathWaypoint = bool("deathWaypoint", true);
     /** Draw this dimension's waypoints in the world. */

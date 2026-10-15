@@ -21,9 +21,14 @@ final class Trip {
     }
 
     void go(Goal goal, LocalPlayer player) {
+        go(goal, player, false);
+    }
+
+    /** @param fallback the nearest safe spot when the goal can't be reached */
+    void go(Goal goal, LocalPlayer player, boolean fallback) {
         startedTick = player.tickCount;
         BlockPos f = start(player);
-        start = session.start(goal, false, pack(f.getX(), f.getY(), f.getZ()), true);
+        start = session.start(goal, fallback, pack(f.getX(), f.getY(), f.getZ()), true);
     }
 
     /** The block to start from: under the player, or where they last stood while in the air. */

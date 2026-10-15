@@ -314,7 +314,9 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         if (tripStart >= 0) {
             if (underWay(snap)) return;
             // the trip ended without a target coming into sight: don't head for it (or them, if it failed) again
-            if (snap.trip() == tripStart && snap.state() == PathingSession.State.ARRIVED) blacklist.add(tripTargets.get(0));
+            if (dev.lazuli.mod.process.Guard.interrupted(tripStart)) {
+                // cut short to dodge or heal: nothing wrong with the targets
+            } else if (snap.trip() == tripStart && snap.state() == PathingSession.State.ARRIVED) blacklist.add(tripTargets.get(0));
             else blacklist.addAll(tripTargets);
             tripStart = -1;
         }
@@ -425,7 +427,10 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         }
         if (pickupTrip) {
             if (underWay(snap)) return;
-            if (snap.trip() != tripStart || snap.state() != PathingSession.State.ARRIVED || pickupTrips >= PICKUP_TRIPS) {
+            if (dev.lazuli.mod.process.Guard.interrupted(tripStart)) {
+                tripStart = -1; // cut short to dodge or heal: go for it again
+                pickupTrips--;
+            } else if (snap.trip() != tripStart || snap.state() != PathingSession.State.ARRIVED || pickupTrips >= PICKUP_TRIPS) {
                 drops.removeIf(d -> d.at().equals(dropAt));
                 phase = Phase.TRAVEL; // can't get to it: leave it
                 tripStart = -1;
