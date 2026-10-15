@@ -12,6 +12,14 @@ public final class Settings {
     public final Setting<Boolean> allowSprint = bool("allowSprint", true);
     /** Swim at the surface with the head out (never sprint-swim under water, where the air runs out). */
     public final Setting<Boolean> surfaceSwim = bool("surfaceSwim", true);
+    /** Across open water use swim mode (sprint-swimming, fast) just under the surface, coming up for air in time. */
+    public final Setting<Boolean> sprintSwim = bool("sprintSwim", true);
+    /** Cross long stretches of water by boat when there's one in the inventory. */
+    public final Setting<Boolean> useBoats = bool("useBoats", true);
+    /** Water blocks in a row on the path it takes to bother with the boat. */
+    public final Setting<Integer> boatMinWater = integer("boatMinWater", 12, 3, 128);
+    /** Break the boat after getting out, to take it along. */
+    public final Setting<Boolean> boatPickup = bool("boatPickup", true);
     public final Setting<Integer> maxFallHeight = integer("maxFallHeight", 3, 0, 20);
     public final Setting<Boolean> allowParkour = bool("allowParkour", true);
     public final Setting<Boolean> allowBreak = bool("allowBreak", true);

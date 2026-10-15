@@ -47,6 +47,8 @@ public final class PathExecutor {
     private final EdgeWatch edgeWatch = new EdgeWatch();
     private final InputDriver input = new InputDriver();
     private final Interactor interactor;
+    private final Swimmer swimmer;
+    private final BoatRider boat;
     private boolean driving;
     private long lastBlock = NONE;
     private int offPathTicks;
@@ -60,6 +62,8 @@ public final class PathExecutor {
         this.follower = new PathFollower(world);
         this.climber = new Climber(world);
         this.jumper = new Jumper(world);
+        this.swimmer = new Swimmer(world);
+        this.boat = new BoatRider(world, settings);
     }
 
     public void tick(Minecraft mc) {
@@ -95,7 +99,10 @@ public final class PathExecutor {
         }
 
         boolean sprint = settings.allowSprint.get() && player.getFoodData().getFoodLevel() > 6;
-        if (settings.surfaceSwim.get() && (player.isInWater() || player.isSwimming())) {
+        // open water ahead: swim mode (sprint-swimming just under the surface, up for air in time)
+        Controls swimC = sprint && settings.sprintSwim.get() && !gentle && !dev.lazuli.mod.process.Upkeep.eating()
+            ? swimmer.tick(player, path, idx, RotationDriver.yaw(player)) : null;
+        if (swimC == null && settings.surfaceSwim.get() && (player.isInWater() || player.isSwimming())) {
             // sprinting with the head under, the game sprint-swims: it dives where the view points and the air runs out.
             // Not sprinting and holding jump (the planner's choice in water), it floats with the head out.
             sprint = false;
@@ -109,7 +116,9 @@ public final class PathExecutor {
             ((LivingEntityAccessor) player).lazuli$noJumpDelay(), player.minorHorizontalCollision, player.fallDistance);
         boolean eating = dev.lazuli.mod.process.Upkeep.eating();
         if (gentle) sprint = false;
-        Controls c = eating ? null : interactor.tick(mc, state, path, idx, block);
+        // long water ahead and a boat: crossing by boat takes over until it's out the other side
+        Controls c = eating ? null : boat.tick(mc, player, path, idx, curYaw, curPitch);
+        if (c == null && !eating) c = interactor.tick(mc, state, path, idx, block);
         // eating: stand still meanwhile (counts as building, so standing still isn't taken as being stuck)
         if (eating) c = new Controls(false, false, false, false, curYaw, curPitch, 0, false);
         boolean building = c != null;
@@ -118,6 +127,7 @@ public final class PathExecutor {
         // long and upward gap jumps: played exactly as proven, not left to the input planner
         jumper.setSneak(settings.allowSneakStop.get());
         if (c == null && !building) c = jumper.tick(state, path, idx, sprint);
+        if (c == null && !building) c = swimC;
         boolean interacting = c != null;
         if (interacting) {
             planner.reset();
@@ -163,6 +173,8 @@ public final class PathExecutor {
         if (driving) input.release();
         driving = false;
         interactor.reset();
+        swimmer.reset();
+        boat.reset(Minecraft.getInstance());
         offPathTicks = 0;
         tracker.reset();
         edgeWatch.reset();

@@ -305,6 +305,24 @@ public class InteractionCourseTest {
     }
 
     @Test
+    void swimsAcrossALakeRatherThanBridgingIt() {
+        GridWorld w = GridWorld.flatFloor(-5, -5, 50, 5).fill(4, -4, -5, 40, 0, 5, BlockKind.WATER)
+            .fill(4, -5, -5, 40, -5, 5, BlockKind.SOLID);
+        Run r = drive(w, BOTH, 64, false, 0, 1, 0, new GoalBlock(45, 1, 0), 45, 0, 3000);
+        assertTrue(r.arrived(), r.log());
+        assertEquals(0, r.places(), "bridged instead of swimming" + System.lineSeparator() + r.log());
+    }
+
+    @Test
+    void swimsAcrossARiverRatherThanBridgingIt() {
+        GridWorld w = GridWorld.flatFloor(-5, -5, 20, 5).fill(4, -2, -5, 7, 0, 5, BlockKind.WATER)
+            .fill(4, -3, -5, 7, -3, 5, BlockKind.SOLID);
+        Run r = drive(w, BOTH, 64, false, 0, 1, 0, new GoalBlock(14, 1, 0), 14, 0, 1500);
+        assertTrue(r.arrived(), r.log());
+        assertEquals(0, r.places(), "bridged instead of swimming" + System.lineSeparator() + r.log());
+    }
+
+    @Test
     void digsToAGoalInsideStone() {
         GridWorld w = GridWorld.flatFloor(-5, -5, 15, 5).fill(-5, -8, -5, 15, -1, 5, BlockKind.SOLID);
         Run r = drive(w, BOTH, 0, 1, 0, 6, -3, 2, 2000);
