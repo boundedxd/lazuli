@@ -50,13 +50,15 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
 - `task/Task`, `Tasks` — one job at a time with a `CompletableFuture<Result>` (DONE/FAILED/CANCELLED).
   `Task.trip(...)` resolves from snapshot trip numbers. Built so `#getitem` can chain steps.
 - `inventory/Stack, Click, Menu, Moves` — a model of an open menu with vanilla click rules; `Moves.transfer/drop` plan
-  click lists (shift-click whole stacks, split remainders) and are tested in `MovesTest`.
+  click lists (shift-click whole stacks, split remainders) and are tested in `MovesTest`. `ItemCount` = item + count.
+- `craft/Recipes` (parses recipe/tag JSON, own tiny `Json`), `CraftTree.resolve` (steps in order, ingredients first,
+  mixes plank kinds; `left()` chains requests, `missing()` says what's lacking), `Crafter.fill` (grid click plan).
 
 ## Key mod pieces
 - `LazuliClient` — wires everything: session, executor, processes, commands context, tick order, the API impl (`Api`).
-- `dev/lazuli/api/Lazuli` — public API for other mods: `Lazuli.get().goTo/mine/container/drop/stop/busy/command`.
+- `dev/lazuli/api/Lazuli` — public API for other mods: `Lazuli.get().goTo/mine/container/drop/craft/stop/busy/command`.
 - `process/*` — `Process` = something running on top of pathing (one at a time): MineProcess (in control/),
-  Follow, Explore, Tunnel, Farm, ContainerProcess (#deposit/#withdraw), Upkeep (auto eat/armor). `Trip` = a quiet trip.
+  Follow, Explore, Tunnel, Farm, ContainerProcess (#deposit/#withdraw), CraftProcess (#craft), Upkeep (auto eat/armor). `Trip` = a quiet trip.
 - `inventory/Inventories` (game menu → core `Menu`, item keys like `minecraft:dirt#<componentsHash>`),
   `ClickDriver` (sends planned clicks, `clicksPerTick` per tick).
 - `control/Aim` — legit looking: find a visible point, turn at rotationSpeed, act only when the crosshair is on it
@@ -85,9 +87,11 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
 
 ## Roadmap (the "mission"), in order — status
 1. Eagle bridge — DONE. Tasks + public API + config tabs — DONE. Inventory clicks, `#drop`, `#deposit`/`#withdraw`
-   (chests single/double, barrels, shulkers, ender chests) — DONE but **not yet tested in game by the user**.
-2. NEXT: crafting (server only sends unlocked recipes → read vanilla recipes from the game's data, craft in the 2x2
-   grid or place/use a crafting table), then smelting (all furnace types, reuse ContainerProcess/ClickDriver).
+   (chests single/double, barrels, shulkers, ender chests) — DONE, tested in game; multi-item (`#drop chest 1 oak_log 3`).
+2. Crafting — DONE, **not yet tested in game**: `#craft item [count]...`. Vanilla recipes + item tags are read from
+   the game jar (`mod/craft/RecipeData`, `VanillaPackResources`; servers only send unlocked recipes). `CraftProcess`:
+   2x2 in the inventory (clicks on menu 0, no screen), else walks to / places a crafting table.
+   NEXT: smelting (all furnace types, reuse ContainerProcess/ClickDriver; smelting JSON is in the same recipe folder).
 3. `#getitem <item>`: resolve item → mine/craft/smelt tree, subtract current inventory (has stone pick → skip ahead),
    run as a chain of Tasks.
 4. Water bucket clutch, boat clutch, auto boats over X water blocks (needs boat physics), minecarts.
