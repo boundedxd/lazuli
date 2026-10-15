@@ -1,5 +1,6 @@
 package dev.lazuli.mod.craft;
 
+import dev.lazuli.core.craft.Drops;
 import dev.lazuli.core.craft.Recipes;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.VanillaPackResources;
@@ -17,6 +18,7 @@ import java.util.concurrent.CompletableFuture;
  */
 public final class RecipeData {
     private static volatile CompletableFuture<Recipes> loading;
+    private static volatile CompletableFuture<Drops> drops;
 
     private RecipeData() {}
 
@@ -28,6 +30,20 @@ public final class RecipeData {
             }
         }
         return loading;
+    }
+
+    /** Which blocks drop what (vanilla block loot tables), loaded in the background (once). */
+    public static CompletableFuture<Drops> drops() {
+        if (drops == null) {
+            synchronized (RecipeData.class) {
+                if (drops == null) drops = CompletableFuture.supplyAsync(() -> {
+                    try (VanillaPackResources pack = ServerPacksSource.createVanillaPackSource()) {
+                        return Drops.load(read(pack, "loot_table/blocks"));
+                    }
+                });
+            }
+        }
+        return drops;
     }
 
     private static Recipes load() {

@@ -23,6 +23,7 @@ import dev.lazuli.mod.process.ExploreProcess;
 import dev.lazuli.mod.process.ContainerProcess;
 import dev.lazuli.mod.process.CraftProcess;
 import dev.lazuli.mod.process.SmeltProcess;
+import dev.lazuli.mod.process.GetItemProcess;
 import dev.lazuli.mod.craft.RecipeData;
 import dev.lazuli.mod.process.FarmProcess;
 import dev.lazuli.mod.process.FollowProcess;
@@ -79,6 +80,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private ContainerProcess containers;
 	private CraftProcess crafts;
 	private SmeltProcess smelts;
+	private GetItemProcess getItem;
 	private Upkeep upkeep;
 	/** Every process; at most one runs at a time. */
 	private java.util.List<Process> processes;
@@ -111,9 +113,11 @@ public final class LazuliClient implements ClientModInitializer {
 		containers = new ContainerProcess(session, settings, clicks, this::chat);
 		crafts = new CraftProcess(session, settings, clicks, this::chat);
 		smelts = new SmeltProcess(session, settings, clicks, crafts, this::chat);
+		getItem = new GetItemProcess(settings, mine, crafts, smelts, this::chat);
+		RecipeData.drops();
 		RecipeData.get(); // read the recipes in the background now, not on the first #craft
 		upkeep = new Upkeep(settings, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, getItem);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -212,6 +216,12 @@ public final class LazuliClient implements ClientModInitializer {
 			public void smelt(ItemCount item) {
 				LazuliClient.this.stopProcesses(false);
 				smelts.start(Minecraft.getInstance(), item);
+			}
+
+			@Override
+			public void getItem(ItemCount item) {
+				LazuliClient.this.stopProcesses(false);
+				getItem.start(Minecraft.getInstance(), item);
 			}
 
 			@Override
@@ -358,6 +368,20 @@ public final class LazuliClient implements ClientModInitializer {
 					case FAILED -> Task.Result.FAILED;
 					case CANCELLED -> Task.Result.CANCELLED;
 				}, () -> smelts.stop(false));
+			});
+		}
+
+		@Override
+		public Task getItem(String item, int count) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				getItem.start(Minecraft.getInstance(), new ItemCount(item, count));
+				return new Task("get " + item, () -> switch (getItem.outcome()) {
+					case NONE -> null;
+					case DONE -> Task.Result.DONE;
+					case FAILED -> Task.Result.FAILED;
+					case CANCELLED -> Task.Result.CANCELLED;
+				}, () -> getItem.stop(false));
 			});
 		}
 

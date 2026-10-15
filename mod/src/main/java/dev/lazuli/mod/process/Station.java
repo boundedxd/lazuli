@@ -92,7 +92,7 @@ final class Station {
                 if (pos == null) pos = nearest(mc, p, block, settings.stationRange.get());
                 if (pos == null) {
                     if (mayPlace) enter(Phase.PLACE, p);
-                    else return fail("No " + name + " within " + settings.stationRange.get() + " blocks");
+                    else return fail("No " + name + " within " + settings.stationRange.get() + " blocks, and placing one is off");
                     return State.WORKING;
                 }
                 enter(Phase.TRAVEL, p);

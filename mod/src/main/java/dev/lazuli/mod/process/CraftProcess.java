@@ -93,8 +93,9 @@ public final class CraftProcess implements Process {
         if (plan == null) return;
         if (plan.stream().anyMatch(s -> !s.recipe().fits(2))
             && Station.nearest(mc, p, Blocks.CRAFTING_TABLE, settings.stationRange.get()) == null) {
-            if (!settings.craftPlaceTable.get()) {
-                fail("No crafting table within " + settings.stationRange.get() + " blocks");
+            if (!mayPlace()) {
+                fail("No crafting table within " + settings.stationRange.get() + " blocks, and placing one is off ("
+                    + (settings.allowPlace.get() ? "craftPlaceTable" : "allowPlace") + ")");
                 return;
             }
             // make (if need be) and keep one table to place, then plan the rest from what's left
@@ -125,6 +126,11 @@ public final class CraftProcess implements Process {
         Recipes recipes = RecipeData.get().getNow(null);
         return recipes != null && CraftTree.resolve(recipes, Inventories.id(item), 1, Inventories.plainCounts(p),
             settings.craftIngredients.get()).ok();
+    }
+
+    /** Whether it may place a crafting table: its own toggle and allowPlace. */
+    private boolean mayPlace() {
+        return settings.craftPlaceTable.get() && settings.allowPlace.get();
     }
 
     private Recipes recipes() {
@@ -188,8 +194,7 @@ public final class CraftProcess implements Process {
         int size = (int) Math.round(Math.sqrt(menu.getInputGridSlots().size()));
         if (!step.recipe().fits(size)) {
             phase = Phase.TABLE;
-            station.start(p, Blocks.CRAFTING_TABLE, TABLE, "crafting table", m -> m instanceof CraftingMenu, null,
-                settings.craftPlaceTable.get());
+            station.start(p, Blocks.CRAFTING_TABLE, TABLE, "crafting table", m -> m instanceof CraftingMenu, null, mayPlace());
             return;
         }
         if (menu == p.inventoryMenu) clicks.keepOpen();

@@ -75,6 +75,12 @@ public interface Lazuli {
      */
     Task smelt(String item, int count);
 
+    /**
+     * Gets an item from scratch until the inventory holds {@code count} of it: mines, crafts and smelts what it takes,
+     * tools, fuel, crafting table and furnace included, planning again after every step.
+     */
+    Task getItem(String item, int count);
+
     /** The running job, or null. */
     Task current();
 

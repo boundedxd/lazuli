@@ -59,6 +59,10 @@ public final class Settings {
         "coal,charcoal,coal_block,dried_kelp_block,blaze_rod,oak_planks,spruce_planks,birch_planks,jungle_planks,acacia_planks,"
             + "dark_oak_planks,mangrove_planks,cherry_planks,pale_oak_planks,bamboo_planks,crimson_planks,warped_planks,stick",
         s -> s.replace(" ", "").toLowerCase(java.util.Locale.ROOT)));
+    /** #getitem may mine for what it needs. */
+    public final Setting<Boolean> getItemMine = bool("getItemMine", true);
+    /** #getitem may smelt for what it needs. */
+    public final Setting<Boolean> getItemSmelt = bool("getItemSmelt", true);
     /** #smelt waits at the furnace until it's done; off: loads it, leaves, and #smelt collect goes back. */
     public final Setting<Boolean> smeltWait = bool("smeltWait", true);
     /** #smelt uses a blast furnace (ores) or smoker (food), twice as fast, when there's one near or in the inventory. */

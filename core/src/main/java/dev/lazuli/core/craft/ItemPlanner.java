@@ -1,0 +1,347 @@
+package dev.lazuli.core.craft;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.ToIntFunction;
+
+/**
+ * #getitem's planner: the steps (mine, craft, smelt) that get an item from what's in the inventory, picking for each
+ * item the cheapest way to get it and making the tools, fuel, crafting table and furnace that takes. The mod runs the
+ * first step and plans again from the real inventory, so the plan only has to be right, not exact.
+ */
+public final class ItemPlanner {
+    public enum Kind { MINE, CRAFT, SMELT }
+
+    /** Mine {@code count} of {@code blocks} for {@code item}; craft or smelt {@code count} more of {@code item}. */
+    public record Action(Kind kind, String item, int count, List<String> blocks) {
+        @Override
+        public String toString() {
+            return kind + " " + count + " " + item + (blocks.isEmpty() ? "" : " from " + blocks);
+        }
+    }
+
+    /** The steps in order, or why it can't be done. */
+    public record Plan(List<Action> actions, String problem) {
+        public boolean ok() {
+            return problem == null;
+        }
+    }
+
+    /** What it may do: mine, smelt, place a crafting table, place a furnace. */
+    public record Rules(boolean mine, boolean smelt, boolean placeTable, boolean placeFurnace) {
+        public static final Rules ALL = new Rules(true, true, true, true);
+    }
+
+    /** Pickaxes by tier: 1 wood, 2 stone, 3 iron, 4 diamond. */
+    static final String[] PICKS = {null, "minecraft:wooden_pickaxe", "minecraft:stone_pickaxe", "minecraft:iron_pickaxe",
+        "minecraft:diamond_pickaxe"};
+    private static final String TABLE = "minecraft:crafting_table", FURNACE = "minecraft:furnace";
+    private static final double INF = 1e12;
+    private static final int DEPTH = 16;
+
+    private final Recipes recipes;
+    private final Drops drops;
+    private final ToIntFunction<String> toolTier, burn;
+    private final List<String> fuels;
+    private final Rules rules;
+
+    /**
+     * @param toolTier for a block id, the pickaxe tier it needs to drop anything (0: none)
+     * @param burn     for an item id, its fuel ticks (0: not a fuel)
+     * @param fuels    fuels it may use, best first
+     */
+    public ItemPlanner(Recipes recipes, Drops drops, ToIntFunction<String> toolTier, ToIntFunction<String> burn,
+                       List<String> fuels, Rules rules) {
+        this.recipes = recipes;
+        this.drops = drops;
+        this.toolTier = toolTier;
+        this.burn = burn;
+        this.fuels = fuels;
+        this.rules = rules;
+    }
+
+    /**
+     * Steps to have at least {@code count} of {@code item}.
+     *
+     * @param have        plain items in the inventory
+     * @param pickTier    the best pickaxe it has (0: none)
+     * @param tableNear   a crafting table is near
+     * @param furnaceNear a furnace is near
+     */
+    public Plan plan(String item, int count, Map<String, Integer> have, int pickTier, boolean tableNear, boolean furnaceNear) {
+        Run r = new Run(have, pickTier, tableNear, furnaceNear);
+        try {
+            r.get(item, count, 0);
+            return new Plan(List.copyOf(r.actions), null);
+        } catch (Stuck e) {
+            return new Plan(List.of(), e.getMessage());
+        }
+    }
+
+    private static final class Stuck extends RuntimeException {
+        Stuck(String msg) {
+            super(msg, null, false, false);
+        }
+    }
+
+    private static String name(String id) {
+        return id.startsWith("minecraft:") ? id.substring(10) : id;
+    }
+
+    /** One planning run: the inventory as the steps change it. */
+    private final class Run {
+        final Map<String, Integer> have, reserved = new HashMap<>(), startHave;
+        final Map<String, Double> costs = new HashMap<>();
+        final Set<String> making = new HashSet<>(), costing = new HashSet<>();
+        final List<Action> actions = new ArrayList<>();
+        int pickTier;
+        boolean tableNear, furnaceNear;
+
+        Run(Map<String, Integer> have, int pickTier, boolean tableNear, boolean furnaceNear) {
+            this.have = new HashMap<>(have);
+            this.startHave = have;
+            this.pickTier = pickTier;
+            this.tableNear = tableNear;
+            this.furnaceNear = furnaceNear;
+        }
+
+        int free(String item) {
+            return have.getOrDefault(item, 0) - reserved.getOrDefault(item, 0);
+        }
+
+        void reserve(String item, int n) {
+            reserved.merge(item, n, Integer::sum);
+        }
+
+        /** Makes sure at least {@code n} of {@code item} are free (not set aside for a step being planned). */
+        void get(String item, int n, int depth) {
+            int need = n - free(item);
+            if (need <= 0) return;
+            if (depth > DEPTH) throw new Stuck("Too many steps to get " + name(item));
+            if (!making.add(item)) throw new Stuck("Going round in circles on " + name(item));
+            try {
+                double mine = mineCost(item, 0), smelt = smeltCost(item, 0), craft = craftCost(item, 0);
+                double best = Math.min(mine, Math.min(smelt, craft));
+                if (best >= INF) throw new Stuck("No way to get " + name(item) + why(item));
+                if (best == craft) craft(item, need, depth);
+                else if (best == smelt) smelt(item, need, depth);
+                else mine(item, need, depth);
+            } finally {
+                making.remove(item);
+            }
+        }
+
+        String why(String item) {
+            for (SmeltRecipe r : recipes.smelting(item)) {
+                if (!rules.smelt()) return " (smelting is off)";
+                for (String in : r.input()) return " (it's smelted from " + name(in) + ", and there's no way to get that)";
+            }
+            if (!drops.blocksDropping(item).isEmpty() && !rules.mine()) return " (mining is off)";
+            if (!tableNear && !rules.placeTable() && recipes.producing(item).stream().anyMatch(r -> !r.fits(2)))
+                return " (it needs a crafting table: none near, and placing one is off)";
+            return "";
+        }
+
+        // ---- the three ways ----
+
+        void mine(String item, int n, int depth) {
+            List<String> blocks = mineable(item);
+            int need = Integer.MAX_VALUE;
+            for (String b : blocks) need = Math.min(need, toolTier.applyAsInt(b));
+            if (need > pickTier) {
+                if (need >= PICKS.length) throw new Stuck("Can't mine " + name(item) + " with any pickaxe it knows");
+                get(PICKS[need], 1, depth + 1);
+                pickTier = need;
+            }
+            int tier = pickTier;
+            List<String> usable = blocks.stream().filter(b -> toolTier.applyAsInt(b) <= tier).toList();
+            have.merge(item, n, Integer::sum);
+            // one trip for all of it: add to an earlier mining step for the same item
+            for (int i = 0; i < actions.size(); i++) {
+                Action a = actions.get(i);
+                if (a.kind() == Kind.MINE && a.item().equals(item)) {
+                    actions.set(i, new Action(Kind.MINE, item, a.count() + n, a.blocks()));
+                    return;
+                }
+            }
+            actions.add(new Action(Kind.MINE, item, n, usable));
+        }
+
+        void smelt(String item, int n, int depth) {
+            String input = cheapest(smeltInputs(item), n, depth);
+            get(input, n, depth + 1);
+            reserve(input, n);
+            // fuel: what it has from the list, else the cheapest fuel to get
+            Map<String, Integer> fuel = Smelting.fuel(fuels, freeMap(), burn, n);
+            if (fuel == null) {
+                String best = null;
+                double bestCost = INF;
+                for (String f : fuels) {
+                    int b = burn.applyAsInt(f);
+                    if (b <= 0) continue;
+                    double c = cost(f, depth) * Math.ceil((double) n * Smelting.ITEM_TICKS / b);
+                    if (c < bestCost) {
+                        bestCost = c;
+                        best = f;
+                    }
+                }
+                if (best == null) throw new Stuck("No fuel to smelt " + name(item) + " with");
+                get(best, (int) Math.ceil((double) n * Smelting.ITEM_TICKS / burn.applyAsInt(best)) + free(best), depth + 1);
+                fuel = Smelting.fuel(fuels, freeMap(), burn, n);
+                if (fuel == null) throw new Stuck("Not enough fuel to smelt " + name(item));
+            }
+            fuel.forEach(this::reserve);
+            if (!furnaceNear) station(FURNACE, rules.placeFurnace(), "furnace", depth);
+            reserved.merge(input, -n, Integer::sum);
+            fuel.forEach((f, k) -> reserved.merge(f, -k, Integer::sum));
+            have.merge(input, -n, Integer::sum);
+            fuel.forEach((f, k) -> have.merge(f, -k, Integer::sum));
+            have.merge(item, n, Integer::sum);
+            actions.add(new Action(Kind.SMELT, item, n, List.of()));
+        }
+
+        void craft(String item, int n, int depth) {
+            Recipe r = bestRecipe(item, depth);
+            if (!r.fits(2) && !tableNear) station(TABLE, rules.placeTable(), "crafting table", depth);
+            int crafts = (n + r.count() - 1) / r.count();
+            Map<Set<String>, Integer> groups = new LinkedHashMap<>();
+            for (Set<String> c : r.cells()) if (!c.isEmpty()) groups.merge(c, 1, Integer::sum);
+            Map<String, Integer> mine = new HashMap<>();
+            for (var g : groups.entrySet()) {
+                int k = crafts * g.getValue();
+                String o = cheapest(g.getKey(), k, depth);
+                get(o, k, depth + 1);
+                reserve(o, k);
+                mine.merge(o, k, Integer::sum);
+            }
+            mine.forEach((o, k) -> reserved.merge(o, -k, Integer::sum));
+            // the inventory after it, as #craft will do it
+            CraftTree.Result res = CraftTree.resolve(recipes, item, n, freeMap(), true);
+            if (!res.ok()) throw new Stuck("Can't work out crafting " + name(item));
+            Map<String, Integer> next = new HashMap<>(res.left()); // what's set aside stays on top of what's left
+            reserved.forEach((k, v) -> next.merge(k, v, Integer::sum));
+            have.clear();
+            have.putAll(next);
+            actions.add(new Action(Kind.CRAFT, item, n, List.of()));
+        }
+
+        /** A crafting table or furnace to place, made if it has none. */
+        void station(String block, boolean mayPlace, String what, int depth) {
+            if (!mayPlace) throw new Stuck("Needs a " + what + ": none near, and placing one is off");
+            get(block, 1, depth + 1);
+            have.merge(block, -1, Integer::sum); // placed
+            if (block.equals(TABLE)) tableNear = true;
+            else furnaceNear = true;
+        }
+
+        Map<String, Integer> freeMap() {
+            Map<String, Integer> out = new HashMap<>();
+            have.forEach((k, v) -> {
+                int f = v - reserved.getOrDefault(k, 0);
+                if (f > 0) out.put(k, f);
+            });
+            return out;
+        }
+
+        /** Of these, one it has {@code n} free of, else the cheapest to get (on a tie, one it's already mining). */
+        String cheapest(Set<String> options, int n, int depth) {
+            for (String o : options) if (free(o) >= n) return o;
+            String best = null;
+            double bestCost = INF;
+            for (String o : options) {
+                double c = cost(o, depth);
+                for (Action a : actions) if (a.kind() == Kind.MINE && a.item().equals(o)) c -= 0.5;
+                if (best == null || c < bestCost) {
+                    bestCost = c;
+                    best = o;
+                }
+            }
+            return best;
+        }
+
+        Recipe bestRecipe(String item, int depth) {
+            Recipe best = null;
+            double bestCost = INF;
+            for (Recipe r : recipes.producing(item)) {
+                double c = recipeCost(r, depth);
+                if (best == null || c < bestCost) {
+                    bestCost = c;
+                    best = r;
+                }
+            }
+            return best;
+        }
+
+        // ---- costs: rough work per item, to choose between ways ----
+
+        double cost(String item, int depth) {
+            if (startHave.getOrDefault(item, 0) > 0) return 0;
+            Double known = costs.get(item);
+            if (known != null) return known;
+            if (depth > DEPTH || !costing.add(item)) return INF;
+            double c = Math.min(mineCost(item, depth), Math.min(smeltCost(item, depth), craftCost(item, depth)));
+            costing.remove(item);
+            costs.put(item, c);
+            return c;
+        }
+
+        double mineCost(String item, int depth) {
+            if (!rules.mine()) return INF;
+            double best = INF;
+            for (String b : mineable(item)) {
+                int t = toolTier.applyAsInt(b);
+                double tool = t > pickTier ? t < PICKS.length ? cost(PICKS[t], depth + 1) : INF : 0;
+                best = Math.min(best, Drops.abundance(b) + tool);
+            }
+            return best;
+        }
+
+        double smeltCost(String item, int depth) {
+            if (!rules.smelt()) return INF;
+            double best = INF;
+            for (String in : smeltInputs(item)) best = Math.min(best, cost(in, depth + 1) + 2);
+            // a furnace to make first counts too
+            if (best < INF && !furnaceNear && startHave.getOrDefault(FURNACE, 0) < 1) {
+                best += rules.placeFurnace() ? cost(FURNACE, depth + 1) : INF;
+            }
+            return best;
+        }
+
+        double craftCost(String item, int depth) {
+            double best = INF;
+            for (Recipe r : recipes.producing(item)) best = Math.min(best, recipeCost(r, depth));
+            return best;
+        }
+
+        double recipeCost(Recipe r, int depth) {
+            double sum = 1;
+            for (Set<String> cell : r.cells()) {
+                if (cell.isEmpty()) continue;
+                double c = INF;
+                for (String o : cell) c = Math.min(c, cost(o, depth + 1));
+                sum += c;
+                if (sum >= INF) return INF;
+            }
+            if (!r.fits(2) && !tableNear && !rules.placeTable()) return INF;
+            return sum / r.count();
+        }
+
+        /** Blocks to mine for {@code item}: the usual ones, or any if that's all there is. */
+        List<String> mineable(String item) {
+            List<String> all = drops.blocksDropping(item);
+            List<String> known = all.stream().filter(b -> Drops.abundance(b) < Drops.UNKNOWN).toList();
+            return known.isEmpty() ? all : known;
+        }
+
+        Set<String> smeltInputs(String item) {
+            Set<String> out = new java.util.LinkedHashSet<>();
+            for (SmeltRecipe r : recipes.smelting(item)) if (r.furnace() == SmeltRecipe.Furnace.FURNACE) out.addAll(r.input());
+            return out;
+        }
+    }
+}

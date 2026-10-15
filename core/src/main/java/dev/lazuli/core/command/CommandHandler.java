@@ -110,6 +110,11 @@ public final class CommandHandler {
             reply(Chat.err("Smelting isn't available here"));
         }
 
+        /** Gets an item from scratch: mines, crafts and smelts what it takes, tools included; count: how many to have. */
+        default void getItem(ItemCount item) {
+            reply(Chat.err("Getting items isn't available here"));
+        }
+
         /** Goes back to the furnaces it left cooking and takes what's done. */
         default void smeltCollect() {
             reply(Chat.err("Smelting isn't available here"));
@@ -205,6 +210,11 @@ public final class CommandHandler {
                 else ctx.drop(items);
             }
             case "deposit", "withdraw" -> container(cmd.equals("deposit"), args);
+            case "getitem", "get" -> {
+                List<ItemCount> items = items(args, 0, args.length);
+                if (items == null || items.size() != 1) ctx.reply(Chat.err("Usage: getitem <item> [count]"));
+                else ctx.getItem(items.get(0));
+            }
             case "smelt" -> {
                 List<ItemCount> items = args.length == 1 && args[0].equalsIgnoreCase("collect") ? null : items(args, 0, args.length);
                 if (args.length == 1 && args[0].equalsIgnoreCase("collect")) ctx.smeltCollect();
@@ -238,6 +248,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
         ctx.reply(Chat.usage(p + "withdraw <item|all> [count] [item [count]...] [x y z]", "take items out of a container"));
         ctx.reply(Chat.usage(p + "craft <item> [count] [item [count]...]", "craft items, making the ingredients too (logs into planks...)"));
+        ctx.reply(Chat.usage(p + "getitem <item> [count]", "get an item from scratch: mines, crafts and smelts what it takes (until you have count)"));
         ctx.reply(Chat.usage(p + "smelt <item> [count]", "cook items in a furnace (iron_ingot or raw_iron; blast furnace/smoker when there's one)"));
         ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
         ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));

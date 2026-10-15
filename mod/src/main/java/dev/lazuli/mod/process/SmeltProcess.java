@@ -66,6 +66,7 @@ public final class SmeltProcess implements Process {
     private Outcome outcome = Outcome.NONE;
     private Job job;
     private ItemCount asked;
+    private boolean wait;
     /** The output count in the inventory when the furnace opened; the last tick something happened. */
     private int before, activeAt;
 
@@ -88,7 +89,13 @@ public final class SmeltProcess implements Process {
 
     /** @param item what comes out (iron_ingot) or goes in (raw_iron); a negative count: all of the input it has */
     public void start(Minecraft mc, ItemCount item) {
+        start(mc, item, settings.smeltWait.get());
+    }
+
+    /** @param wait stay until it's all done (else load it and leave) */
+    public void start(Minecraft mc, ItemCount item, boolean wait) {
         stop(false);
+        this.wait = wait;
         outcome = Outcome.NONE;
         LocalPlayer p = mc.player;
         if (p.containerMenu != p.inventoryMenu) {
@@ -125,12 +132,13 @@ public final class SmeltProcess implements Process {
         SmeltRecipe.Furnace kind = SmeltRecipe.Furnace.FURNACE;
         if (settings.smeltFastFurnaces.get() && sj.fast() != null) {
             SmeltRecipe.Furnace fast = sj.fast().furnace();
-            if (have.getOrDefault(fast.block, 0) > 0 || Station.nearest(mc, p, block(fast), settings.stationRange.get()) != null) kind = fast;
+            if (have.getOrDefault(fast.block, 0) > 0 && mayPlace() || Station.nearest(mc, p, block(fast), settings.stationRange.get()) != null) kind = fast;
         }
-        if (kind == SmeltRecipe.Furnace.FURNACE && have.getOrDefault(FURNACE, 0) < 1
+        if (kind == SmeltRecipe.Furnace.FURNACE && (have.getOrDefault(FURNACE, 0) < 1 || !mayPlace())
             && Station.nearest(mc, p, Blocks.FURNACE, settings.stationRange.get()) == null) {
-            if (!settings.smeltPlaceFurnace.get()) {
-                fail("No furnace within " + settings.stationRange.get() + " blocks");
+            if (!mayPlace()) {
+                fail("No furnace within " + settings.stationRange.get() + " blocks, and placing one is off ("
+                    + (settings.allowPlace.get() ? "smeltPlaceFurnace" : "allowPlace") + ")");
                 return;
             }
             if (!crafts.canCraft(p, FURNACE)) {
@@ -164,6 +172,7 @@ public final class SmeltProcess implements Process {
             return;
         }
         job = left.remove(0);
+        wait = settings.smeltWait.get();
         chat.accept(Chat.ok("Going back for the {} at {} {} {}", short_(job.result), job.pos.getX(), job.pos.getY(), job.pos.getZ()));
         go(mc.player, job.pos);
     }
@@ -171,7 +180,7 @@ public final class SmeltProcess implements Process {
     private void go(LocalPlayer p, BlockPos at) {
         phase = Phase.STATION;
         station.start(p, block(job.furnace), job.furnace.block, name(job.furnace), m -> m instanceof AbstractFurnaceMenu, at,
-            settings.smeltPlaceFurnace.get());
+            mayPlace());
     }
 
     @Override
@@ -196,7 +205,7 @@ public final class SmeltProcess implements Process {
         switch (phase) {
             case MAKE_FURNACE -> {
                 switch (crafts.outcome()) {
-                    case DONE -> start(mc, asked);
+                    case DONE -> start(mc, asked, wait);
                     case FAILED, CANCELLED -> end(Outcome.FAILED, Chat.err("Couldn't make a furnace"));
                     case NONE -> {}
                 }
@@ -274,13 +283,18 @@ public final class SmeltProcess implements Process {
             int cooking = sim.get(0).count();
             job.readyAt = mc.level.getGameTime() + (long) cooking * cookTicks(job.furnace);
             job.told = false;
-            phase = settings.smeltWait.get() ? Phase.WAIT : Phase.LEAVE;
+            phase = wait ? Phase.WAIT : Phase.LEAVE;
             return;
         }
         if (p.tickCount - activeAt > STALL_TICKS) {
             if (in.isEmpty() && job.toLoad == 0) fail("Only got " + taken + " of " + job.toTake + " " + short_(job.result));
             else fail("The " + name(job.furnace) + " went out (no fuel left?)");
         }
+    }
+
+    /** Whether it may place a furnace: its own toggle and allowPlace. */
+    private boolean mayPlace() {
+        return settings.smeltPlaceFurnace.get() && settings.allowPlace.get();
     }
 
     private static void add(Menu sim, List<Click> plan, List<Click> clicks) {
@@ -297,12 +311,12 @@ public final class SmeltProcess implements Process {
         return n;
     }
 
-    private List<String> fuels() {
+    List<String> fuels() {
         return Arrays.stream(settings.smeltFuels.get().split(",")).filter(s -> !s.isBlank()).map(Inventories::id).toList();
     }
 
     /** Fuel ticks for one of an item, as the game counts them. */
-    private static ToIntFunction<String> burn(Minecraft mc) {
+    static ToIntFunction<String> burn(Minecraft mc) {
         return id -> {
             try {
                 var item = BuiltInRegistries.ITEM.getValue(Identifier.parse(id));

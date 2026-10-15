@@ -55,8 +55,10 @@ public final class RotationDriver {
         return fromPitch + (pitch - fromPitch) * Math.max(0, Math.min(1, partial));
     }
 
-    /** Next tick's rotation. */
+    /** Next tick's rotation. Ignored while a menu (chest, furnace, inventory...) is open: no one turns in a GUI. */
     public static void set(LocalPlayer p, float newYaw, float newPitch) {
+        if (net.minecraft.client.Minecraft.getInstance().screen
+            instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>) return;
         fromYaw = yaw(p);
         fromPitch = pitch(p);
         yaw = newYaw;
@@ -73,6 +75,10 @@ public final class RotationDriver {
         }
         p.setYRot(yaw);
         p.setXRot(pitch);
+        // the player is there now: until a new rotation is set, frames hold still instead of easing in from the old
+        // one over and over (that was the shaking in menus)
+        fromYaw = yaw;
+        fromPitch = pitch;
     }
 
     /** LocalPlayer.tick, after: free look gives the camera its own rotation back. */

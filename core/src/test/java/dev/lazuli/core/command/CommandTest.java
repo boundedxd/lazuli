@@ -65,6 +65,9 @@ class CommandTest {
             public void smeltCollect() {
                 mined.add("collect");
             }
+            public void getItem(ItemCount item) {
+                mined.add("get " + item);
+            }
             public int[] cameraFeet() { return new int[]{12, 1, 7}; }
             public void toggleFreecam() { mined.add("freecam"); }
         });
@@ -118,6 +121,14 @@ class CommandTest {
         CommandHandler h = handler();
         for (String c : new String[]{"#smelt iron_ingot 16", "#smelt Raw_Iron", "#smelt collect", "#smelt", "#smelt a 1 b 2"}) h.handle(c);
         assertEquals(List.of("smelt iron_ingot 16", "smelt raw_iron -1", "collect"), mined);
+        assertEquals(2, replies.size(), replies.toString());
+    }
+
+    @Test
+    void getItemTakesOneItem() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#getitem iron_pickaxe", "#getitem Torch 16", "#getitem", "#getitem a 1 b 2"}) h.handle(c);
+        assertEquals(List.of("get iron_pickaxe -1", "get torch 16"), mined);
         assertEquals(2, replies.size(), replies.toString());
     }
 
