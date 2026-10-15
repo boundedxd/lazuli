@@ -26,6 +26,7 @@ import dev.lazuli.mod.process.SmeltProcess;
 import dev.lazuli.mod.process.GetItemProcess;
 import dev.lazuli.mod.craft.RecipeData;
 import dev.lazuli.mod.process.FarmProcess;
+import dev.lazuli.mod.process.SleepProcess;
 import dev.lazuli.mod.process.FollowProcess;
 import dev.lazuli.mod.process.Process;
 import dev.lazuli.mod.process.TunnelProcess;
@@ -86,6 +87,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private ExploreProcess explore;
 	private TunnelProcess tunnel;
 	private FarmProcess farm;
+	private SleepProcess sleeps;
 	private ContainerProcess containers;
 	private CraftProcess crafts;
 	private SmeltProcess smelts;
@@ -114,6 +116,7 @@ public final class LazuliClient implements ClientModInitializer {
 		explore = new ExploreProcess(session, this::chat);
 		tunnel = new TunnelProcess(session, settings, this::chat);
 		farm = new FarmProcess(session, settings, this::chat);
+		sleeps = new SleepProcess(session, settings, this::chat);
 		clicks = new ClickDriver(settings);
 		containers = new ContainerProcess(session, settings, clicks, this::chat);
 		crafts = new CraftProcess(session, settings, clicks, this::chat);
@@ -122,7 +125,7 @@ public final class LazuliClient implements ClientModInitializer {
 		RecipeData.drops();
 		RecipeData.get(); // read the recipes in the background now, not on the first #craft
 		upkeep = new Upkeep(settings, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, getItem);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, getItem, sleeps);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -251,6 +254,12 @@ public final class LazuliClient implements ClientModInitializer {
 			@Override
 			public void toggleFreecam() {
 				LazuliClient.this.toggleFreecam(Minecraft.getInstance());
+			}
+
+			@Override
+			public void sleep() {
+				LazuliClient.this.stopProcesses(false);
+				sleeps.start(Minecraft.getInstance());
 			}
 
 			@Override

@@ -132,6 +132,11 @@ public final class CommandHandler {
             return playerFeet();
         }
 
+        /** Gets into a bed (the nearest, or one placed from the inventory) until morning. */
+        default void sleep() {
+            reply(Chat.err("Sleeping isn't available here"));
+        }
+
         /** Saved places ({@code #wp}); null when there are none here. */
         default dev.lazuli.core.waypoint.Waypoints waypoints() {
             return null;
@@ -185,6 +190,7 @@ public final class CommandHandler {
                 else if (setGoal(args)) startPath();
             }
             case "wp", "waypoint", "waypoints" -> waypoint(args);
+            case "sleep" -> ctx.sleep();
             case "back" -> goToWaypoint(dev.lazuli.core.waypoint.Waypoints.DEATH);
             case "stop", "cancel" -> {
                 ctx.stopProcesses();
@@ -275,6 +281,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "getitem <item> [count]", "get an item from scratch: mines, crafts and smelts what it takes (until you have count)"));
         ctx.reply(Chat.usage(p + "smelt <item> [count]", "cook items in a furnace (iron_ingot or raw_iron; blast furnace/smoker when there's one)"));
         ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
+        ctx.reply(Chat.usage(p + "sleep", "sleep in the nearest bed (or one from the hotbar) until morning"));
         ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
         ctx.reply(Chat.usage(p + "kill", "when something's stuck: reset everything (planner thread, keys, jobs), then any command works again"));
         ctx.reply(Chat.usage(p + "set <name> [value]", "show or change a setting"));

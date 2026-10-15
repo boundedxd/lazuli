@@ -51,6 +51,14 @@ public final class Settings {
     public final Setting<Integer> autoEatHunger = integer("autoEatHunger", 14, 1, 19);
     /** Put on better armor from the inventory. */
     public final Setting<Boolean> autoArmor = bool("autoArmor", true);
+    /** Place torches from the hotbar where it's dark underground, while pathing. */
+    public final Setting<Boolean> autoTorch = bool("autoTorch", true);
+    /** Block light below which autoTorch places one (mobs spawn at 0; 14 is right next to a torch). */
+    public final Setting<Integer> torchLight = integer("torchLight", 4, 1, 14);
+    /** #sleep places a bed from the hotbar when none is near. */
+    public final Setting<Boolean> sleepPlaceBed = bool("sleepPlaceBed", true);
+    /** #sleep breaks the bed it placed in the morning, to take it along. */
+    public final Setting<Boolean> sleepPickupBed = bool("sleepPickupBed", true);
     /** Save a "death" waypoint where the player dies ({@code #back} goes there). */
     public final Setting<Boolean> deathWaypoint = bool("deathWaypoint", true);
     /** Draw this dimension's waypoints in the world. */

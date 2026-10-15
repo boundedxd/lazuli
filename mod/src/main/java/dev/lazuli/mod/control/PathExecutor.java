@@ -49,6 +49,7 @@ public final class PathExecutor {
     private final Interactor interactor;
     private final Swimmer swimmer;
     private final BoatRider boat;
+    private final Torcher torcher;
     private boolean driving;
     private long lastBlock = NONE;
     private int offPathTicks;
@@ -64,6 +65,7 @@ public final class PathExecutor {
         this.jumper = new Jumper(world);
         this.swimmer = new Swimmer(world);
         this.boat = new BoatRider(world, settings);
+        this.torcher = new Torcher(settings);
     }
 
     public void tick(Minecraft mc) {
@@ -119,6 +121,8 @@ public final class PathExecutor {
         // long water ahead and a boat: crossing by boat takes over until it's out the other side
         Controls c = eating ? null : boat.tick(mc, player, path, idx, curYaw, curPitch);
         if (c == null && !eating) c = interactor.tick(mc, state, path, idx, block);
+        // dark underground: a torch at the feet (standing still meanwhile, like building)
+        if (c == null && !eating && idx >= 0 && !boat.active()) c = torcher.tick(mc, player, curYaw, curPitch);
         // eating: stand still meanwhile (counts as building, so standing still isn't taken as being stuck)
         if (eating) c = new Controls(false, false, false, false, curYaw, curPitch, 0, false);
         boolean building = c != null;
@@ -175,6 +179,7 @@ public final class PathExecutor {
         interactor.reset();
         swimmer.reset();
         boat.reset(Minecraft.getInstance());
+        torcher.reset(Minecraft.getInstance());
         offPathTicks = 0;
         tracker.reset();
         edgeWatch.reset();

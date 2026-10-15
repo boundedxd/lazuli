@@ -232,6 +232,11 @@ final class Station {
 
     /** The nearest {@code block} within {@code r} blocks (half that up and down), or null. */
     static BlockPos nearest(Minecraft mc, LocalPlayer p, Block block, int r) {
+        return nearest(mc, p, s -> s.is(block), r);
+    }
+
+    /** The nearest block matching {@code test} within {@code r} blocks (half that up and down), or null. */
+    static BlockPos nearest(Minecraft mc, LocalPlayer p, Predicate<net.minecraft.world.level.block.state.BlockState> test, int r) {
         BlockPos feet = p.blockPosition(), best = null;
         double bestD = Double.MAX_VALUE;
         BlockPos.MutableBlockPos at = new BlockPos.MutableBlockPos();
@@ -240,7 +245,7 @@ final class Station {
             for (int x = feet.getX() - r; x <= feet.getX() + r; x++)
                 for (int z = feet.getZ() - r; z <= feet.getZ() + r; z++) {
                     at.set(x, y, z);
-                    if (!mc.level.getBlockState(at).is(block)) continue;
+                    if (!test.test(mc.level.getBlockState(at))) continue;
                     double d = at.distSqr(feet);
                     if (d < bestD) {
                         bestD = d;

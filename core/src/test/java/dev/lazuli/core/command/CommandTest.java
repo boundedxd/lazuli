@@ -71,6 +71,7 @@ class CommandTest {
             }
             public int[] cameraFeet() { return new int[]{12, 1, 7}; }
             public void toggleFreecam() { mined.add("freecam"); }
+            public void sleep() { mined.add("sleep"); }
             public dev.lazuli.core.waypoint.Waypoints waypoints() { return waypoints; }
             public String dimension() { return "overworld"; }
         });
@@ -83,7 +84,8 @@ class CommandTest {
         assertEquals(PathingSession.State.PATHING, session.snapshot().state(), replies.toString());
         assertEquals(Pos.pack(12, 1, 7), session.snapshot().path().get(session.snapshot().path().size() - 1));
         h.handle("#freecam");
-        assertEquals(List.of("freecam"), mined);
+        h.handle("#sleep");
+        assertEquals(List.of("freecam", "sleep"), mined);
     }
 
     @Test
