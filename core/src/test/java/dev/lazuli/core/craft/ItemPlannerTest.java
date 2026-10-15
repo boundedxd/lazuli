@@ -27,6 +27,8 @@ class ItemPlannerTest {
     static Drops drops() {
         Map<String, String> loot = new HashMap<>();
         loot.put("minecraft:oak_log", self("minecraft:oak_log"));
+        loot.put("minecraft:birch_log", self("minecraft:birch_log"));
+        loot.put("minecraft:stripped_birch_log", self("minecraft:stripped_birch_log"));
         loot.put("minecraft:stone", ore("minecraft:stone", "minecraft:cobblestone"));
         loot.put("minecraft:cobblestone", self("minecraft:cobblestone"));
         loot.put("minecraft:iron_ore", ore("minecraft:iron_ore", "minecraft:raw_iron"));
@@ -59,8 +61,11 @@ class ItemPlannerTest {
                 {"type": "minecraft:smelting", "cookingtime": 200, "ingredient": "minecraft:raw_iron", "result": {"id": "minecraft:iron_ingot"}}""",
             "minecraft:glass", """
                 {"type": "minecraft:smelting", "cookingtime": 200, "ingredient": "minecraft:sand", "result": {"id": "minecraft:glass"}}"""));
-        tags.put("minecraft:planks", "{\"values\": [\"minecraft:oak_planks\"]}");
+        r.put("minecraft:birch_planks", """
+            {"type": "minecraft:crafting_shapeless", "ingredients": ["#minecraft:birch_logs"], "result": {"count": 4, "id": "minecraft:birch_planks"}}""");
+        tags.put("minecraft:planks", "{\"values\": [\"minecraft:oak_planks\", \"minecraft:birch_planks\"]}");
         tags.put("minecraft:oak_logs", "{\"values\": [\"minecraft:oak_log\"]}");
+        tags.put("minecraft:birch_logs", "{\"values\": [\"minecraft:birch_log\", \"minecraft:stripped_birch_log\"]}");
         return Recipes.load(r, tags);
     }
 
@@ -90,6 +95,19 @@ class ItemPlannerTest {
         assertEquals(2, p.actions().get(0).count(), p.toString()); // 3 planks + 2 for the sticks: 2 logs, mined in one go
         assertEquals(new ItemPlanner.Action(ItemPlanner.Kind.CRAFT, "minecraft:wooden_pickaxe", 1, List.of()),
             p.actions().get(p.actions().size() - 1));
+    }
+
+    @Test
+    void anyKindOfWoodWillDo() {
+        ItemPlanner.Plan p = planner().plan("minecraft:wooden_pickaxe", 1, Map.of(), 0, true, true);
+        ItemPlanner.Action mine = p.actions().get(0);
+        assertEquals(ItemPlanner.Kind.MINE, mine.kind(), p.toString());
+        assertEquals(List.of("minecraft:birch_log", "minecraft:oak_log"), mine.blocks().stream().sorted().toList(), p.toString());
+        assertEquals(1, p.actions().stream().filter(a -> a.kind() == ItemPlanner.Kind.MINE).count(), p.toString());
+        // with birch logs mined, it makes birch planks
+        ItemPlanner.Plan next = planner().plan("minecraft:wooden_pickaxe", 1, Map.of("minecraft:birch_log", 2), 0, true, true);
+        assertEquals(ItemPlanner.Kind.CRAFT, next.actions().get(0).kind(), next.toString());
+        assertEquals("minecraft:birch_planks", next.actions().get(0).item(), next.toString());
     }
 
     @Test

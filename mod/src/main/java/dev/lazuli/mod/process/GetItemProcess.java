@@ -147,7 +147,8 @@ public final class GetItemProcess implements Process {
             end(Outcome.FAILED, Chat.err("Stuck: {} {} {} keeps not helping", verb(a), a.count(), name(a.item())));
             return;
         }
-        chat.accept(Chat.info("Step {}/{}: {} {} {}", 1, plan.actions().size(), verb(a), a.count(), name(a.item())));
+        chat.accept(Chat.info("Step {}/{}: {} {} {}{}", 1, plan.actions().size(), verb(a), a.count(), name(a.item()),
+            kinds(a) > 1 ? " (or any of " + kinds(a) + " kinds)" : ""));
         current = a;
         switch (a.kind()) {
             case MINE -> mine.start(mc, a.count(), a.blocks());
@@ -223,6 +224,11 @@ public final class GetItemProcess implements Process {
             if (!s.isEmpty() && BuiltInRegistries.ITEM.getKey(s.getItem()).toString().equals(item)) n += s.getCount();
         }
         return n;
+    }
+
+    /** How many different blocks a mining step takes (deepslate ores count with their plain kind). */
+    private static long kinds(ItemPlanner.Action a) {
+        return a.blocks().stream().map(b -> b.replace("deepslate_", "")).distinct().count();
     }
 
     private static String verb(ItemPlanner.Action a) {

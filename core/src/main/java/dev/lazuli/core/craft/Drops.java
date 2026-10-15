@@ -72,6 +72,7 @@ public final class Drops {
     public static int abundance(String block) {
         String b = block.startsWith("minecraft:") ? block.substring(10) : block;
         if (b.startsWith("deepslate_") && b.endsWith("_ore")) b = b.substring(10);
+        if (b.startsWith("stripped_")) return UNKNOWN; // only where someone stripped them
         if (b.endsWith("_log") || b.endsWith("_stem") || b.equals("bamboo_block")) return 4;
         return switch (b) {
             case "stone", "deepslate", "netherrack", "andesite", "diorite", "granite", "tuff", "dirt", "grass_block", "sand",

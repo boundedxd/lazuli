@@ -101,6 +101,8 @@ public final class ItemPlanner {
         final List<Action> actions = new ArrayList<>();
         int pickTier;
         boolean tableNear, furnaceNear;
+        /** While trying out alternatives (see getAny): plain gets inside, no trying out again. */
+        int tryingOut;
 
         Run(Map<String, Integer> have, int pickTier, boolean tableNear, boolean furnaceNear) {
             this.have = new HashMap<>(have);
@@ -161,10 +163,10 @@ public final class ItemPlanner {
             int tier = pickTier;
             List<String> usable = blocks.stream().filter(b -> toolTier.applyAsInt(b) <= tier).toList();
             have.merge(item, n, Integer::sum);
-            // one trip for all of it: add to an earlier mining step for the same item
+            // one trip for all of it: add to an earlier mining step for the same item, or one that takes these blocks
             for (int i = 0; i < actions.size(); i++) {
                 Action a = actions.get(i);
-                if (a.kind() == Kind.MINE && a.item().equals(item)) {
+                if (a.kind() == Kind.MINE && (a.item().equals(item) || a.blocks().containsAll(usable))) {
                     actions.set(i, new Action(Kind.MINE, item, a.count() + n, a.blocks()));
                     return;
                 }
@@ -173,8 +175,9 @@ public final class ItemPlanner {
         }
 
         void smelt(String item, int n, int depth) {
-            String input = cheapest(smeltInputs(item), n, depth);
-            get(input, n, depth + 1);
+            Set<String> inputs = smeltInputs(item);
+            String input = cheapest(inputs, n, depth);
+            getAny(inputs, input, n, depth);
             reserve(input, n);
             // fuel: what it has from the list, else the cheapest fuel to get
             Map<String, Integer> fuel = Smelting.fuel(fuels, freeMap(), burn, n);
@@ -215,7 +218,7 @@ public final class ItemPlanner {
             for (var g : groups.entrySet()) {
                 int k = crafts * g.getValue();
                 String o = cheapest(g.getKey(), k, depth);
-                get(o, k, depth + 1);
+                getAny(g.getKey(), o, k, depth);
                 reserve(o, k);
                 mine.merge(o, k, Integer::sum);
             }
@@ -228,6 +231,77 @@ public final class ItemPlanner {
             have.clear();
             have.putAll(next);
             actions.add(new Action(Kind.CRAFT, item, n, List.of()));
+        }
+
+        /**
+         * Gets {@code k} of {@code rep}, chosen from {@code options}. Options just as cheap (any kind of planks, any
+         * log...) are planned too, and where they come out the same apart from what's mined, the mining takes any of
+         * their blocks: "mine 3 logs" rather than "mine 3 oak logs". The next plan goes on from whichever it got.
+         */
+        void getAny(Set<String> options, String rep, int k, int depth) {
+            double c = cost(rep, depth);
+            List<String> ties = free(rep) >= k || tryingOut > 0 ? List.of()
+                : options.stream().filter(o -> !o.equals(rep) && Math.abs(cost(o, depth) - c) < 1e-9).toList();
+            if (ties.isEmpty()) {
+                get(rep, k, depth + 1);
+                return;
+            }
+            Snap before = save();
+            get(rep, k, depth + 1);
+            Snap after = save();
+            List<Set<String>> wide = new ArrayList<>();
+            for (Action a : actions) wide.add(new java.util.LinkedHashSet<>(a.blocks()));
+            tryingOut++;
+            try {
+                for (String alt : ties) {
+                    restore(before);
+                    try {
+                        get(alt, k, depth + 1);
+                    } catch (Stuck e) {
+                        continue;
+                    }
+                    if (actions.size() != after.actions.size()) continue;
+                    boolean same = true;
+                    for (int i = 0; i < actions.size() && same; i++) {
+                        Action a = actions.get(i), b = after.actions.get(i);
+                        same = a.kind() == b.kind() && a.count() == b.count();
+                    }
+                    if (!same) continue;
+                    for (int i = 0; i < actions.size(); i++) if (actions.get(i).kind() == Kind.MINE) wide.get(i).addAll(actions.get(i).blocks());
+                }
+            } finally {
+                tryingOut--;
+            }
+            restore(after);
+            for (int i = 0; i < actions.size(); i++) {
+                Action a = actions.get(i);
+                if (a.kind() == Kind.MINE && wide.get(i).size() > a.blocks().size()) {
+                    actions.set(i, new Action(Kind.MINE, a.item(), a.count(), List.copyOf(wide.get(i))));
+                }
+            }
+        }
+
+        /** Everything a plan changes, to try something and go back. */
+        record Snap(Map<String, Integer> have, Map<String, Integer> reserved, List<Action> actions, Map<String, Double> costs,
+                    int pickTier, boolean tableNear, boolean furnaceNear) {}
+
+        Snap save() {
+            return new Snap(new HashMap<>(have), new HashMap<>(reserved), new ArrayList<>(actions), new HashMap<>(costs),
+                pickTier, tableNear, furnaceNear);
+        }
+
+        void restore(Snap s) {
+            have.clear();
+            have.putAll(s.have());
+            reserved.clear();
+            reserved.putAll(s.reserved());
+            actions.clear();
+            actions.addAll(s.actions());
+            costs.clear();
+            costs.putAll(s.costs());
+            pickTier = s.pickTier();
+            tableNear = s.tableNear();
+            furnaceNear = s.furnaceNear();
         }
 
         /** A crafting table or furnace to place, made if it has none. */
