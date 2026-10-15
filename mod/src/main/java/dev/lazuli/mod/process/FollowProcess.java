@@ -55,6 +55,11 @@ public final class FollowProcess implements Process {
     }
 
     @Override
+    public String status() {
+        return active() ? "Following" : null;
+    }
+
+    @Override
     public boolean active() {
         return active;
     }

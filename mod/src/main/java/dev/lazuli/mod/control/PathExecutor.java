@@ -95,6 +95,12 @@ public final class PathExecutor {
         }
 
         boolean sprint = settings.allowSprint.get() && player.getFoodData().getFoodLevel() > 6;
+        if (settings.surfaceSwim.get() && (player.isInWater() || player.isSwimming())) {
+            // sprinting with the head under, the game sprint-swims: it dives where the view points and the air runs out.
+            // Not sprinting and holding jump (the planner's choice in water), it floats with the head out.
+            sprint = false;
+            if (player.isSprinting()) player.setSprinting(false);
+        }
         float maxTurn = settings.rotationSpeed.get().floatValue();
         Vec3 v = player.getDeltaMovement();
         float curYaw = RotationDriver.yaw(player), curPitch = RotationDriver.pitch(player);
@@ -135,6 +141,7 @@ public final class PathExecutor {
         long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(v.x, v.z), building);
         if (failed != null) session.edgeFailed(failed[0], failed[1]);
         if (c == null) c = new Controls(false, false, false, curYaw, curPitch);
+        if (!sprint && c.sprint()) c = new Controls(c.forward(), c.back(), c.jump(), false, c.targetYaw(), c.targetPitch(), c.strafe(), c.sneak());
         float yaw = InputPlanner.approach(curYaw, c.targetYaw(), maxTurn);
         float pitchSpeed = interacting ? maxTurn : PITCH_SPEED;
         float pitch = curPitch + Math.max(-pitchSpeed, Math.min(pitchSpeed, c.targetPitch() - curPitch));

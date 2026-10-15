@@ -79,6 +79,19 @@ public final class SmeltProcess implements Process {
     }
 
     @Override
+    public String status() {
+        if (phase == Phase.IDLE || asked == null) return null;
+        String doing = switch (phase) {
+            case MAKE_FURNACE -> "making a furnace";
+            case STATION -> "going to the furnace";
+            case LOAD -> "loading";
+            case LEAVE, WAIT -> "cooking";
+            case IDLE -> "";
+        };
+        return "Smelt " + asked.count() + " " + asked.item().replace("minecraft:", "") + "  (" + doing + ")";
+    }
+
+    @Override
     public boolean active() {
         return phase != Phase.IDLE;
     }

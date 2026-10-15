@@ -35,6 +35,8 @@ public final class LazuliConfig implements WalksyLibApi {
     public static boolean renderPrediction = true;
     public static boolean renderGoal = true;
     public static boolean showHud = true;
+    public static boolean hudBars = true;
+    public static boolean hudStats = true;
     public static float lineWidth = 2.5f;
     public static WLColor pathColor = DEFAULT_PATH.copy();
     public static WLColor predictionColor = DEFAULT_PREDICTION.copy();
@@ -51,6 +53,7 @@ public final class LazuliConfig implements WalksyLibApi {
             .category(Category.builder("Movement")
                 .group(OptionGroup.builder("Moving")
                     .option(bool(s.allowSprint, "Sprint when food allows."))
+                    .option(bool(s.surfaceSwim, "Swim at the surface with your head out of the water (no sprint-swimming under, no drowning)."))
                     .option(bool(s.allowParkour, "Jump gaps, any direction, up to 7 blocks."))
                     .option(Options.ofNumber("Max fall height", s.maxFallHeight::get, s.maxFallHeight.defaultValue(), s.maxFallHeight::set)
                         .range(0, 20, 1)
@@ -165,8 +168,12 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(Options.ofNumber("Line width", () -> lineWidth, 2.5f, v -> lineWidth = v).range(1.0f, 6.0f, 0.5f).build())
                     .build())
                 .group(OptionGroup.builder("HUD")
-                    .option(Options.ofBoolean("Status line", () -> showHud, true, v -> showHud = v)
-                        .description(OptionDescription.ofText(() -> "State, distance and remaining path while pathing.")).build())
+                    .option(Options.ofBoolean("Status panel", () -> showHud, true, v -> showHud = v)
+                        .description(OptionDescription.ofText(() -> "What Lazuli is doing (job, step, trip) in the top left.")).build())
+                    .option(Options.ofBoolean("Progress bars", () -> hudBars, true, v -> hudBars = v)
+                        .description(OptionDescription.ofText(() -> "Bars for the job (blocks mined, #getitem steps) and the trip.")).build())
+                    .option(Options.ofBoolean("Speed and ETA", () -> hudStats, true, v -> hudStats = v)
+                        .description(OptionDescription.ofText(() -> "Speed, time left and path nodes under the trip.")).build())
                     .build())
                 .build())
             .build();

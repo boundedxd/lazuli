@@ -10,6 +10,8 @@ public final class Settings {
     private final Map<String, Setting<?>> byName = new LinkedHashMap<>();
 
     public final Setting<Boolean> allowSprint = bool("allowSprint", true);
+    /** Swim at the surface with the head out (never sprint-swim under water, where the air runs out). */
+    public final Setting<Boolean> surfaceSwim = bool("surfaceSwim", true);
     public final Setting<Integer> maxFallHeight = integer("maxFallHeight", 3, 0, 20);
     public final Setting<Boolean> allowParkour = bool("allowParkour", true);
     public final Setting<Boolean> allowBreak = bool("allowBreak", true);

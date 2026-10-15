@@ -62,6 +62,13 @@ public final class CraftProcess implements Process {
     }
 
     @Override
+    public String status() {
+        if (phase == Phase.IDLE) return null;
+        return "Craft " + String.join(", ", asked.stream().map(i -> i.count() + " " + i.item().replace("minecraft:", "")).toList())
+            + (phase == Phase.TABLE ? "  (going to a table)" : "");
+    }
+
+    @Override
     public boolean active() {
         return phase != Phase.IDLE;
     }

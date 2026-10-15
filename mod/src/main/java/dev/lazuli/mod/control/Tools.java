@@ -163,6 +163,11 @@ public final class Tools {
     /** Items processes are collecting, by process: how many of each it needs (Integer.MAX_VALUE: all). */
     private static final Map<String, Map<String, Integer>> KEEP = new ConcurrentHashMap<>();
 
+    /** Forgets what every process was collecting (#kill). */
+    public static void keepNothing() {
+        KEEP.clear();
+    }
+
     /** {@code who} is collecting these (an empty map: nothing any more); see keepCollected. */
     public static void keep(String who, Map<String, Integer> items) {
         if (items == null || items.isEmpty()) KEEP.remove(who);

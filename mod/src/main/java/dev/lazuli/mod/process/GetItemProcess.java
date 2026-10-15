@@ -56,6 +56,22 @@ public final class GetItemProcess implements Process {
         return running;
     }
 
+    /** Steps finished, and steps the last plan still had (the HUD's bar). */
+    private int done, planned;
+
+    @Override
+    public String status() {
+        if (!running) return null;
+        String s = "Get " + want + " " + name(target);
+        if (current != null) s += "  step " + (done + 1) + "/" + (done + planned) + ": " + verb(current) + " " + current.count() + " " + name(current.item());
+        return s;
+    }
+
+    @Override
+    public double progress() {
+        return running && done + planned > 0 ? (double) done / (done + planned) : -1;
+    }
+
     public Outcome outcome() {
         return outcome;
     }
@@ -77,6 +93,7 @@ public final class GetItemProcess implements Process {
         current = null;
         lastStep = null;
         steps = repeats = 0;
+        done = planned = 0;
         chat.accept(Chat.ok("Getting {} {}", want, name(target)));
     }
 
@@ -110,7 +127,10 @@ public final class GetItemProcess implements Process {
                     end(Outcome.CANCELLED, null);
                     return;
                 }
-                case OK -> current = null;
+                case OK -> {
+                    current = null;
+                    done++;
+                }
             }
         }
         if (count(p, target) >= want) {
@@ -151,6 +171,7 @@ public final class GetItemProcess implements Process {
         chat.accept(Chat.info("Step {}/{}: {} {} {}{}", 1, plan.actions().size(), verb(a), a.count(), name(a.item()),
             kinds(a) > 1 ? " (or any of " + kinds(a) + " kinds)" : ""));
         current = a;
+        planned = plan.actions().size();
         switch (a.kind()) {
             case MINE -> mine.start(mc, a.count(), a.blocks());
             case CRAFT -> crafts.start(mc, List.of(new ItemCount(a.item(), a.count())));

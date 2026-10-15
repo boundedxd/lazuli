@@ -36,6 +36,8 @@ public class InteractionCourseTest {
     static int lastOuts;
     /** The last run's {@link SimHands#besideBelow}. */
     static int lastBesideBelow;
+    /** The last run's longest stretch of ticks with the eyes under water (vanilla starts drowning after 300). */
+    static int lastUnderwater;
     /** The planner always gets {@code in}'s block count, whatever the hands have left. */
     static boolean staleBlocks;
     static boolean DEBUG;
@@ -158,6 +160,8 @@ public class InteractionCourseTest {
         session.start(goal, false, Pos.pack(sx, sy, sz));
         lastOuts = 0;
         lastBesideBelow = 0;
+        lastUnderwater = 0;
+        int under = 0;
         PlayerSim s = new PlayerSim(w, sx + 0.5, sy, sz + 0.5, 0, 0, 0, true, false);
         hands.s = s;
         InputPlanner planner = new InputPlanner(w);
@@ -239,6 +243,11 @@ public class InteractionCourseTest {
             s.step(c.impulse(), c.strafe(), c.jump(), c.sprint(), c.sneak(), yaw);
             lowest = Math.min(lowest, s.y);
             maxFall = Math.max(maxFall, s.fallen());
+            double eye = s.y + Builder.EYE;
+            int ey = (int) Math.floor(eye);
+            boolean wet = w.get((int) Math.floor(s.x), ey, (int) Math.floor(s.z)) == BlockKind.WATER && eye < ey + 8.0 / 9.0;
+            under = wet ? under + 1 : 0;
+            lastUnderwater = Math.max(lastUnderwater, under);
             t++;
             if (log.length() < 30000) {
                 log.append(String.format("t=%d pos=(%.2f,%.2f,%.2f) g=%s idx=%d/%d in=%d%s%s%s block=%s path0=%s %s%n", t, s.x, s.y, s.z,
@@ -282,6 +291,17 @@ public class InteractionCourseTest {
         assertTrue(r.arrived(), r.log());
         assertTrue(r.breaks() <= 24, r.breaks() + " breaks" + System.lineSeparator() + r.log());
         assertEquals(0, lastBesideBelow, "dug down from beside the hole" + System.lineSeparator() + r.log());
+    }
+
+    @Test
+    void swimsALongWayWithItsHeadAboveWater() {
+        // a 36-block lake, 4 deep: swim across at the surface, not along the bottom
+        GridWorld w = GridWorld.flatFloor(-5, -5, 50, 5).fill(4, -4, -5, 40, 0, 5, BlockKind.WATER)
+            .fill(4, -5, -5, 40, -5, 5, BlockKind.SOLID);
+        Run r = drive(w, new Interaction(false, false, 0, p -> Double.POSITIVE_INFINITY), 0, false, 0, 1, 0,
+            new GoalBlock(45, 1, 0), 45, 0, 3000);
+        assertTrue(r.arrived(), r.log());
+        assertTrue(lastUnderwater < 20, "head under water for " + lastUnderwater + " ticks in a row" + System.lineSeparator() + r.log());
     }
 
     @Test

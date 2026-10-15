@@ -61,11 +61,17 @@ public final class LazuliClient implements ClientModInitializer {
 
 	private final WorldCache cache = new WorldCache(-64, 384);
 	private final Settings settings = LazuliConfig.SETTINGS;
-	private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
-		Thread t = new Thread(r, "lazuli-planner");
-		t.setDaemon(true);
-		return t;
-	});
+	/** The planner thread; #kill swaps in a new one if it hangs. */
+	private volatile ExecutorService workerPool = newWorker();
+	private final java.util.concurrent.Executor worker = r -> workerPool.execute(r);
+
+	private static ExecutorService newWorker() {
+		return Executors.newSingleThreadExecutor(r -> {
+			Thread t = new Thread(r, "lazuli-planner");
+			t.setDaemon(true);
+			return t;
+		});
+	}
 	private TraceRecorder recorder;
 	private LazuliRenderer renderer;
 	private boolean openConfigNextTick;
@@ -163,6 +169,11 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public void kill() {
+				LazuliClient.this.kill(Minecraft.getInstance());
+			}
+
+			@Override
 			public void stopProcesses() {
 				// #stop and #come: the job, every process and its clicks (the trip is stopped by the command)
 				tasks.cancel();
@@ -255,6 +266,7 @@ public final class LazuliClient implements ClientModInitializer {
 		}, this::chat);
 		Lazuli.Holder.set(new Api());
 		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal, cache);
+		renderer.processes(processes);
 
 		ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
 			if (Minecraft.getInstance().player == null) return true;
@@ -439,6 +451,32 @@ public final class LazuliClient implements ClientModInitializer {
 
 	private final dev.lazuli.mod.control.InputDriver userKeys = new dev.lazuli.mod.control.InputDriver();
 
+	/** #kill: everything stopped and reset, a fresh planner thread, keys and view let go. */
+	private void kill(Minecraft mc) {
+		tasks.cancel();
+		clicks.cancel();
+		for (Process p : processes) {
+			try {
+				p.stop(false);
+			} catch (RuntimeException e) {
+				org.slf4j.LoggerFactory.getLogger("lazuli").warn("stopping a process failed", e);
+			}
+		}
+		ExecutorService old = workerPool;
+		workerPool = newWorker();
+		old.shutdownNow(); // interrupts a hung search; whatever it finds is stale and never published
+		session.kill();
+		executor.release(mc);
+		new dev.lazuli.mod.control.InputDriver().release();
+		RotationDriver.end();
+		Tools.keepNothing();
+		upkeep.reset(mc);
+		if (mc.gameMode != null && mc.player != null) mc.gameMode.stopDestroyBlock();
+		mc.options.keyAttack.setDown(false);
+		mc.options.keyUse.setDown(false);
+		chat(Chat.ok("Killed everything; ready for new commands"));
+	}
+
 	/** Stops the job, every process and the trip (or the search for one). */
 	private void stopAll(boolean announce) {
 		tasks.cancel();
@@ -460,6 +498,7 @@ public final class LazuliClient implements ClientModInitializer {
 		tasks.tick();
 		clicks.tick(mc, settings.clicksPerTick.get());
 		renderer.tick(mc);
+		renderer.hudTick(mc);
 		FreeCam.tick(mc);
 		while (LazuliConfig.FREECAM.consumeClick()) toggleFreecam(mc);
 		if (mc.player == null) FreeCam.off();

@@ -43,6 +43,11 @@ public final class TunnelProcess implements Process {
     }
 
     @Override
+    public String status() {
+        return active() ? "Tunnelling" : null;
+    }
+
+    @Override
     public boolean active() {
         return active;
     }

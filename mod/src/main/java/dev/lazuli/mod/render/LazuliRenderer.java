@@ -98,16 +98,117 @@ public final class LazuliRenderer {
         return new Vec3(Pos.x(n) + 0.5, Pos.y(n) + LIFT, Pos.z(n) + 0.5);
     }
 
+    // ---- HUD ----
+
+    private static final int PAD = 4, BAR_W = 120, BAR_H = 3, LINE = 11;
+    private static final String SPIN = "|/-\\";
+    private List<dev.lazuli.mod.process.Process> processes = List.of();
+    /** The trip the HUD measures progress on, and how far its goal was when it began. */
+    private long hudTrip = -1;
+    private double tripStartDist;
+    private double speed, lastX = Double.NaN, lastZ;
+    private PathingSession.State lastState = PathingSession.State.IDLE;
+    private String flash;
+    private int flashTicks, hudTicks;
+
+    /** The processes whose status the HUD shows. */
+    public void processes(List<dev.lazuli.mod.process.Process> processes) {
+        this.processes = processes;
+    }
+
+    /** Per client tick: speed, trip progress and the "arrived" / "failed" flash. */
+    public void hudTick(Minecraft mc) {
+        hudTicks++;
+        if (flashTicks > 0) flashTicks--;
+        if (mc.player == null) return;
+        double x = mc.player.getX(), z = mc.player.getZ();
+        double v = Double.isNaN(lastX) ? 0 : Math.hypot(x - lastX, z - lastZ) * 20;
+        speed = speed * 0.85 + v * 0.15; // smoothed, blocks a second
+        lastX = x;
+        lastZ = z;
+        PathingSession.Snapshot snap = session.snapshot();
+        if (snap.state() == PathingSession.State.PATHING && snap.goal() != null && snap.trip() != hudTrip) {
+            hudTrip = snap.trip();
+            BlockPos b = mc.player.blockPosition();
+            tripStartDist = Math.max(1, snap.goal().distance(b.getX(), b.getY(), b.getZ()));
+        }
+        if (snap.state() != lastState) {
+            if (snap.state() == PathingSession.State.ARRIVED) flash("Arrived", 60);
+            else if (snap.state() == PathingSession.State.FAILED) flash("No path", 80);
+            lastState = snap.state();
+        }
+    }
+
+    private void flash(String text, int ticks) {
+        flash = text;
+        flashTicks = ticks;
+    }
+
     public void renderHud(GuiGraphics g, DeltaTracker delta) {
         Minecraft mc = Minecraft.getInstance();
         if (!LazuliConfig.showHud || mc.player == null || mc.options.hideGui) return;
         PathingSession.Snapshot snap = session.snapshot();
-        if (snap.state() != PathingSession.State.PATHING) return;
-        BlockPos p = mc.player.blockPosition();
-        String text = "Lazuli: " + (snap.goal() == null ? "pathing" : snap.goal().describe());
-        if (snap.goal() != null) text += String.format("  %.0f m", snap.goal().distance(p.getX(), p.getY(), p.getZ()));
-        text += "  " + snap.path().size() + " nodes";
+        boolean pathing = snap.state() == PathingSession.State.PATHING, planning = session.planning();
+        int accent = 0xFF000000 | LazuliConfig.pathColor.getRGB();
+        // rows: text, color, bar progress (negative: none), bar color
+        List<Object[]> rows = new java.util.ArrayList<>();
+        for (dev.lazuli.mod.process.Process p : processes) {
+            String st = p.active() ? p.status() : null;
+            if (st != null) rows.add(new Object[]{st, 0xFFFFFFFF, LazuliConfig.hudBars ? p.progress() : -1, 0xFF60E070});
+        }
+        BlockPos b = mc.player.blockPosition();
+        if (pathing && snap.goal() != null) {
+            double dist = snap.goal().distance(b.getX(), b.getY(), b.getZ());
+            String goal = snap.goal().describe();
+            if (goal.length() > 40) goal = goal.substring(0, 38) + "..";
+            rows.add(new Object[]{"→ " + goal, 0xFFD0D0D0, -1.0, 0});
+            String line = String.format("%.0f m", dist);
+            if (LazuliConfig.hudStats) {
+                line += String.format("  %.1f m/s", speed);
+                if (speed > 0.5) line += "  ~" + time(dist / speed);
+                line += "  " + snap.path().size() + " nodes";
+            }
+            double prog = snap.trip() == hudTrip ? Math.max(0, Math.min(1, 1 - dist / tripStartDist)) : -1;
+            rows.add(new Object[]{line, 0xFFA0A0A0, LazuliConfig.hudBars ? prog : -1, accent});
+        }
+        if (dev.lazuli.mod.process.Upkeep.eating()) rows.add(new Object[]{"Eating", 0xFFFFC040, -1.0, 0});
+        String title;
+        if (planning) title = "Lazuli  planning " + SPIN.charAt(hudTicks / 3 % 4);
+        else if (pathing) title = "Lazuli  pathing";
+        else if (!rows.isEmpty()) title = "Lazuli  working";
+        else if (flashTicks > 0) title = "Lazuli  " + flash;
+        else return;
+
         Font font = mc.font;
-        g.drawString(font, text, 4, 4, 0xFF000000 | LazuliConfig.pathColor.getRGB(), true);
+        int w = font.width(title);
+        int h = LINE;
+        for (Object[] r : rows) {
+            w = Math.max(w, font.width((String) r[0]));
+            h += LINE + ((double) r[2] >= 0 ? BAR_H + 2 : 0);
+        }
+        w = Math.max(w, BAR_W);
+        int x0 = PAD, y0 = PAD;
+        g.fill(x0, y0, x0 + w + 2 * PAD, y0 + h + 2 * PAD - 2, 0x90000000);
+        g.fill(x0, y0, x0 + 2, y0 + h + 2 * PAD - 2, accent); // accent strip
+        int x = x0 + PAD + 1, y = y0 + PAD;
+        g.drawString(font, title, x, y, accent, true);
+        y += LINE;
+        for (Object[] r : rows) {
+            g.drawString(font, (String) r[0], x, y, (int) r[1], true);
+            y += LINE;
+            double prog = (double) r[2];
+            if (prog >= 0) {
+                int bw = Math.max(BAR_W, w);
+                g.fill(x, y - 1, x + bw, y - 1 + BAR_H, 0x60FFFFFF);
+                g.fill(x, y - 1, x + (int) Math.round(bw * prog), y - 1 + BAR_H, (int) r[3]);
+                y += BAR_H + 2;
+            }
+        }
+    }
+
+    /** 75 -> "1m15s", 9 -> "9s". */
+    private static String time(double seconds) {
+        int s = (int) Math.round(seconds);
+        return s >= 60 ? s / 60 + "m" + String.format("%02d", s % 60) + "s" : s + "s";
     }
 }

@@ -10,4 +10,14 @@ public interface Process {
     void tick(Minecraft mc);
 
     void stop(boolean announce);
+
+    /** What it's doing, for the HUD (null: nothing worth showing). */
+    default String status() {
+        return null;
+    }
+
+    /** How far along it is, 0 to 1, for the HUD's bar; negative when there's no telling. */
+    default double progress() {
+        return -1;
+    }
 }

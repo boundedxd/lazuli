@@ -127,6 +127,28 @@ class PathingSessionTest {
     }
 
     @Test
+    void killRecoversFromADeadWorker() {
+        // a worker that silently lost its tasks (a crash, a hang): the session would wait for them forever
+        GridWorld w = GridWorld.flatFloor(-10, -10, 20, 10);
+        boolean[] dead = {true};
+        java.util.concurrent.Executor worker = r -> { if (!dead[0]) r.run(); };
+        PathingSession s = new PathingSession(w, () -> -64, () -> 319, new Settings(), worker, msgs::add);
+        s.start(new GoalBlock(10, 1, 0), false, Pos.pack(0, 1, 0));
+        s.regionChanged(5, 1, 0, 5, 1, 0);
+        assertTrue(s.planning());
+        dead[0] = false; // the mod swaps in a fresh thread, then kills
+        s.kill();
+        assertFalse(s.planning());
+        assertEquals(PathingSession.State.IDLE, s.snapshot().state());
+        s.start(new GoalBlock(10, 1, 0), false, Pos.pack(0, 1, 0));
+        assertEquals(PathingSession.State.PATHING, s.snapshot().state());
+        // block changes are picked up again (the lost batch had left them "already queued")
+        w.fill(5, 1, -10, 5, 3, 10, BlockKind.SOLID);
+        s.regionChanged(5, 1, -10, 5, 3, 10);
+        assertNotEquals(PathingSession.State.PATHING, s.snapshot().state(), "replanned around the new wall");
+    }
+
+    @Test
     void stopIsImmediateEvenWhileTheWorkerIsSearching() throws Exception {
         // a huge open world and a goal walled off: the search runs until its time budget
         GridWorld w = GridWorld.flatFloor(-300, -300, 300, 300).fill(250, 1, 250, 252, 4, 252, BlockKind.SOLID);

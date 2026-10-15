@@ -35,6 +35,11 @@ public final class ExploreProcess implements Process {
     }
 
     @Override
+    public String status() {
+        return active() ? "Exploring" : null;
+    }
+
+    @Override
     public boolean active() {
         return active;
     }

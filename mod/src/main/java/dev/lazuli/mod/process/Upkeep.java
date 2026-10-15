@@ -50,6 +50,16 @@ public final class Upkeep {
         return eating;
     }
 
+    /** Lets go of food being eaten (#kill). */
+    public void reset(Minecraft mc) {
+        if (!eating) return;
+        eating = false;
+        mc.options.keyUse.setDown(false);
+        if (mc.player != null && mc.player.isUsingItem()) mc.gameMode.releaseUsingItem(mc.player);
+        if (mc.player != null && prevSlot >= 0) mc.player.getInventory().setSelectedSlot(prevSlot);
+        prevSlot = -1;
+    }
+
     /** @param busy Lazuli is pathing or running a process */
     public void tick(Minecraft mc, boolean busy) {
         LocalPlayer p = mc.player;

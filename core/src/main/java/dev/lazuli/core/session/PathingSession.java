@@ -183,6 +183,25 @@ public final class PathingSession {
         });
     }
 
+    /**
+     * Last resort (#kill) after the worker hung or died: stops everything and forgets every bit of trip state, including
+     * work a lost task left marked as queued. Call it once the worker the session uses runs tasks again (a new thread).
+     */
+    public void kill() {
+        stop(true);
+        replanQueued.set(false);
+        dirtyQueued.set(false);
+        dirty.clear();
+        long gen = generation.get();
+        worker.execute(() -> {
+            if (generation.get() != gen) return;
+            tripGeneration = gen;
+            planner = null;
+            segment = null;
+            invalidStartSince = -1;
+        });
+    }
+
     private void cancelSearch() {
         LazyDStarLite p = searching;
         if (p != null) p.cancel();

@@ -65,6 +65,11 @@ public final class FarmProcess implements Process {
     }
 
     @Override
+    public String status() {
+        return active() ? "Farming" : null;
+    }
+
+    @Override
     public boolean active() {
         return active;
     }

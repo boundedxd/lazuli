@@ -64,6 +64,13 @@ public final class CommandHandler {
         /** Stops whatever process (mining...) is running on top of pathing. */
         default void stopProcesses() {}
 
+        /** Hard reset when something is stuck: every job and process, the planner thread, held keys and the view. */
+        default void kill() {
+            stopProcesses();
+            session().kill();
+            reply(Chat.ok("Killed everything; ready for new commands"));
+        }
+
         /**
          * Follows entities: {@code mode} is players, entities, player (names in {@code args}) or entity (type ids in
          * {@code args}).
@@ -170,6 +177,7 @@ public final class CommandHandler {
                 ctx.stopProcesses();
                 ctx.session().stop();
             }
+            case "kill" -> ctx.kill();
             case "set" -> set(args);
             case "settings" -> {
                 ctx.reply(Chat.info("Settings ({}set <name> <value> to change):", prefix));
@@ -252,6 +260,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "smelt <item> [count]", "cook items in a furnace (iron_ingot or raw_iron; blast furnace/smoker when there's one)"));
         ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
         ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
+        ctx.reply(Chat.usage(p + "kill", "when something's stuck: reset everything (planner thread, keys, jobs), then any command works again"));
         ctx.reply(Chat.usage(p + "set <name> [value]", "show or change a setting"));
         ctx.reply(Chat.usage(p + "settings", "list every setting"));
         ctx.reply(Chat.usage(p + "config", "open the settings screen"));

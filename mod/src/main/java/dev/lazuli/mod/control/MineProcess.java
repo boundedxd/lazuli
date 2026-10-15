@@ -105,6 +105,25 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         return phase != Phase.IDLE;
     }
 
+    @Override
+    public String status() {
+        String doing = switch (phase) {
+            case TRAVEL -> "looking for";
+            case BREAK -> "breaking";
+            case PICKUP -> "picking up";
+            case IDLE -> null;
+        };
+        if (doing == null) return null;
+        String names = what.replace("minecraft:", "");
+        if (names.length() > 32) names = names.substring(0, 30) + "..";
+        return "Mine " + names + (quantity > 0 ? "  " + mined + "/" + quantity : "  " + mined) + "  (" + doing + ")";
+    }
+
+    @Override
+    public double progress() {
+        return phase == Phase.IDLE || quantity <= 0 ? -1 : Math.min(1, (double) mined / quantity);
+    }
+
     /** How the last run ended: true if it was stopped rather than finishing (or running out of blocks to mine). */
     private boolean cancelled;
 

@@ -62,6 +62,11 @@ public final class ContainerProcess implements Process {
     }
 
     @Override
+    public String status() {
+        return active() ? "Moving items" : null;
+    }
+
+    @Override
     public boolean active() {
         return phase != Phase.IDLE;
     }
