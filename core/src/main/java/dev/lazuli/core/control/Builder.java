@@ -69,6 +69,23 @@ public final class Builder {
         this.hands = hands;
     }
 
+    /**
+     * Eagle bridging: back up to the edge without sneaking and only crouch there, to place (faster). Off, it sneaks
+     * the whole way (ninja bridging: slower, but the edge always holds).
+     */
+    private boolean eagle;
+
+    public void setEagle(boolean on) {
+        eagle = on;
+    }
+
+    /**
+     * Eagle bridging crouches once the body would hang this far (blocks) past the edge within {@link #EAGLE_LEAD}
+     * ticks at the current speed; the edge holds a sneaking player until 0.3 past.
+     */
+    static final double EAGLE_EDGE = 0.1;
+    static final int EAGLE_LEAD = 2;
+
     public void reset() {
         pillar = NONE;
         pendingPos = NONE;
@@ -165,7 +182,12 @@ public final class Builder {
         double[] fc = faceCenter(pos, against);
         double past = (p.x() - fc[0]) * dx + (p.z() - fc[2]) * dz;
         float pitch = past > 0.02 ? (float) Math.toDegrees(Math.atan2(eye - fc[1], past)) : BRIDGE_PITCH;
-        return walkFacing(p, Pos.x(pos) + 0.5, Pos.z(pos) + 0.5, back, pitch);
+        Controls c = walkFacing(p, Pos.x(pos) + 0.5, Pos.z(pos) + 0.5, back, pitch);
+        if (!eagle) return c;
+        // the edge only holds while sneaking (and the key takes effect at once), so crouch just before it's needed
+        double toward = p.vx() * dx + p.vz() * dz;
+        boolean crouch = past + Math.max(0, toward) * EAGLE_LEAD > EAGLE_EDGE || !p.onGround();
+        return new Controls(c.forward(), c.back(), false, false, c.targetYaw(), c.targetPitch(), c.strafe(), crouch);
     }
 
     /**

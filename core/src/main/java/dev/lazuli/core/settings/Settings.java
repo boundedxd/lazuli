@@ -14,6 +14,8 @@ public final class Settings {
     public final Setting<Boolean> allowParkour = bool("allowParkour", true);
     public final Setting<Boolean> allowBreak = bool("allowBreak", true);
     public final Setting<Boolean> allowPlace = bool("allowPlace", true);
+    /** Bridge eagle-style: crouch only at the edge (faster); off, ninja-style, sneaking the whole way. */
+    public final Setting<Boolean> eagleBridge = bool("eagleBridge", false);
     /** Block ids (namespace optional) the path may place for bridging and pillaring. */
     public final Setting<String> throwawayBlocks = register(new Setting<>("throwawayBlocks",
         "dirt,cobblestone,cobbled_deepslate,netherrack,stone,andesite,diorite,granite,tuff,deepslate,blackstone,end_stone",

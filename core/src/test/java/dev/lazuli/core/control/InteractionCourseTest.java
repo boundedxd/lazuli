@@ -105,6 +105,9 @@ public class InteractionCourseTest {
         }
     }
 
+    /** Bridge eagle style (see {@link Builder#setEagle}) in the runs that follow. */
+    static boolean eagle;
+
     public static Run drive(GridWorld w, Interaction in, int sx, int sy, int sz, int gx, int gy, int gz, int maxTicks) {
         return drive(w, in, in.throwaways(), sx, sy, sz, gx, gy, gz, maxTicks);
     }
@@ -124,6 +127,7 @@ public class InteractionCourseTest {
         SimHands hands = new SimHands(w, session, blocks);
         handsRef[0] = hands;
         Builder builder = new Builder(w, hands);
+        builder.setEagle(eagle);
         session.start(new GoalBlock(gx, gy, gz), false, Pos.pack(sx, sy, sz));
         PlayerSim s = new PlayerSim(w, sx + 0.5, sy, sz + 0.5, 0, 0, 0, true, false);
         hands.s = s;
@@ -284,6 +288,40 @@ public class InteractionCourseTest {
         assertTrue(r.lowestY() >= 0.99, r.log());
         // ninja bridging: one turn round at the start and one at the end, never a turn per block
         assertTrue(r.turned() < 500, "turned " + r.turned() + " degrees" + System.lineSeparator() + r.log());
+    }
+
+    @Test
+    void eagleBridgesFasterWithoutFalling() {
+        int[] ticks = new int[2];
+        for (int e = 0; e < 2; e++) {
+            GridWorld w = new GridWorld(BlockKind.AIR).fill(-3, 0, -2, 0, 0, 2, BlockKind.SOLID).fill(16, 0, -2, 18, 0, 2, BlockKind.SOLID);
+            eagle = e == 1;
+            Run r;
+            try {
+                r = drive(w, PLACE, 0, 1, 0, 17, 1, 0, 2500);
+            } finally {
+                eagle = false;
+            }
+            assertTrue(r.arrived(), r.log());
+            assertTrue(r.lowestY() >= 0.99, (e == 1 ? "eagle" : "ninja") + " never falls" + System.lineSeparator() + r.log());
+            ticks[e] = r.ticks();
+        }
+        System.out.println("ninja " + ticks[0] + " ticks, eagle " + ticks[1]);
+        assertTrue(ticks[1] < ticks[0], "ninja " + ticks[0] + " ticks, eagle " + ticks[1]);
+    }
+
+    @Test
+    void eagleBridgesAroundACorner() {
+        GridWorld w = new GridWorld(BlockKind.AIR).fill(-2, 0, -2, 0, 0, 0, BlockKind.SOLID).fill(5, 0, 6, 7, 0, 8, BlockKind.SOLID);
+        eagle = true;
+        Run r;
+        try {
+            r = drive(w, PLACE, 0, 1, 0, 6, 1, 7, 2500);
+        } finally {
+            eagle = false;
+        }
+        assertTrue(r.arrived(), r.log());
+        assertTrue(r.lowestY() >= 0.99, r.log());
     }
 
     @Test

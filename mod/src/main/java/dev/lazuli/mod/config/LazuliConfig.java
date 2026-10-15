@@ -53,6 +53,7 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(bool(s.allowParkour, "Jump gaps, any direction, up to 7 blocks."))
                     .option(bool(s.allowBreak, "Mine through blocks in the way, with the best tool in the hotbar."))
                     .option(bool(s.allowPlace, "Bridge gaps and pillar up with throwaway blocks from the hotbar."))
+                    .option(bool(s.eagleBridge, "Eagle bridge: walk back without sneaking and only crouch at the edge to place (faster). Off: ninja bridge, sneaking the whole way."))
                     .option(Options.ofString("Throwaway blocks", s.throwawayBlocks::get, s.throwawayBlocks.defaultValue(),
                         v -> s.throwawayBlocks.parse(v))
                         .description(OptionDescription.ofText(() -> "Comma-separated block ids it may place.")).build())
