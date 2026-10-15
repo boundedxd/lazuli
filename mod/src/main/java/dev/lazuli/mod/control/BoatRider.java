@@ -2,6 +2,7 @@ package dev.lazuli.mod.control;
 
 import dev.lazuli.core.control.Controls;
 import dev.lazuli.core.inventory.Click;
+import dev.lazuli.core.move.Boating;
 import dev.lazuli.core.move.Standing;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.world.BlockView;
@@ -32,7 +33,11 @@ final class BoatRider {
     /** Ticks of hardly moving while riding before it's taken as stuck. */
     private static final int STUCK_TICKS = 60;
     /** Path nodes ahead it steers for. */
-    private static final int AHEAD = 4;
+    private static final int AHEAD = 3;
+    /** Cells the boat route may look through. */
+    private static final int ROUTE_LIMIT = 6000;
+    /** How far a boat can be put down (block reach, with a little to spare). */
+    private static final double PLACE_REACH = 4.3;
 
     private final BlockView world;
     private final Settings settings;
@@ -44,6 +49,10 @@ final class BoatRider {
     /** Boats that were around before placing ours: never taken for the one just placed. */
     private final java.util.Set<Integer> before = new java.util.HashSet<>();
     private long landing;
+    /** Where the boat goes: water cells wide enough for it when there's a way (else the path's own), and the spot it's put on. */
+    private List<Long> route = List.of();
+    private long spot;
+    private float lastYaw;
     /** The last node of a crossing given up on or done: not tried again from there. */
     private long skipUntil = Long.MIN_VALUE;
 
@@ -88,6 +97,13 @@ final class BoatRider {
         if (boatSlot(p, 36) < 0) return false;
         run = List.copyOf(path.subList(first, end + 1));
         landing = path.get(end + 1);
+        // a boat only goes down with water (or air) all around it, within reach
+        spot = placeSpot(p, Pos.y(run.get(0)));
+        if (spot == Long.MIN_VALUE) {
+            skipUntil = run.get(run.size() - 1);
+            return false;
+        }
+        route = List.of();
         progress = 0;
         ticks = slow = 0;
         usedAt = -100;
@@ -113,8 +129,8 @@ final class BoatRider {
         p.getInventory().setSelectedSlot(slot);
         // the boat this placed: any new one near (it shows up a tick or two after the click)
         AbstractBoat b = newBoat(mc, p);
-        // on the first water block, right next to the shore, aiming at its surface
-        long cell = run.get(0);
+        // on a water block with room all around (the boat sticks out into the blocks beside it), aiming at its surface
+        long cell = spot;
         Vec3 at = new Vec3(Pos.x(cell) + 0.5, Pos.y(cell) + WATER_TOP, Pos.z(cell) + 0.5);
         float[] aim = angles(p, at);
         boolean onIt = Math.abs(Mth.wrapDegrees(aim[0] - RotationDriver.yaw(p))) < 3 && Math.abs(aim[1] - RotationDriver.pitch(p)) < 3;
@@ -152,34 +168,79 @@ final class BoatRider {
     private Controls ride(LocalPlayer p, float pitch0) {
         if (p.getVehicle() != boat) return giveUp();
         Vec3 pos = boat.position();
-        // how far along: the run node nearest the boat, never going back
+        int y = Pos.y(run.get(0));
+        int bx = Mth.floor(pos.x), bz = Mth.floor(pos.z);
+        // a way wide enough for the boat (planned again when it drifts off it); else the path's own swim nodes
+        if (route.isEmpty() || ticks % 20 == 0 && nearestDist(pos) > 2.5 * 2.5) {
+            List<Long> r = Boating.route(world, bx, bz, y, Pos.x(landing), Pos.z(landing), ROUTE_LIMIT);
+            route = r != null && r.size() > 1 ? r : run;
+            progress = 0;
+        }
+        // how far along: the route cell nearest the boat, never going back
         double best = Double.POSITIVE_INFINITY;
-        for (int i = progress; i < Math.min(run.size(), progress + 8); i++) {
-            double d = sq(Pos.x(run.get(i)) + 0.5 - pos.x) + sq(Pos.z(run.get(i)) + 0.5 - pos.z);
+        for (int i = progress; i < Math.min(route.size(), progress + 10); i++) {
+            double d = sq(Pos.x(route.get(i)) + 0.5 - pos.x) + sq(Pos.z(route.get(i)) + 0.5 - pos.z);
             if (d < best) {
                 best = d;
                 progress = i;
             }
         }
         double lx = Pos.x(landing) + 0.5, lz = Pos.z(landing) + 0.5;
-        if (progress >= run.size() - 1 || sq(lx - pos.x) + sq(lz - pos.z) < 2.5 * 2.5) {
+        Vec3 v = boat.getDeltaMovement();
+        double speed2 = v.x * v.x + v.z * v.z;
+        boolean there = sq(lx - pos.x) + sq(lz - pos.z) < 1.9 * 1.9;
+        if (there || progress >= route.size() - 1 && speed2 < 0.05 * 0.05) {
             phase = Phase.DISMOUNT;
             ticks = 0;
             return still(p.getYRot(), pitch0);
         }
-        Vec3 v = boat.getDeltaMovement();
-        slow = v.x * v.x + v.z * v.z < 0.02 * 0.02 && ticks > 20 ? slow + 1 : 0;
+        slow = speed2 < 0.02 * 0.02 && ticks > 20 ? slow + 1 : 0;
         if (slow > STUCK_TICKS) {
             phase = Phase.DISMOUNT; // stuck on something: get out and carry on from here
             ticks = 0;
         }
-        long t = run.get(Math.min(run.size() - 1, progress + AHEAD));
-        double tx = Pos.x(t) + 0.5, tz = Pos.z(t) + 0.5;
+        // steer for a cell a few ahead (the last one: the landing itself)
+        int ahead = Math.min(route.size() - 1, progress + AHEAD);
+        double tx = Pos.x(route.get(ahead)) + 0.5, tz = Pos.z(route.get(ahead)) + 0.5;
+        if (ahead == route.size() - 1) {
+            tx = lx;
+            tz = lz;
+        }
         float want = (float) Math.toDegrees(Math.atan2(-(tx - pos.x), tz - pos.z));
         float diff = Mth.wrapDegrees(want - boat.getYRot());
-        // A turns the boat left (its yaw down), D right; paddle when roughly facing the way
-        int strafe = diff > 6 ? -1 : diff < -6 ? 1 : 0;
-        return new Controls(Math.abs(diff) < 50, false, false, false, want, 10f, strafe);
+        float rate = ticks <= 1 ? 0 : Mth.wrapDegrees(boat.getYRot() - lastYaw);
+        lastYaw = boat.getYRot();
+        // A turns the boat left (its yaw down), D right; the spin carries on, so it lets go (or counters) early.
+        // Paddles while roughly facing the way, gently when the landing is close.
+        int strafe = Boating.steer(diff, rate);
+        double toLand = Math.sqrt(sq(lx - pos.x) + sq(lz - pos.z));
+        boolean paddle = Math.abs(diff) < 40 && (toLand > 4 || speed2 < 0.15 * 0.15);
+        return new Controls(paddle, false, false, false, want, 10f, strafe);
+    }
+
+    private double nearestDist(Vec3 pos) {
+        double best = Double.POSITIVE_INFINITY;
+        for (long c : route) best = Math.min(best, sq(Pos.x(c) + 0.5 - pos.x) + sq(Pos.z(c) + 0.5 - pos.z));
+        return best;
+    }
+
+    /** The water cell (level y) nearest the player with room for a boat all around and in reach, or MIN_VALUE. */
+    private long placeSpot(LocalPlayer p, int y) {
+        long best = Long.MIN_VALUE;
+        double bd = PLACE_REACH * PLACE_REACH;
+        int px = Mth.floor(p.getX()), pz = Mth.floor(p.getZ());
+        for (int dx = -5; dx <= 5; dx++) {
+            for (int dz = -5; dz <= 5; dz++) {
+                int x = px + dx, z = pz + dz;
+                if (!Boating.fits(world, x, y, z)) continue;
+                double d = p.getEyePosition().distanceToSqr(x + 0.5, y + WATER_TOP, z + 0.5);
+                if (d < bd) {
+                    bd = d;
+                    best = Pos.pack(x, y, z);
+                }
+            }
+        }
+        return best;
     }
 
     private Controls dismount(LocalPlayer p, float yaw0, float pitch0) {

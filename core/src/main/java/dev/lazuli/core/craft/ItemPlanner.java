@@ -106,6 +106,11 @@ public final class ItemPlanner {
         return plan(List.of(new ItemCount(item, count)), have, pickTier, tableNear, furnaceNear);
     }
 
+    /** Rough work to get one {@code item} starting from {@code have} (1e12 or more: there's no way). */
+    public double cost(String item, Map<String, Integer> have, int pickTier) {
+        return new Run(have, pickTier, true, true).cost(item, 0);
+    }
+
     /** Steps to have all of these (a negative count: 1), planned together so they share steps. */
     public Plan plan(List<ItemCount> wants, Map<String, Integer> have, int pickTier, boolean tableNear, boolean furnaceNear) {
         Run r = new Run(have, pickTier, tableNear, furnaceNear);

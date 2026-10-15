@@ -81,6 +81,11 @@ public final class ChestMemory {
         return out;
     }
 
+    /** A container at x y z has been opened before. */
+    public synchronized boolean known(String dim, int x, int y, int z) {
+        return chests.containsKey(new Key(dim, x, y, z));
+    }
+
     public synchronized int size() {
         return chests.size();
     }

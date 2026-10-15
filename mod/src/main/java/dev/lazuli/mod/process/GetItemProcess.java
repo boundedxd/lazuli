@@ -59,6 +59,10 @@ public final class GetItemProcess implements Process {
     private Bring bring = Bring.NONE;
     private final Trip trip;
     private ItemPlanner.Action current;
+    /** Trading for an item instead of making it (getItemTrade), and items trading didn't work out for. */
+    private TradeProcess trade;
+    private ItemCount trading;
+    private final java.util.Set<String> noTrade = new java.util.HashSet<>();
 
     public GetItemProcess(dev.lazuli.core.session.PathingSession session, Settings settings, MineProcess mine, CraftProcess crafts,
                           SmeltProcess smelts, Consumer<String> chat) {
@@ -83,6 +87,11 @@ public final class GetItemProcess implements Process {
         this.dimension = dimension;
     }
 
+    /** Lets it trade with villagers for an item when that's the only way or cheaper (getItemTrade). */
+    public void useTrades(TradeProcess trade) {
+        this.trade = trade;
+    }
+
     /** Steps finished, and steps the last plan still had (the HUD's bar). */
     private int done, planned;
 
@@ -93,6 +102,7 @@ public final class GetItemProcess implements Process {
         if (bring == Bring.RETURN) s += "  bringing it back";
         else if (bring == Bring.DEPOSIT) s += "  putting it away";
         else if (withdrawAt != null) s += "  taking " + name(withdrawItem) + " from a chest";
+        else if (trading != null) s += "  trading for " + name(trading.item());
         else if (current != null) s += "  step " + (done + 1) + "/" + (done + planned) + ": " + verb(current) + " " + current.count() + " " + name(current.item());
         return s;
     }
@@ -132,6 +142,8 @@ public final class GetItemProcess implements Process {
         lastStep = null;
         steps = repeats = 0;
         done = planned = 0;
+        trading = null;
+        noTrade.clear();
         chat.accept(Chat.ok("Getting {}", describe(wants)));
     }
 
@@ -161,6 +173,8 @@ public final class GetItemProcess implements Process {
             }
         }
         if (withdrawAt != null || bring == Bring.DEPOSIT) containers.stop(false);
+        if (trading != null) trade.stop(false);
+        trading = null;
         trip.cancel();
         end(Outcome.CANCELLED, announce ? Chat.warn("Stopped") : null);
     }
@@ -185,6 +199,18 @@ public final class GetItemProcess implements Process {
             }
             withdrawAt = null;
             done++;
+        }
+        if (trading != null) {
+            if (trade.active()) return;
+            switch (trade.outcome()) {
+                case CANCELLED -> {
+                    end(Outcome.CANCELLED, null);
+                    return;
+                }
+                case DONE -> done++;
+                default -> noTrade.add(trading.item()); // make it instead, if there's a way
+            }
+            trading = null;
         }
         if (current != null) {
             switch (status(current)) {
@@ -227,6 +253,7 @@ public final class GetItemProcess implements Process {
         int range = settings.stationRange.get();
         ItemPlanner.Plan plan = planner.plan(wants, Inventories.plainCounts(p), pickTier(p),
             Station.nearest(mc, p, Blocks.CRAFTING_TABLE, range) != null, Station.nearest(mc, p, Blocks.FURNACE, range) != null);
+        if (tradeFor(mc, p, need, plan, planner, recipes, drops)) return;
         if (!plan.ok()) {
             end(Outcome.FAILED, Chat.err("Can't get {}: {}", describe(wants), plan.problem()));
             return;
@@ -255,6 +282,28 @@ public final class GetItemProcess implements Process {
             case CRAFT -> crafts.start(mc, List.of(new ItemCount(a.item(), a.count())));
             case SMELT -> smelts.start(mc, new ItemCount(a.item(), a.count()), true);
         }
+    }
+
+    /**
+     * Trades for the missing item instead when villagers seen so far sell it and making it can't be done, or takes
+     * more work than the trades (getting the emeralds included).
+     */
+    private boolean tradeFor(Minecraft mc, LocalPlayer p, ItemCount need, ItemPlanner.Plan plan, ItemPlanner planner,
+                             Recipes recipes, Drops drops) {
+        if (trade == null || !settings.getItemTrade.get() || noTrade.contains(need.item())) return false;
+        int missing = need.count() - count(p, need.item());
+        dev.lazuli.core.trade.Want w = new dev.lazuli.core.trade.Want(need.item(), null, 0, need.count());
+        dev.lazuli.core.trade.TradePlanner.Plan tp = trade.plan(mc, p, List.of(w), recipes, drops);
+        if (!tp.ok() || tp.steps().isEmpty()) return false;
+        if (plan.ok()) {
+            double make = planner.cost(need.item(), Inventories.plainCounts(p), pickTier(p)) * missing;
+            double buy = trade.cost(p, tp, trade.gatherCost(mc, p, recipes, drops));
+            if (buy >= make) return false;
+        }
+        chat.accept(Chat.info("Trading for {} {} ({})", missing, name(need.item()), plan.ok() ? "less work than making it" : "no other way"));
+        trading = need;
+        trade.start(mc, List.of(w));
+        return true;
     }
 
     /** Has everything: done, or off to bring it back / put it away first. */

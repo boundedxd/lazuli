@@ -95,6 +95,9 @@ public final class LazuliClient implements ClientModInitializer {
 	private CraftProcess crafts;
 	private SmeltProcess smelts;
 	private GetItemProcess getItem;
+	private dev.lazuli.mod.process.TradeProcess trades;
+	private dev.lazuli.mod.inventory.TradeWatcher tradeWatcher;
+	private final java.util.Map<String, dev.lazuli.core.trade.TradeMemory> tradesByWorld = new java.util.HashMap<>();
 	private Upkeep upkeep;
 	/** Every process; at most one runs at a time. */
 	private java.util.List<Process> processes;
@@ -131,10 +134,15 @@ public final class LazuliClient implements ClientModInitializer {
 		getItem = new GetItemProcess(session, settings, mine, crafts, smelts, this::chat);
 		getItem.useChests(containers, this::chests, LazuliClient::dimension);
 		chestWatcher = new dev.lazuli.mod.inventory.ChestWatcher(settings.chestMemory::get, this::chests, LazuliClient::dimension);
+		trades = new dev.lazuli.mod.process.TradeProcess(session, settings, clicks, mine, crafts, smelts, containers, this::tradeMemory,
+			this::chests, LazuliClient::dimension, this::chat);
+		tradeWatcher = new dev.lazuli.mod.inventory.TradeWatcher(settings.tradeMemory::get, this::tradeMemory, LazuliClient::dimension);
+		trades.watch(tradeWatcher);
+		getItem.useTrades(trades);
 		RecipeData.drops();
 		RecipeData.get(); // read the recipes in the background now, not on the first #craft
 		upkeep = new Upkeep(settings, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, getItem, sleeps, guard);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, getItem, trades, sleeps, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -269,6 +277,28 @@ public final class LazuliClient implements ClientModInitializer {
 			public void sleep() {
 				LazuliClient.this.stopProcesses(false);
 				sleeps.start(Minecraft.getInstance());
+			}
+
+			@Override
+			public boolean isEnchantment(String id) {
+				return dev.lazuli.mod.inventory.TradeWatcher.isEnchantment(Minecraft.getInstance(), id);
+			}
+
+			@Override
+			public void trade(java.util.List<dev.lazuli.core.trade.Want> wants) {
+				LazuliClient.this.stopProcesses(false);
+				trades.start(Minecraft.getInstance(), wants);
+			}
+
+			@Override
+			public void tradeScan() {
+				LazuliClient.this.stopProcesses(false);
+				trades.scan(Minecraft.getInstance());
+			}
+
+			@Override
+			public dev.lazuli.core.trade.TradeMemory trades() {
+				return settings.tradeMemory.get() ? LazuliClient.this.tradeMemory(Minecraft.getInstance()) : null;
 			}
 
 			@Override
@@ -470,7 +500,7 @@ public final class LazuliClient implements ClientModInitializer {
 
 	/** Commands that start a job: rerun quietly when it gets stuck (unstickRestart). */
 	private static final java.util.Set<String> JOBS = java.util.Set.of("goto", "path", "mine", "getitem", "get", "farm",
-		"explore", "tunnel", "follow", "craft", "smelt", "deposit", "withdraw", "sleep", "back", "wp", "waypoint", "come");
+		"explore", "tunnel", "follow", "craft", "smelt", "deposit", "withdraw", "sleep", "back", "wp", "waypoint", "come", "trade");
 	/** The command that started what's running, if a command did. */
 	private String lastJob;
 	private volatile boolean restartPending;
@@ -586,6 +616,7 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 		tasks.tick();
 		chestWatcher.tick(mc);
+		tradeWatcher.tick(mc);
 		boolean dead = mc.player != null && mc.player.isDeadOrDying();
 		if (dead && !wasDead && settings.deathWaypoint.get()) {
 			BlockPos b = mc.player.blockPosition();
@@ -618,6 +649,12 @@ public final class LazuliClient implements ClientModInitializer {
 	private dev.lazuli.core.storage.ChestMemory chests(Minecraft mc) {
 		return chestsByWorld.computeIfAbsent(worldFile(mc), f -> new dev.lazuli.core.storage.ChestMemory(
 			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("chests").resolve(f)));
+	}
+
+	/** Every villager's trades seen on this server (or world). */
+	private dev.lazuli.core.trade.TradeMemory tradeMemory(Minecraft mc) {
+		return tradesByWorld.computeIfAbsent(worldFile(mc), f -> new dev.lazuli.core.trade.TradeMemory(
+			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("trades").resolve(f)));
 	}
 
 	/** A file name for the server (or singleplayer world) being played on. */

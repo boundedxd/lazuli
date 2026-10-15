@@ -25,6 +25,12 @@ final class Swimmer {
 
     private final BlockView world;
     private boolean breathing;
+    /** Ticks it's had a full breath with the head out: it stays up a bit longer (the air shown lags the server's). */
+    private int full;
+    /** Goes up for air below this much of a full breath. */
+    private static final double LOW_AIR = 0.45;
+    /** Ticks at full air, head out, before going under again. */
+    private static final int FULL_TICKS = 15;
 
     Swimmer(BlockView world) {
         this.world = world;
@@ -32,12 +38,14 @@ final class Swimmer {
 
     void reset() {
         breathing = false;
+        full = 0;
     }
 
     /** Controls for open water ahead, or null to leave it to the usual movement. */
     Controls tick(LocalPlayer p, List<Long> path, int idx, float yaw0) {
+        // out of the water for a moment (bobbing up for air): still breathing, not done with it
         if (!p.isInWater() || idx < 0 || idx >= path.size()) {
-            breathing = false;
+            if (!p.isInWater() && p.getAirSupply() >= p.getMaxAirSupply()) full = Math.max(full, FULL_TICKS);
             return null;
         }
         int end = idx;
@@ -48,8 +56,16 @@ final class Swimmer {
         double tx = Pos.x(target) + 0.5, tz = Pos.z(target) + 0.5;
         float yaw = (float) Math.toDegrees(Math.atan2(-(tx - p.getX()), tz - p.getZ()));
         int max = p.getMaxAirSupply();
-        if (p.getAirSupply() < max / 3) breathing = true;
-        if (breathing && p.getAirSupply() >= max) breathing = false;
+        if (p.getAirSupply() < max * LOW_AIR) {
+            breathing = true;
+            full = 0;
+        }
+        // up until the air's full and has stayed full a moment with the head out of the water
+        if (breathing && p.getAirSupply() >= max && !p.isEyeInFluid(net.minecraft.tags.FluidTags.WATER)) full++;
+        if (breathing && full >= FULL_TICKS) {
+            breathing = false;
+            full = 0;
+        }
         if (breathing) {
             // out of swim mode (no sprint), jump held, looking up: up to the air, still heading on
             if (p.isSprinting()) p.setSprinting(false);

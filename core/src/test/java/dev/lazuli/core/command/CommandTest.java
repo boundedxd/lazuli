@@ -237,6 +237,28 @@ class CommandTest {
     }
 
     @Test
+    void tradeTakesEnchantsAndItems() {
+        List<List<dev.lazuli.core.trade.Want>> got = new ArrayList<>();
+        List<String> raw = new ArrayList<>();
+        Settings st = new Settings();
+        CommandHandler h = new CommandHandler(new CommandHandler.Context() {
+            public int[] playerFeet() { return new int[]{0, 1, 0}; }
+            public BlockView world() { return GridWorld.flatFloor(0, 0, 4, 4); }
+            public PathingSession session() { return null; }
+            public Settings settings() { return st; }
+            public void reply(String msg) { raw.add(msg); }
+            public void settingsChanged() {}
+            public boolean isEnchantment(String id) { return id.equals("minecraft:sharpness"); }
+            public void trade(List<dev.lazuli.core.trade.Want> wants) { got.add(wants); }
+        });
+        h.handle("#trade sharpness 5 bread 10");
+        assertEquals(List.of(List.of(new dev.lazuli.core.trade.Want("minecraft:enchanted_book", "minecraft:sharpness", 5, 1),
+            new dev.lazuli.core.trade.Want("minecraft:bread", null, 0, 10))), got);
+        h.handle("#trade");
+        assertTrue(Chat.strip(raw.get(raw.size() - 1)).startsWith("Usage: trade"), raw.toString());
+    }
+
+    @Test
     void repliesAreColoured() {
         List<String> raw = new ArrayList<>();
         Settings st = new Settings();

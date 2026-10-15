@@ -155,6 +155,26 @@ public final class CommandHandler {
             return "overworld";
         }
 
+        /** An enchantment's id (minecraft:sharpness): #trade wants an enchanted book with it. */
+        default boolean isEnchantment(String id) {
+            return false;
+        }
+
+        /** Trades with villagers for these (selling things for emeralds first if need be). */
+        default void trade(List<dev.lazuli.core.trade.Want> wants) {
+            reply(Chat.err("Trading isn't available here"));
+        }
+
+        /** Walks to the villagers around whose trades aren't known and looks at them. */
+        default void tradeScan() {
+            reply(Chat.err("Trading isn't available here"));
+        }
+
+        /** Every villager's trades seen so far; null when not kept. */
+        default dev.lazuli.core.trade.TradeMemory trades() {
+            return null;
+        }
+
         /** Detaches the camera to fly around (or puts it back). */
         default void toggleFreecam() {
             reply(Chat.err("Freecam isn't available here"));
@@ -200,6 +220,7 @@ public final class CommandHandler {
             case "wp", "waypoint", "waypoints" -> waypoint(args);
             case "sleep" -> ctx.sleep();
             case "find" -> find(args);
+            case "trade", "trades" -> trade(args);
             case "back" -> goToWaypoint(dev.lazuli.core.waypoint.Waypoints.DEATH);
             case "stop", "cancel" -> {
                 ctx.stopProcesses();
@@ -288,6 +309,8 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "smelt <item> [count]", "cook items in a furnace (iron_ingot or raw_iron; blast furnace/smoker when there's one)"));
         ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
         ctx.reply(Chat.usage(p + "find <item>", "which chests (opened before) hold an item"));
+        ctx.reply(Chat.usage(p + "trade <enchant [level]|item [count]>...", "trade with villagers, e.g. " + p + "trade sharpness 5 (sells string, sticks... for emeralds first if need be)"));
+        ctx.reply(Chat.usage(p + "trade list | scan | forget", "the trades seen so far | go look at the villagers around | forget them"));
         ctx.reply(Chat.usage(p + "sleep", "sleep in the nearest bed (or one from the hotbar) until morning"));
         ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
         ctx.reply(Chat.usage(p + "kill", "when something's stuck: reset everything (planner thread, keys, jobs), then any command works again"));
@@ -490,6 +513,48 @@ public final class CommandHandler {
                 else goToWaypoint(args[1]);
             }
             default -> ctx.reply(Chat.err("Usage: wp add <name> [x y z] | del <name> | list | goto <name>"));
+        }
+    }
+
+    /** trade <enchant [level]|item [count]>... | list | scan | forget */
+    private void trade(String[] args) {
+        String usage = "Usage: trade <enchant [level]|item [count]>... | list | scan | forget";
+        if (args.length == 0) {
+            ctx.reply(Chat.err(usage));
+            return;
+        }
+        switch (args[0].toLowerCase(Locale.ROOT)) {
+            case "scan" -> ctx.tradeScan();
+            case "forget", "clear" -> {
+                var mem = ctx.trades();
+                if (mem != null) mem.clear();
+                ctx.reply(Chat.ok("Forgot every villager's trades"));
+            }
+            case "list" -> {
+                var mem = ctx.trades();
+                if (mem == null) {
+                    ctx.reply(Chat.err("Trade memory is off"));
+                    return;
+                }
+                int[] f = ctx.playerFeet();
+                var near = mem.near(ctx.dimension(), f[0], f[1], f[2]);
+                if (near.isEmpty()) {
+                    ctx.reply(Chat.info("No villager's trades seen here yet (open one, or {}trade scan)", ctx.settings().prefix.get()));
+                    return;
+                }
+                ctx.reply(Chat.info("{} villagers' trades known; nearest:", near.size()));
+                for (int i = 0; i < Math.min(4, near.size()); i++) {
+                    var t = near.get(i);
+                    ctx.reply(Chat.pair(t.profession() + " at " + t.x() + " " + t.y() + " " + t.z(),
+                        (int) Math.sqrt(t.distSq(f[0], f[1], f[2])) + "m"));
+                    for (var o : t.offers()) ctx.reply(Chat.pair("  " + o.describe(), o.left() > 0 ? o.left() + " left" : "sold out"));
+                }
+            }
+            default -> {
+                var wants = dev.lazuli.core.trade.Want.parse(args, ctx::isEnchantment);
+                if (wants == null) ctx.reply(Chat.err(usage));
+                else ctx.trade(wants);
+            }
         }
     }
 

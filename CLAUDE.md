@@ -104,7 +104,13 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
    MineProcess with none found (`mineSearch`): strip-mines at `core/mine/OreDepth` best Y (`StripPattern`, via an inner
    TunnelProcess) or explores; `antiXray` only trusts ores next to air.
 4. Water bucket clutch, boat clutch, auto boats over X water blocks (needs boat physics), minecarts.
-5. Villager trading, chat/command use.
+5. Villager trading — DONE, **not yet tested in game**: `#trade sharpness 5 mending bread 20`, `#trade list|scan|forget`.
+   `core/trade` (`TradeMemory` file per world like chests, `TradePlanner`: cheapest offers, sells things for emeralds
+   when short `tradeForEmeralds`, gathers what trades cost), `mod/inventory/TradeWatcher` (records offers whenever a
+   trading screen opens, by hand too), `mod/process/TradeProcess` (scan unknown villagers, walk, open, select trade,
+   take result; `tradeLootChests` opens chests near the buyers). #getitem trades when it's the only way or cheaper
+   (`getItemTrade`). Boats: `core/move/Boating` (where a 1.375-wide boat fits, a route wide enough, spin-aware steering).
+   Chat/command use: not yet.
 6. Extras approved: stash/chest memory, nether travel, survival safety (flee/fight, low-HP retreat, sleep, `#back`),
    waypoints.
 Backlog: neo rework (double/triple neos, edge/run-up starts), parkour onto open trapdoors/fence 3-gap,

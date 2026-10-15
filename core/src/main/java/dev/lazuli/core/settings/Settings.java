@@ -111,6 +111,16 @@ public final class Settings {
     public final Setting<Integer> stripLength = integer("stripLength", 32, 8, 256);
     /** Searching gives up after this many minutes. */
     public final Setting<Integer> searchMinutes = integer("searchMinutes", 15, 1, 240);
+    /** Remember every villager's trades when its trading screen opens (by hand too): #trade plans from them. */
+    public final Setting<Boolean> tradeMemory = bool("tradeMemory", true);
+    /** #trade short of emeralds: sells things for them first (string to a fisherman, sticks to a fletcher...). */
+    public final Setting<Boolean> tradeForEmeralds = bool("tradeForEmeralds", true);
+    /** #trade needing things to sell: looks in the chests around the villagers that buy them (village chests). */
+    public final Setting<Boolean> tradeLootChests = bool("tradeLootChests", false);
+    /** #getitem trades for an item when that's the only way, or cheaper than making it. */
+    public final Setting<Boolean> getItemTrade = bool("getItemTrade", true);
+    /** How far #trade looks for villagers (and walks to them), in blocks. */
+    public final Setting<Integer> tradeRange = integer("tradeRange", 96, 16, 512);
     /** #getitem may smelt for what it needs. */
     public final Setting<Boolean> getItemSmelt = bool("getItemSmelt", true);
     /** #smelt waits at the furnace until it's done; off: loads it, leaves, and #smelt collect goes back. */
