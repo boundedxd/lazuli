@@ -46,7 +46,7 @@ public final class Tools {
         for (ItemStack s : hotbar) {
             if (throwawayRank(s, names) <= 0) continue;
             String id = BuiltInRegistries.ITEM.getKey(s.getItem()).toString();
-            int left = spare.getOrDefault(id, Integer.MAX_VALUE), use = Math.min(s.getCount(), left);
+            int left = spare.getOrDefault(id, Integer.MAX_VALUE), use = Math.max(0, Math.min(s.getCount(), left));
             throwaways += use;
             if (spare.containsKey(id)) spare.put(id, left - use);
         }

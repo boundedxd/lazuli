@@ -151,6 +151,11 @@ public final class Interactor implements Builder.Hands {
     }
 
     @Override
+    public void impossible(long u, long v) {
+        session.edgeImpossible(u, v);
+    }
+
+    @Override
     public void outOfBlocks() {
         if (rebuildCooldown == 0) {
             rebuildCooldown = 40; // the new path takes a moment

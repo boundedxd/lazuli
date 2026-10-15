@@ -82,7 +82,9 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     private BlockPos breaking;
     private int breakTicks;
     private Vec3 dropAt;
-    private int pickupTicks, pickupTrips;
+    private int pickupTicks, pickupTrips, bumps;
+    /** Ticks of walking straight into something before the drop is walked to by path instead. */
+    private static final int BUMPS = 4;
     private boolean pickupTrip;
     private boolean driving;
 
@@ -317,7 +319,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             if (settings.minePickup.get()) {
                 phase = Phase.PICKUP;
                 dropAt = Vec3.atCenterOf(breaking);
-                pickupTicks = pickupTrips = 0;
+                pickupTicks = pickupTrips = bumps = 0;
                 pickupTrip = false;
             } else {
                 phase = Phase.TRAVEL;
@@ -370,7 +372,8 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         // close by on the same level with nothing in the way: walk straight onto it (a "near" goal counts as arrived a
         // block short of it)
         double dx = item.getX() - player.getX(), dz = item.getZ() - player.getZ();
-        if (player.onGround() && dx * dx + dz * dz < 9 && Math.abs(item.getY() - player.getY()) < 1.2 && clear(mc, player, item)) {
+        if (player.onGround() && player.horizontalCollision) bumps++;
+        if (player.onGround() && bumps < BUMPS && dx * dx + dz * dz < 9 && walkable(mc, player, item)) {
             if (pickupTrip && snap.state() == PathingSession.State.PATHING) session.stop(true);
             pickupTrip = false;
             float yaw0 = RotationDriver.yaw(player), pitch0 = RotationDriver.pitch(player);
@@ -399,16 +402,32 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         pickupTrips++;
     }
 
-    /** Nothing solid between the player and the drop, at foot and eye height: it can be walked straight onto. */
-    private static boolean clear(Minecraft mc, LocalPlayer player, ItemEntity item) {
-        Vec3 to = item.position();
-        for (double h : new double[]{0.3, player.getEyeHeight()}) {
-            Vec3 a = player.position().add(0, h, 0), b = new Vec3(to.x, Math.max(to.y + 0.1, player.getY() + h - 0.6), to.z);
-            if (h > 1) b = new Vec3(to.x, player.getY() + h, to.z);
-            HitResult hit = mc.level.clip(new ClipContext(a, b, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
-            if (hit.getType() != HitResult.Type.MISS) return false;
+    /** How close (horizontally) the body has to get for the game to pick a drop up: its reach is 1 block out. */
+    private static final double PICKUP_REACH = 0.9;
+
+    /**
+     * The whole body can walk straight over to the drop: the player's box, swept along the line, never hits a block
+     * (a step of a slab is fine) or walks off more than a block's drop, and the drop is no higher than a step.
+     */
+    private static boolean walkable(Minecraft mc, LocalPlayer player, ItemEntity item) {
+        double rise = item.getY() - player.getY();
+        if (rise > 0.6 || rise < -1.2) return false;
+        double dx = item.getX() - player.getX(), dz = item.getZ() - player.getZ(), len = Math.sqrt(dx * dx + dz * dz);
+        double go = len - PICKUP_REACH;
+        if (go <= 0) return rise > -0.5; // already in reach sideways; below that it has to be walked down to
+        AABB box = player.getBoundingBox();
+        double lift = 0;
+        for (double t = 0.1; ; t += 0.1) {
+            double f = Math.min(t, go) / len;
+            AABB b = box.move(dx * f, lift, dz * f);
+            if (!mc.level.noCollision(player, b)) {
+                if (lift > 0 || !mc.level.noCollision(player, b.move(0, 0.6, 0))) return false;
+                lift = 0.6; // stepped up a slab
+                b = b.move(0, lift, 0);
+            }
+            if (mc.level.noCollision(player, b.expandTowards(0, -1.25, 0))) return false; // walks off a drop
+            if (t >= go) return true;
         }
-        return true;
     }
 
     // ---- choosing and aiming ----

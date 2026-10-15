@@ -42,10 +42,10 @@ public final class LazyDStarLite {
     private final Graph graph;
     private final LongPredicate isGoal;
     private final long[] goalCandidates;
-    private final Map<Long, Node> nodes = new HashMap<>();
-    private final Map<Long, List<Long>> nodesByChunk = new HashMap<>();
+    private final dev.lazuli.core.util.LongMap<Node> nodes = new dev.lazuli.core.util.LongMap<>(4096);
+    private final dev.lazuli.core.util.LongMap<List<Long>> nodesByChunk = new dev.lazuli.core.util.LongMap<>();
     private final TreeSet<Key> open = new TreeSet<>();
-    private final Map<Long, Map<Long, Double>> evaluated = new HashMap<>();
+    private final dev.lazuli.core.util.LongMap<Map<Long, Double>> evaluated = new dev.lazuli.core.util.LongMap<>();
     private long start;
     private double km;
     private long expansions;
@@ -98,6 +98,13 @@ public final class LazyDStarLite {
         Double c = fromU.get(v);
         if (n >= FAILS || c == null) fromU.put(v, INF);
         else fromU.put(v, c * 2);
+        recompute(u);
+    }
+
+    /** u->v can't be done (not just missed): impassable until the blocks around it change. */
+    public void edgeImpossible(long u, long v) {
+        failures.computeIfAbsent(u, k -> new HashMap<>()).put(v, FAILS);
+        evaluated.computeIfAbsent(u, k -> new HashMap<>()).put(v, INF);
         recompute(u);
     }
 
@@ -217,9 +224,11 @@ public final class LazyDStarLite {
                 double gu = n.g;
                 forEachPred(u, p -> {
                     if (p == GOAL) return;
+                    Node old = nodes.get(p);
+                    if (old != null && old.rhs <= gu) return; // no edge is cheaper than free: nothing to improve
                     double c = cost(p, u);
                     if (c == INF) return;
-                    Node pn = node(p);
+                    Node pn = old != null ? old : node(p);
                     if (c + gu < pn.rhs) {
                         pn.rhs = c + gu;
                         updateVertex(p, pn);
@@ -230,7 +239,7 @@ public final class LazyDStarLite {
                 n.g = INF;
                 forEachPred(u, p -> {
                     Node pn = nodes.get(p);
-                    if (pn != null && p != GOAL && pn.rhs == cost(p, u) + gOld) recompute(p);
+                    if (pn != null && p != GOAL && pn.rhs >= gOld && pn.rhs == cost(p, u) + gOld) recompute(p);
                 });
                 recompute(u);
             }

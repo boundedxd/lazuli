@@ -32,12 +32,20 @@ public class InteractionCourseTest {
 
     public record Run(boolean arrived, int ticks, int breaks, int places, double lowestY, double maxFall, String log, double turned) {}
 
+    /** How often the last run's hands were asked to place with nothing to place. */
+    static int lastOuts;
+    /** The planner always gets {@code in}'s block count, whatever the hands have left. */
+    static boolean staleBlocks;
+    static boolean DEBUG;
+
     /** The game as far as building goes: blocks appear and vanish in the sim's world. */
     static final class SimHands implements Builder.Hands {
         final GridWorld w;
         final PathingSession session;
         PlayerSim s;
-        int blocks, breaks, places, cooldown, rebuilds;
+        int blocks, breaks, places, cooldown, rebuilds, outs;
+        /** Re-planning doesn't help (the planner keeps thinking it has blocks), like a stale count in the game. */
+        boolean rebuildUseless;
         long minePos = Long.MIN_VALUE;
         int mineTicks;
 
@@ -78,6 +86,7 @@ public class InteractionCourseTest {
             }
             if (++mineTicks >= BREAK_TICKS) {
                 w.set(Pos.x(pos), Pos.y(pos), Pos.z(pos), BlockKind.AIR);
+                if (DEBUG) System.out.println("broke " + Pos.toString(pos));
                 session.regionChanged(Pos.x(pos), Pos.y(pos), Pos.z(pos), Pos.x(pos), Pos.y(pos), Pos.z(pos));
                 breaks++;
                 minePos = Long.MIN_VALUE;
@@ -89,7 +98,8 @@ public class InteractionCourseTest {
         }
 
         public void outOfBlocks() {
-            if (rebuilds++ == 0) session.rebuild();
+            outs++;
+            if (rebuilds++ == 0 && !rebuildUseless) session.rebuild();
         }
 
         public double eyeHeight() {
@@ -98,6 +108,10 @@ public class InteractionCourseTest {
 
         public void stuck(long u, long v) {
             session.edgeFailed(u, v);
+        }
+
+        public void impossible(long u, long v) {
+            session.edgeImpossible(u, v);
         }
 
         private static double sq(double d) {
@@ -125,10 +139,12 @@ public class InteractionCourseTest {
         PathingSession session = new PathingSession(w, () -> -64, () -> 319, settings, Runnable::run, msgs::add,
             () -> handsRef[0] == null ? in : new Interaction(in.allowBreak(), in.allowPlace(), handsRef[0].blocks, in.breakTime()));
         SimHands hands = new SimHands(w, session, blocks);
-        handsRef[0] = hands;
+        hands.rebuildUseless = staleBlocks;
+        if (!staleBlocks) handsRef[0] = hands;
         Builder builder = new Builder(w, hands);
         builder.setEagle(eagle);
         session.start(new GoalBlock(gx, gy, gz), false, Pos.pack(sx, sy, sz));
+        lastOuts = 0;
         PlayerSim s = new PlayerSim(w, sx + 0.5, sy, sz + 0.5, 0, 0, 0, true, false);
         hands.s = s;
         InputPlanner planner = new InputPlanner(w);
@@ -171,6 +187,7 @@ public class InteractionCourseTest {
                 continue;
             }
             if (hands.cooldown > 0) hands.cooldown--;
+            lastOuts = hands.outs;
             PlayerState st = new PlayerState(s.x, s.y, s.z, yaw, pitch, s.onGround, s.horizontalCollision,
                 s.vx, s.vy, s.vz, s.sprinting, s.noJumpDelay, s.minorHorizontalCollision, s.onGround ? 0 : Math.max(0, s.peakY - s.y));
             Controls c = builder.tick(st, path, idx, block, in.allowBreak(), in.allowPlace());
@@ -364,6 +381,38 @@ public class InteractionCourseTest {
     void bridgesThenTowersOntoAFloatingIsland() {
         GridWorld w = new GridWorld(BlockKind.AIR).fill(-3, 0, -2, 0, 0, 2, BlockKind.SOLID).fill(6, 3, -1, 8, 3, 1, BlockKind.SOLID);
         Run r = drive(w, PLACE, 0, 1, 0, 7, 4, 0, 2500);
+        assertTrue(r.arrived(), r.log());
+    }
+
+    @Test
+    void withNoBlocksToSpareItNeverWantsToPlace() {
+        // placing allowed but nothing to place from the start (all kept): dig out of a pit, over a gap, up a cliff
+        Interaction none = new Interaction(true, true, 0, p -> Interaction.handTicks(p, false));
+        GridWorld pit = GridWorld.flatFloor(-6, -6, 6, 6).fill(-6, 1, -6, 6, 4, 6, BlockKind.SOLID).fill(0, 1, 0, 0, 4, 0, BlockKind.AIR);
+        GridWorld cliff = GridWorld.flatFloor(-5, -5, 10, 5).fill(3, 1, -5, 10, 4, 5, BlockKind.SOLID);
+        GridWorld room = GridWorld.flatFloor(-6, -6, 6, 6).fill(-6, 1, -6, 6, 7, 6, BlockKind.SOLID).fill(-1, 1, -1, 1, 2, 1, BlockKind.AIR);
+        Object[][] cases = {{pit, new int[]{5, 5, 3}}, {cliff, new int[]{5, 5, 0}}, {room, new int[]{0, 8, 0}}};
+        for (Object[] c : cases) {
+            int[] g = (int[]) c[1];
+            Run r = drive((GridWorld) c[0], none, 0, 0, 1, 0, g[0], g[1], g[2], 3000);
+            assertEquals(0, lastOuts, java.util.Arrays.toString(g) + " " + r.log());
+            assertTrue(r.arrived(), java.util.Arrays.toString(g) + " " + r.log());
+        }
+    }
+
+    @Test
+    void aBridgeItCantBuildIsGivenUpNotAskedForForever() {
+        // the planner thinks it has blocks (it never learns otherwise) and bridges; the long way round is a walk
+        GridWorld w = new GridWorld(BlockKind.AIR).fill(-2, 0, -2, 0, 0, 2, BlockKind.SOLID).fill(4, 0, -2, 6, 0, 2, BlockKind.SOLID)
+            .fill(-2, 0, 6, 6, 0, 8, BlockKind.SOLID).fill(-2, 0, 2, -2, 0, 6, BlockKind.SOLID).fill(6, 0, 2, 6, 0, 6, BlockKind.SOLID);
+        staleBlocks = true;
+        Run r;
+        try {
+            r = drive(w, PLACE, 0, 0, 1, 0, 5, 1, 0, 3000);
+        } finally {
+            staleBlocks = false;
+        }
+        assertTrue(lastOuts <= 2, "asked " + lastOuts + " times" + System.lineSeparator() + r.log());
         assertTrue(r.arrived(), r.log());
     }
 

@@ -43,7 +43,7 @@ public final class Digging {
         return in.canPlace();
     }
 
-    private final java.util.HashMap<Long, Kind> kinds = new java.util.HashMap<>();
+    private final dev.lazuli.core.util.LongMap<Kind> kinds = new dev.lazuli.core.util.LongMap<>(4096);
 
     /** Forgets cached kinds after the world changed. */
     public void invalidate() {
@@ -52,7 +52,7 @@ public final class Digging {
 
     /** Forgets cached kinds inside these boxes ({x0, y0, z0, x1, y1, z1} each). */
     public void invalidate(List<int[]> boxes) {
-        kinds.keySet().removeIf(p -> MoveGraph.inAny(p, boxes));
+        kinds.removeIf(p -> MoveGraph.inAny(p, boxes));
     }
 
     /** What standing at u takes (cached: the search asks about each cell dozens of times). */

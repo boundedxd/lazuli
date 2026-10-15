@@ -138,6 +138,18 @@ public final class WorldCache implements BlockView {
     }
 
     private final ConcurrentHashMap<Long, Chunk> chunks = new ConcurrentHashMap<>();
+    /** The chunk looked up last: most lookups land in the same chunk as the one before. */
+    private record Last(long key, Chunk chunk) {}
+    private volatile Last last;
+
+    private Chunk chunk(int cx, int cz) {
+        long k = key(cx, cz);
+        Last l = last;
+        if (l != null && l.key == k) return l.chunk;
+        Chunk c = chunks.get(k);
+        if (c != null) last = new Last(k, c);
+        return c;
+    }
     private volatile int minY;
     private volatile int height;
 
@@ -148,6 +160,7 @@ public final class WorldCache implements BlockView {
 
     public void reset(int minY, int height) {
         chunks.clear();
+        last = null;
         this.minY = minY;
         this.height = height;
     }
@@ -181,10 +194,12 @@ public final class WorldCache implements BlockView {
             if (kinds[s] != null) out[s] = Section.of(kinds[s], physics[s]);
         }
         chunks.put(key(cx, cz), new Chunk(out));
+        last = null;
     }
 
     public void removeChunk(int cx, int cz) {
         chunks.remove(key(cx, cz));
+        last = null;
     }
 
     public boolean isLoaded(int cx, int cz) {
@@ -197,7 +212,7 @@ public final class WorldCache implements BlockView {
 
     /** @return whether the block's kind or physics actually changed (most block updates don't matter here) */
     public boolean set(int x, int y, int z, BlockKind kind, short physicsId) {
-        Chunk c = chunks.get(key(x >> 4, z >> 4));
+        Chunk c = chunk(x >> 4, z >> 4);
         if (c == null || y < minY || y > maxY()) {
             return false;
         }
@@ -224,7 +239,7 @@ public final class WorldCache implements BlockView {
         if (y > maxY()) {
             return BlockKind.AIR;
         }
-        Chunk c = chunks.get(key(x >> 4, z >> 4));
+        Chunk c = chunk(x >> 4, z >> 4);
         if (c == null) {
             return BlockKind.UNKNOWN;
         }
@@ -235,7 +250,7 @@ public final class WorldCache implements BlockView {
     @Override
     public BlockPhysics physics(int x, int y, int z) {
         if (y >= minY && y <= maxY()) {
-            Chunk c = chunks.get(key(x >> 4, z >> 4));
+            Chunk c = chunk(x >> 4, z >> 4);
             if (c != null) {
                 Section sec = c.sections[(y - minY) >> 4];
                 if (sec != null) {
@@ -252,7 +267,11 @@ public final class WorldCache implements BlockView {
         return ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
     }
 
+    /**
+     * Chunk map key. Plain (cx << 32 | cz) hashes as cx ^ cz as a Long, so every diagonal of chunks lands in one
+     * bucket; multiplying by an odd constant keeps keys unique and spreads them.
+     */
     private static long key(int cx, int cz) {
-        return ((long) cx << 32) | (cz & 0xFFFFFFFFL);
+        return (((long) cx << 32) | (cz & 0xFFFFFFFFL)) * 0x9E3779B97F4A7C15L;
     }
 }

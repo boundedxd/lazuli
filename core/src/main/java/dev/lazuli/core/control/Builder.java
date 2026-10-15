@@ -37,6 +37,11 @@ public final class Builder {
 
         /** Edge u->v needs a block the player can't get the crosshair on: plan another way. */
         default void stuck(long u, long v) {}
+
+        /** Edge u->v can't be done at all (it needs a block and there are none): never plan it again. */
+        default void impossible(long u, long v) {
+            stuck(u, v);
+        }
     }
 
     private static final long NONE = Long.MIN_VALUE;
@@ -63,6 +68,11 @@ public final class Builder {
     private long pendingPos = NONE;
     private boolean pendingPlace;
     private int blind;
+    /** The edge that wanted a block with none to place, and for how many ticks since. */
+    private long outU = NONE, outV = NONE;
+    private int outTicks;
+    /** Ticks a re-plan without placing gets before the edge still asking for a block is ruled out. */
+    static final int OUT_WAIT = 40;
 
     public Builder(BlockView world, Hands hands) {
         this.world = world;
@@ -90,6 +100,7 @@ public final class Builder {
         pillar = NONE;
         pendingPos = NONE;
         blind = 0;
+        outU = outV = NONE;
     }
 
     /**
@@ -132,7 +143,16 @@ public final class Builder {
         }
         if (!a.place()) return mine(p, a.pos());
         if (!hands.selectThrowaway()) {
-            hands.outOfBlocks();
+            if (outU != u || outV != v) {
+                outU = u;
+                outV = v;
+                outTicks = 0;
+                hands.outOfBlocks();
+            } else if (++outTicks > OUT_WAIT) {
+                // re-planning still came back this way: this edge is out
+                outTicks = 0;
+                hands.impossible(u, v);
+            }
             return still(p, null);
         }
         if (vertical) {

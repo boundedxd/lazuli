@@ -194,6 +194,15 @@ public final class PathingSession {
         });
     }
 
+    /** u->v can't be done at all (a bridge with no blocks): plan around it for good. */
+    public void edgeImpossible(long u, long v) {
+        worker.execute(() -> {
+            if (planner == null) return;
+            planner.edgeImpossible(u, v);
+            scheduleReplan();
+        });
+    }
+
     /**
      * Blocks changed (a chunk loaded, a block was placed...). Changes pile up and are applied together the next time
      * the worker gets to them; only changes to blocks the search actually used cause a replan.

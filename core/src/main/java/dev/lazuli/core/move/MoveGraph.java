@@ -36,12 +36,11 @@ public final class MoveGraph implements Graph {
     private final boolean parkour;
     private final Digging dig;
 
-    private final java.util.Map<Long, Boolean> nearGap = new java.util.HashMap<>();
-    private final java.util.Map<Edge, Double> jumpTicks = new java.util.HashMap<>();
-    private final java.util.Map<Long, Double> feetCache = new java.util.HashMap<>();
-    private final java.util.Map<Edge, Double> costCache = new java.util.HashMap<>();
+    private final dev.lazuli.core.util.LongMap<Boolean> nearGap = new dev.lazuli.core.util.LongMap<>(1024);
+    private final dev.lazuli.core.util.EdgeMap jumpTicks = new dev.lazuli.core.util.EdgeMap(256);
+    private final dev.lazuli.core.util.LongMap<Double> feetCache = new dev.lazuli.core.util.LongMap<>(4096);
+    private final dev.lazuli.core.util.EdgeMap costCache = new dev.lazuli.core.util.EdgeMap(8192);
 
-    private record Edge(long u, long v) {}
 
     public MoveGraph(BlockView world, int maxFall, boolean sprint) {
         this(world, maxFall, sprint, 1.0, false);
@@ -163,11 +162,10 @@ public final class MoveGraph implements Graph {
     @Override
     public double optimisticCost(long u, long v) {
         // repairs re-price the same edges many times over; the world can't change without invalidate()
-        Edge e = new Edge(u, v);
-        Double cached = costCache.get(e);
-        if (cached != null) return cached;
-        double c = computeOptimistic(u, v);
-        costCache.put(e, c);
+        double c = costCache.get(u, v, Double.NaN);
+        if (!Double.isNaN(c)) return c;
+        c = computeOptimistic(u, v);
+        costCache.put(u, v, c);
         return c;
     }
 
@@ -319,11 +317,10 @@ public final class MoveGraph implements Graph {
         double opt = optimisticCost(u, v);
         if (opt == INF || !isJump(u, v)) return opt;
         double fu = feet(u), fv = feet(v);
-        Edge e = new Edge(u, v);
-        Double ticks = jumpTicks.get(e);
-        if (ticks == null) {
+        double ticks = jumpTicks.get(u, v, Double.NaN);
+        if (Double.isNaN(ticks)) {
             ticks = JumpEvaluator.ticks(w, u, fu, v, fv, sprint);
-            jumpTicks.put(e, ticks);
+            jumpTicks.put(u, v, ticks);
         }
         double d = Math.hypot(Pos.x(v) - Pos.x(u), Pos.z(v) - Pos.z(u));
         return Math.max(opt, ticks + Costs.JUMP_PENALTY + risk(d));
@@ -340,10 +337,10 @@ public final class MoveGraph implements Graph {
 
     @Override
     public void invalidate(java.util.List<int[]> boxes) {
-        nearGap.keySet().removeIf(p -> inAny(p, boxes));
-        feetCache.keySet().removeIf(p -> inAny(p, boxes));
-        jumpTicks.keySet().removeIf(e -> inAny(e.u(), boxes));
-        costCache.keySet().removeIf(e -> inAny(e.u(), boxes));
+        nearGap.removeIf(p -> inAny(p, boxes));
+        feetCache.removeIf(p -> inAny(p, boxes));
+        jumpTicks.removeIfFrom(u -> inAny(u, boxes));
+        costCache.removeIfFrom(u -> inAny(u, boxes));
         dig.invalidate(boxes);
     }
 

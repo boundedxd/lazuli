@@ -13,4 +13,7 @@ tasks.register('benchmark', Test) {
 	testClassesDirs = sourceSets.test.output.classesDirs
 	classpath = sourceSets.test.runtimeClasspath
 	useJUnitPlatform { includeTags 'benchmark' }
+	outputs.upToDateWhen { false }
+	maxHeapSize = '3g'
+	if (project.hasProperty('jfr')) jvmArgs "-XX:StartFlightRecording=filename=${project.property('jfr')},settings=profile"
 }
