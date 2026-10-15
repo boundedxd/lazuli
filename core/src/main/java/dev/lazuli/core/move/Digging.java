@@ -176,7 +176,12 @@ public final class Digging {
         }
         if (-dy > maxFall) return INF;
         double c = flat + Costs.fallTicks(-dy);
-        for (int y = uy + 1; y >= vy; y--) c += clearCost(vx, y, vz, y != uy + 1);
+        for (int y = uy + 1; y >= vy; y--) {
+            // below the feet only into a hole that's already there: digging down is done standing on the spot
+            // (mining straight down), never by breaking the column beside from up here, out of sight under the floor
+            if (y < uy && !open(w, vx, y, vz)) return INF;
+            c += clearCost(vx, y, vz, y != uy + 1);
+        }
         return c;
     }
 

@@ -34,6 +34,8 @@ public class InteractionCourseTest {
 
     /** How often the last run's hands were asked to place with nothing to place. */
     static int lastOuts;
+    /** The last run's {@link SimHands#besideBelow}. */
+    static int lastBesideBelow;
     /** The planner always gets {@code in}'s block count, whatever the hands have left. */
     static boolean staleBlocks;
     static boolean DEBUG;
@@ -44,6 +46,8 @@ public class InteractionCourseTest {
         final PathingSession session;
         PlayerSim s;
         int blocks, breaks, places, cooldown, rebuilds, outs;
+        /** Blocks broken below the feet but not under the player: digging down from beside the hole. */
+        int besideBelow;
         /** Re-planning doesn't help (the planner keeps thinking it has blocks), like a stale count in the game. */
         boolean rebuildUseless;
         long minePos = Long.MIN_VALUE;
@@ -87,6 +91,9 @@ public class InteractionCourseTest {
             if (++mineTicks >= BREAK_TICKS) {
                 w.set(Pos.x(pos), Pos.y(pos), Pos.z(pos), BlockKind.AIR);
                 if (DEBUG) System.out.println("broke " + Pos.toString(pos));
+                if (Pos.y(pos) < Math.floor(s.y + 1e-6)
+                    && (Pos.x(pos) != (int) Math.floor(s.x) || Pos.z(pos) != (int) Math.floor(s.z))) besideBelow++;
+                lastBesideBelow = besideBelow;
                 session.regionChanged(Pos.x(pos), Pos.y(pos), Pos.z(pos), Pos.x(pos), Pos.y(pos), Pos.z(pos));
                 breaks++;
                 minePos = Long.MIN_VALUE;
@@ -132,6 +139,11 @@ public class InteractionCourseTest {
 
     public static Run drive(GridWorld w, Interaction in, int blocks, boolean parkour, int sx, int sy, int sz, int gx, int gy, int gz,
                      int maxTicks) {
+        return drive(w, in, blocks, parkour, sx, sy, sz, new GoalBlock(gx, gy, gz), gx, gz, maxTicks);
+    }
+
+    public static Run drive(GridWorld w, Interaction in, int blocks, boolean parkour, int sx, int sy, int sz,
+                     dev.lazuli.core.goal.Goal goal, int gx, int gz, int maxTicks) {
         List<String> msgs = new ArrayList<>();
         Settings settings = new Settings();
         settings.allowParkour.set(parkour);
@@ -143,8 +155,9 @@ public class InteractionCourseTest {
         if (!staleBlocks) handsRef[0] = hands;
         Builder builder = new Builder(w, hands);
         builder.setEagle(eagle);
-        session.start(new GoalBlock(gx, gy, gz), false, Pos.pack(sx, sy, sz));
+        session.start(goal, false, Pos.pack(sx, sy, sz));
         lastOuts = 0;
+        lastBesideBelow = 0;
         PlayerSim s = new PlayerSim(w, sx + 0.5, sy, sz + 0.5, 0, 0, 0, true, false);
         hands.s = s;
         InputPlanner planner = new InputPlanner(w);
@@ -259,6 +272,16 @@ public class InteractionCourseTest {
         Run r = drive(w, BREAK, 0, 1, 0, 0, -4, 0, 600);
         assertTrue(r.arrived(), r.log());
         assertEquals(5, r.breaks(), r.log());
+    }
+
+    @Test
+    void digsStraightDownToAnOreFarBelowThenAcross() {
+        // an ore deep under the player, a little to the side: down the shaft it stands in, not a staircase
+        GridWorld w = GridWorld.flatFloor(-8, -8, 8, 8).fill(-8, -20, -8, 8, 0, 8, BlockKind.SOLID);
+        Run r = drive(w, BREAK, 0, false, 0, 1, 0, new dev.lazuli.core.goal.GoalAdjacent(3, -14, 2), 3, 2, 4000);
+        assertTrue(r.arrived(), r.log());
+        assertTrue(r.breaks() <= 24, r.breaks() + " breaks" + System.lineSeparator() + r.log());
+        assertEquals(0, lastBesideBelow, "dug down from beside the hole" + System.lineSeparator() + r.log());
     }
 
     @Test
