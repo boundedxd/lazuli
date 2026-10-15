@@ -88,15 +88,15 @@ public final class Aim {
     }
 
     /**
-     * One tick of right-clicking face {@code face} of {@code against} with the selected item: true once used, false
-     * while turning (or if it can't be seen, see {@link #at}).
+     * One tick of right-clicking face {@code face} (any face, if null) of {@code against} with the selected item: true
+     * once used, false while turning (or if it can't be seen, see {@link #at}).
      */
     public static boolean useOn(Minecraft mc, LocalPlayer player, BlockPos against, Direction face, InputDriver input, Settings settings) {
         float[] aim = at(mc, player, against, face);
         if (aim == null) return false;
         BlockHitResult hit = current(mc, player);
         turn(mc, player, input, aim, settings);
-        if (hit == null || !hit.getBlockPos().equals(against) || hit.getDirection() != face) return false;
+        if (hit == null || !hit.getBlockPos().equals(against) || face != null && hit.getDirection() != face) return false;
         if (mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit).consumesAction()) {
             player.swing(InteractionHand.MAIN_HAND);
             return true;

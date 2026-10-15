@@ -86,6 +86,19 @@ public final class CommandHandler {
             reply(Chat.err("Farming isn't available here"));
         }
 
+        /** Throws out {@code count} of an item (an id like {@code dirt}, or "all" for everything); negative: all of it. */
+        default void drop(String item, int count) {
+            reply(Chat.err("Dropping isn't available here"));
+        }
+
+        /**
+         * Moves items between the inventory and a container: {@code at} {x, y, z}, or null for the nearest storage.
+         * {@code item} is an id or "all"; a negative count means all of it.
+         */
+        default void container(boolean deposit, String item, int count, int[] at) {
+            reply(Chat.err("Containers aren't available here"));
+        }
+
         /** The block the camera is in {x, y, z}: the freecam's when it's on, otherwise the player's feet. */
         default int[] cameraFeet() {
             return playerFeet();
@@ -170,6 +183,12 @@ public final class CommandHandler {
                 else if (args.length == 1) ctx.farm(Math.max(1, integer(args[0])));
                 else ctx.reply(Chat.err("Usage: farm [range]"));
             }
+            case "drop" -> {
+                if (args.length == 1) ctx.drop(args[0].toLowerCase(Locale.ROOT), -1);
+                else if (args.length == 2) ctx.drop(args[0].toLowerCase(Locale.ROOT), Math.max(1, integer(args[1])));
+                else ctx.reply(Chat.err("Usage: drop <item|all> [count]"));
+            }
+            case "deposit", "withdraw" -> container(cmd.equals("deposit"), args);
             case "help" -> help(prefix);
             default -> ctx.reply(Chat.err("Unknown command: {}. Try {}help", cmd, prefix));
         }
@@ -188,6 +207,9 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "explore [x z]", "walk into chunks never loaded, spiralling out"));
         ctx.reply(Chat.usage(p + "tunnel [height width depth]", "dig straight ahead (default 2x1, no end)"));
         ctx.reply(Chat.usage(p + "farm [range]", "harvest and replant crops around here"));
+        ctx.reply(Chat.usage(p + "drop <item|all> [count]", "throw items out of the inventory (all of them without a count)"));
+        ctx.reply(Chat.usage(p + "deposit <item|all> [count] [x y z]", "put items into a container (the nearest chest, barrel...)"));
+        ctx.reply(Chat.usage(p + "withdraw <item|all> [count] [x y z]", "take items out of a container"));
         ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
         ctx.reply(Chat.usage(p + "set <name> [value]", "show or change a setting"));
         ctx.reply(Chat.usage(p + "settings", "list every setting"));
@@ -211,6 +233,28 @@ public final class CommandHandler {
             }
             default -> ctx.follow("player", List.of(args)); // follow Steve
         }
+    }
+
+    /** deposit|withdraw <item|all> [count] [x y z]; coordinates may be relative (~). */
+    private void container(boolean deposit, String[] args) {
+        if (args.length != 1 && args.length != 2 && args.length != 4 && args.length != 5) {
+            ctx.reply(Chat.err("Usage: {} <item|all> [count] [x y z]", deposit ? "deposit" : "withdraw"));
+            return;
+        }
+        int count = args.length == 2 || args.length == 5 ? Math.max(1, integer(args[1])) : -1;
+        int[] at = null;
+        if (args.length >= 4) {
+            int[] f = ctx.playerFeet();
+            int o = args.length - 3;
+            at = new int[]{coord(args[o], f[0]), coord(args[o + 1], f[1]), coord(args[o + 2], f[2])};
+        }
+        ctx.container(deposit, args[0].toLowerCase(Locale.ROOT), count, at);
+    }
+
+    /** A coordinate: a number, or ~ / ~n relative to {@code here}. */
+    private static int coord(String s, int here) {
+        if (s.startsWith("~")) return here + (s.length() == 1 ? 0 : integer(s.substring(1)));
+        return integer(s);
     }
 
     private static int integer(String s) {

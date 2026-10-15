@@ -41,6 +41,8 @@ public final class Settings {
     public final Setting<Boolean> autoArmor = bool("autoArmor", true);
     /** Move the best tool from the inventory into the hotbar when mining. */
     public final Setting<Boolean> allowInventory = bool("allowInventory", true);
+    /** Inventory clicks (moving, dropping items) sent per tick: more is faster, fewer looks less like a bot. */
+    public final Setting<Integer> clicksPerTick = integer("clicksPerTick", 2, 1, 20);
     /** Never use a tool's last few points of durability. */
     public final Setting<Boolean> saveTools = bool("saveTools", true);
     public final Setting<Integer> evalHorizon = integer("evalHorizon", 32, 1, 4096);

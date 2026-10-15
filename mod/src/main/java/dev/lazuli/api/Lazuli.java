@@ -32,6 +32,19 @@ public interface Lazuli {
      */
     Task mine(int quantity, String... blocks);
 
+    /**
+     * Moves items between the inventory and a container (a chest, barrel, shulker box...). Done once it moved the
+     * number asked for (all of them if {@code count} is negative).
+     *
+     * @param deposit into the container, else out of it
+     * @param item    an id like {@code iron_ingot}, or "all"
+     * @param at      the container {x, y, z}, or null for the nearest chest, barrel, shulker box or ender chest
+     */
+    Task container(boolean deposit, String item, int count, int[] at);
+
+    /** Throws out {@code count} of an item ("all": anything) from the inventory; negative: all of it. */
+    void drop(String item, int count);
+
     /** The running job, or null. */
     Task current();
 

@@ -3,7 +3,10 @@ package dev.lazuli.mod;
 import dev.lazuli.api.Lazuli;
 import dev.lazuli.core.command.CommandHandler;
 import dev.lazuli.core.goal.Goal;
+import dev.lazuli.core.inventory.Moves;
 import dev.lazuli.core.task.Task;
+import dev.lazuli.mod.inventory.ClickDriver;
+import dev.lazuli.mod.inventory.Inventories;
 import dev.lazuli.core.task.Tasks;
 import dev.lazuli.core.world.Pos;
 import dev.lazuli.core.session.PathingSession;
@@ -16,6 +19,7 @@ import dev.lazuli.mod.control.ClickGoal;
 import dev.lazuli.mod.control.FreeCam;
 import dev.lazuli.mod.control.MineProcess;
 import dev.lazuli.mod.process.ExploreProcess;
+import dev.lazuli.mod.process.ContainerProcess;
 import dev.lazuli.mod.process.FarmProcess;
 import dev.lazuli.mod.process.FollowProcess;
 import dev.lazuli.mod.process.Process;
@@ -68,6 +72,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private ExploreProcess explore;
 	private TunnelProcess tunnel;
 	private FarmProcess farm;
+	private ContainerProcess containers;
 	private Upkeep upkeep;
 	/** Every process; at most one runs at a time. */
 	private java.util.List<Process> processes;
@@ -76,6 +81,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private ClientLevel lastLevel;
 	/** The job started through the API (see {@link Lazuli}). */
 	private final Tasks tasks = new Tasks();
+	private final ClickDriver clicks = new ClickDriver();
 
 	@Override
 	public void onInitializeClient() {
@@ -95,8 +101,9 @@ public final class LazuliClient implements ClientModInitializer {
 		explore = new ExploreProcess(session, this::chat);
 		tunnel = new TunnelProcess(session, settings, this::chat);
 		farm = new FarmProcess(session, settings, this::chat);
+		containers = new ContainerProcess(session, settings, clicks, this::chat);
 		upkeep = new Upkeep(settings, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -172,6 +179,17 @@ public final class LazuliClient implements ClientModInitializer {
 			public void farm(int range) {
 				LazuliClient.this.stopProcesses(false);
 				farm.start(Minecraft.getInstance(), range);
+			}
+
+			@Override
+			public void container(boolean deposit, String item, int count, int[] at) {
+				LazuliClient.this.stopProcesses(false);
+				containers.start(Minecraft.getInstance(), deposit, item, count, at == null ? null : new BlockPos(at[0], at[1], at[2]));
+			}
+
+			@Override
+			public void drop(String item, int count) {
+				LazuliClient.this.drop(item, count);
 			}
 
 			@Override
@@ -264,6 +282,25 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 
 		@Override
+		public Task container(boolean deposit, String item, int count, int[] at) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				containers.start(Minecraft.getInstance(), deposit, item, count, at == null ? null : new BlockPos(at[0], at[1], at[2]));
+				return new Task((deposit ? "deposit " : "withdraw ") + item, () -> switch (containers.outcome()) {
+					case NONE -> null;
+					case DONE -> Task.Result.DONE;
+					case FAILED -> Task.Result.FAILED;
+					case CANCELLED -> Task.Result.CANCELLED;
+				}, () -> containers.stop(false));
+			});
+		}
+
+		@Override
+		public void drop(String item, int count) {
+			LazuliClient.this.drop(item, count);
+		}
+
+		@Override
 		public Task current() {
 			return tasks.current();
 		}
@@ -287,6 +324,27 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 	}
 
+	/** Throws out {@code count} of {@code item} ("all": anything) from the main inventory and hotbar; negative: all of it. */
+	private void drop(String item, int count) {
+		var p = Minecraft.getInstance().player;
+		if (p == null) return;
+		if (p.containerMenu != p.inventoryMenu) {
+			chat(Chat.err("Close the open menu first"));
+			return;
+		}
+		var match = Inventories.matcher(item);
+		var menu = Inventories.read(p.inventoryMenu, p);
+		var plan = Moves.drop(menu, Inventories.PLAYER_MAIN, match, count);
+		if (plan.isEmpty()) {
+			chat(Chat.err("No {} to drop", item));
+			return;
+		}
+		var sim = menu.copy();
+		sim.applyAll(plan);
+		clicks.play(p.inventoryMenu.containerId, plan);
+		chat(Chat.ok("Dropping {} {}", sim.dropped(), item));
+	}
+
 	private void stopProcesses(boolean announce) {
 		for (Process p : processes) p.stop(announce);
 	}
@@ -300,6 +358,7 @@ public final class LazuliClient implements ClientModInitializer {
 
 	private void onTick(Minecraft mc) {
 		tasks.tick();
+		clicks.tick(mc, settings.clicksPerTick.get());
 		renderer.tick(mc);
 		FreeCam.tick(mc);
 		while (LazuliConfig.FREECAM.consumeClick()) toggleFreecam(mc);

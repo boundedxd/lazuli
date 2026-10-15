@@ -49,6 +49,12 @@ class CommandTest {
             public void farm(int range) {
                 mined.add("farm " + range);
             }
+            public void container(boolean deposit, String item, int count, int[] at) {
+                mined.add((deposit ? "deposit " : "withdraw ") + item + " " + count + (at == null ? "" : " at " + at[0] + " " + at[1] + " " + at[2]));
+            }
+            public void drop(String item, int count) {
+                mined.add("drop " + item + " " + count);
+            }
             public int[] cameraFeet() { return new int[]{12, 1, 7}; }
             public void toggleFreecam() { mined.add("freecam"); }
         });
@@ -62,6 +68,17 @@ class CommandTest {
         assertEquals(Pos.pack(12, 1, 7), session.snapshot().path().get(session.snapshot().path().size() - 1));
         h.handle("#freecam");
         assertEquals(List.of("freecam"), mined);
+    }
+
+    @Test
+    void itemCommandsTakeCountsAndPlaces() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#deposit all", "#deposit Cobblestone 32", "#withdraw iron_ingot 5 10 64 ~-2",
+            "#withdraw diamond ~ ~1 ~", "#drop dirt", "#drop dirt 3"}) h.handle(c);
+        h.handle("#deposit");
+        assertEquals(List.of("deposit all -1", "deposit cobblestone 32", "withdraw iron_ingot 5 at 10 64 -2",
+            "withdraw diamond -1 at 0 2 0", "drop dirt -1", "drop dirt 3"), mined);
+        assertTrue(replies.get(replies.size() - 1).startsWith("Usage: deposit"), replies.toString());
     }
 
     @Test
