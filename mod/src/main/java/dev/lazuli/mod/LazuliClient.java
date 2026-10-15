@@ -309,10 +309,16 @@ public final class LazuliClient implements ClientModInitializer {
 			return w == null || !settings.renderWaypoints.get() ? java.util.List.of() : w.list(dimension(mc));
 		});
 
+		executor.onStuck(() -> {
+			if (lastJob == null) return false;
+			restartPending = true;
+			return true;
+		});
+
 		ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
 			if (Minecraft.getInstance().player == null) return true;
 			try {
-				return !commands.handle(message);
+				return !runCommand(message);
 			} catch (RuntimeException e) {
 				chat(Chat.err("Error: {}", e.getMessage()));
 				return false;
@@ -458,7 +464,42 @@ public final class LazuliClient implements ClientModInitializer {
 		@Override
 		public void command(String line) {
 			String prefix = settings.prefix.get();
-			commands.handle(line.startsWith(prefix) ? line : prefix + line);
+			runCommand(line.startsWith(prefix) ? line : prefix + line);
+		}
+	}
+
+	/** Commands that start a job: rerun quietly when it gets stuck (unstickRestart). */
+	private static final java.util.Set<String> JOBS = java.util.Set.of("goto", "path", "mine", "getitem", "get", "farm",
+		"explore", "tunnel", "follow", "craft", "smelt", "deposit", "withdraw", "sleep", "back", "wp", "waypoint", "come");
+	/** The command that started what's running, if a command did. */
+	private String lastJob;
+	private volatile boolean restartPending;
+	/** Chat is muted until then (a quiet restart). */
+	private int quietUntil = -1, ticks;
+
+	/** Handles a chat line as a command (false: not one), remembering a job's command for a quiet restart. */
+	private boolean runCommand(String line) {
+		boolean handled = commands.handle(line);
+		String prefix = settings.prefix.get();
+		if (handled && line.startsWith(prefix)) {
+			String[] w = line.substring(prefix.length()).trim().split("\\s+");
+			String cmd = w[0].toLowerCase(java.util.Locale.ROOT);
+			if (JOBS.contains(cmd) && (!cmd.equals("wp") && !cmd.equals("waypoint") || w.length > 1 && w[1].equalsIgnoreCase("goto"))) lastJob = line;
+			else if (cmd.equals("stop") || cmd.equals("cancel") || cmd.equals("kill")) lastJob = null;
+		}
+		return handled;
+	}
+
+	/** Stuck: what #kill and running the command again does, without a word. */
+	private void restartJob(Minecraft mc) {
+		String job = lastJob;
+		if (job == null || mc.player == null) return;
+		quietUntil = ticks + 40;
+		kill(mc);
+		try {
+			runCommand(job);
+		} catch (RuntimeException e) {
+			lastJob = null;
 		}
 	}
 
@@ -488,6 +529,7 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private void stopProcesses(boolean announce) {
+		lastJob = null; // something else is starting (a command sets it again after)
 		for (Process p : processes) p.stop(announce);
 	}
 
@@ -537,6 +579,11 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private void onTick(Minecraft mc) {
+		ticks++;
+		if (restartPending) {
+			restartPending = false;
+			restartJob(mc);
+		}
 		tasks.tick();
 		chestWatcher.tick(mc);
 		boolean dead = mc.player != null && mc.player.isDeadOrDying();
@@ -593,6 +640,7 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private void chat(String msg) {
+		if (ticks < quietUntil) return;
 		Minecraft mc = Minecraft.getInstance();
 		mc.execute(() -> mc.gui.getChat().addMessage(Component.literal(PREFIX + msg)));
 	}

@@ -66,6 +66,8 @@ public final class Settings {
     public final Setting<Integer> retreatHealth = integer("retreatHealth", 8, 1, 19);
     /** A trip with nothing happening for ~6 seconds is planned again from scratch (what #kill and a rerun would do). */
     public final Setting<Boolean> unstick = bool("unstick", true);
+    /** Stuck: quietly #kill and run the last command again instead (what fixes it by hand), when there is one. */
+    public final Setting<Boolean> unstickRestart = bool("unstickRestart", true);
     /** Save a "death" waypoint where the player dies ({@code #back} goes there). */
     public final Setting<Boolean> deathWaypoint = bool("deathWaypoint", true);
     /** Draw this dimension's waypoints in the world. */

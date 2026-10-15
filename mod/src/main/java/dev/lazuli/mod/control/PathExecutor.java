@@ -53,10 +53,14 @@ public final class PathExecutor {
     private final java.util.function.Consumer<String> chat;
     /** Watchdog: where the player was when nothing last happened, for how long, and the re-plans tried there. */
     private Vec3 stallAt = Vec3.ZERO;
+    /** Stuck: quietly kill and rerun the job; false if there's none to rerun (then the trip is planned again). */
+    private java.util.function.BooleanSupplier restart = () -> false;
     private long stallBlock = NONE;
     private int stallTicks, unsticks;
     /** Ticks of nothing happening before the trip is planned again from scratch (no path yet: the search may be long). */
-    private static final int STALL_TICKS = 120, STALL_NO_PATH_TICKS = 400, MAX_UNSTICKS = 3;
+    private static final int STALL_TICKS = 120, STALL_NO_PATH_TICKS = 200, MAX_UNSTICKS = 3;
+    /** Moving less than this far (blocks, sideways) from where it stalled isn't getting anywhere. */
+    private static final double STALL_MOVE = 0.8;
     private boolean driving;
     private long lastBlock = NONE;
     private int offPathTicks;
@@ -86,6 +90,13 @@ public final class PathExecutor {
         if (snap.state() != PathingSession.State.PATHING || mc.screen != null) {
             if (snap.state() != PathingSession.State.PATHING) lastBlock = NONE;
             reset();
+            // a search going on and on with the player standing there (no path yet): stuck too
+            if (mc.screen == null && session.planning() && settings.unstick.get()) {
+                BlockPos f = player.blockPosition();
+                watchdog(player, snap, Pos.pack(f.getX(), f.getY(), f.getZ()), dev.lazuli.mod.process.Upkeep.eating(), true);
+            } else {
+                stallTicks = 0;
+            }
             return;
         }
         // moving to cancel is handled once for everything in LazuliClient
@@ -162,7 +173,7 @@ public final class PathExecutor {
         }
         long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(v.x, v.z), building);
         if (failed != null) session.edgeFailed(failed[0], failed[1]);
-        if (settings.unstick.get()) watchdog(player, snap, block, eating);
+        if (settings.unstick.get()) watchdog(player, snap, block, eating, false);
         if (c == null) c = new Controls(false, false, false, curYaw, curPitch);
         if (!sprint && c.sprint()) c = new Controls(c.forward(), c.back(), c.jump(), false, c.targetYaw(), c.targetPitch(), c.strafe(), c.sneak());
         float yaw = InputPlanner.approach(curYaw, c.targetYaw(), maxTurn);
@@ -177,11 +188,15 @@ public final class PathExecutor {
      * got stuck (a search, a start that wasn't a node, a stale plan), it's planned again from scratch, the way #kill
      * and running it again would. Still stuck after a few tries at the same block, the trip is given up.
      */
-    private void watchdog(LocalPlayer player, PathingSession.Snapshot snap, long block, boolean eating) {
+    private void watchdog(LocalPlayer player, PathingSession.Snapshot snap, long block, boolean eating, boolean searching) {
         boolean busyHere = Interactor.mining() != null || eating || boat.active() || player.isUsingItem()
             || dev.lazuli.mod.process.Guard.paused();
-        if (busyHere || player.position().distanceToSqr(stallAt) > 0.01) {
-            stallAt = player.position();
+        // getting somewhere: a block sideways, or a block up or down standing (jumping into a corner over and over isn't)
+        Vec3 at = player.position();
+        double dx = at.x - stallAt.x, dz = at.z - stallAt.z;
+        boolean progress = dx * dx + dz * dz > STALL_MOVE * STALL_MOVE || player.onGround() && Math.abs(at.y - stallAt.y) > 0.9;
+        if (busyHere || progress) {
+            stallAt = at;
             stallTicks = 0;
         } else {
             stallTicks++;
@@ -190,7 +205,7 @@ public final class PathExecutor {
             stallBlock = block;
             unsticks = 0;
         }
-        if (stallTicks < (snap.path().isEmpty() ? STALL_NO_PATH_TICKS : STALL_TICKS)) return;
+        if (stallTicks < (searching || snap.path().isEmpty() ? STALL_NO_PATH_TICKS : STALL_TICKS)) return;
         stallTicks = 0;
         if (++unsticks > MAX_UNSTICKS) {
             unsticks = 0;
@@ -198,9 +213,15 @@ public final class PathExecutor {
             session.stop(true);
             return;
         }
-        chat.accept(dev.lazuli.core.chat.Chat.warn("Stuck; planning again ({}/{})", unsticks, MAX_UNSTICKS));
         reset();
+        if (settings.unstickRestart.get() && restart.getAsBoolean()) return; // quietly, like #kill and running it again
+        chat.accept(dev.lazuli.core.chat.Chat.warn("Stuck; planning again ({}/{})", unsticks, MAX_UNSTICKS));
         session.unstick(block);
+    }
+
+    /** What to do when stuck before planning the trip again: true if it restarted the job instead. */
+    public void onStuck(java.util.function.BooleanSupplier restart) {
+        this.restart = restart;
     }
 
     /** The input planner's predicted motion (x, y, z triples), empty when not driving. */
