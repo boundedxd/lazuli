@@ -122,11 +122,12 @@ public final class Tools {
         saveTools = settings.saveTools.get();
         int slot = best(p, s, settings.allowInventory.get() && mc.screen == null ? 36 : 9);
         if (slot >= 9) {
-            // swap it into the selected hotbar slot (menu slots: 9-35 are the main inventory)
-            int sel = p.getInventory().getSelectedSlot();
-            mc.gameMode.handleInventoryMouseClick(p.inventoryMenu.containerId, slot, sel,
-                net.minecraft.world.inventory.ClickType.SWAP, p);
-            slot = sel;
+            // swap it into the selected hotbar slot (menu slots: 9-35 are the main inventory); the click driver may
+            // first stop and open the inventory, so it's selected once it's there
+            var clicks = dev.lazuli.mod.inventory.ClickDriver.get();
+            if (!clicks.busy()) clicks.add(p.inventoryMenu.containerId,
+                java.util.List.of(dev.lazuli.core.inventory.Click.swap(slot, p.getInventory().getSelectedSlot())));
+            return;
         }
         p.getInventory().setSelectedSlot(slot);
     }

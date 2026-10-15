@@ -91,6 +91,7 @@ public final class LazuliConfig implements WalksyLibApi {
                         .description(OptionDescription.ofText(() -> "How far (blocks) #craft looks for a crafting table.")).build())
                     .build())
                 .group(OptionGroup.builder("Clicking")
+                    .option(bool(s.openInventory, "Open the inventory screen and stand still for inventory clicks (tool and armor swaps, #drop, 2x2 crafting), like a player: anticheats flag clicks with no screen open or while moving (InvMove). Off: click straight away, faster."))
                     .option(Options.ofNumber("Clicks per tick", s.clicksPerTick::get, s.clicksPerTick.defaultValue(), s.clicksPerTick::set)
                         .range(1, 20, 1)
                         .description(OptionDescription.ofText(() -> "Inventory clicks (moving, dropping items) per tick: more is faster, fewer looks less like a bot.")).build())

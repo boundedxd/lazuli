@@ -20,7 +20,6 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.inventory.AbstractCraftingMenu;
-import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
@@ -223,7 +222,11 @@ public final class CraftProcess implements Process {
             enter(Phase.TABLE, p);
             return;
         }
-        if (clicks.busy()) return;
+        if (menu == p.inventoryMenu) clicks.keepOpen();
+        if (clicks.busy()) {
+            batchStart = p.tickCount; // the clock starts once the clicks are in
+            return;
+        }
         int[] grid = menu.getInputGridSlots().stream().mapToInt(s -> s.index).toArray();
         int result = menu.getResultSlot().index;
         int[] mine = Inventories.slots(menu, p, true);
@@ -322,7 +325,8 @@ public final class CraftProcess implements Process {
         int sel = p.getInventory().getSelectedSlot();
         if (slot != sel) {
             if (slot < 9) p.getInventory().setSelectedSlot(slot);
-            else mc.gameMode.handleInventoryMouseClick(p.inventoryMenu.containerId, slot, sel, ClickType.SWAP, p);
+            else if (!clicks.busy()) clicks.add(p.inventoryMenu.containerId, List.of(Click.swap(slot, sel)));
+            phaseStart = p.tickCount; // the clock starts once it's in hand
             return;
         }
         if (spot == null || !mc.level.getBlockState(spot).canBeReplaced()) spot = spot(mc, p);

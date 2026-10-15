@@ -41,6 +41,11 @@ public final class Settings {
     public final Setting<Boolean> autoArmor = bool("autoArmor", true);
     /** Move the best tool from the inventory into the hotbar when mining. */
     public final Setting<Boolean> allowInventory = bool("allowInventory", true);
+    /**
+     * Open the inventory screen (standing still) for clicks in the player's own inventory, as a player would:
+     * anticheats flag inventory clicks with no screen open or while moving. Off: click straight away (faster).
+     */
+    public final Setting<Boolean> openInventory = bool("openInventory", true);
     /** Inventory clicks (moving, dropping items) sent per tick: more is faster, fewer looks less like a bot. */
     public final Setting<Integer> clicksPerTick = integer("clicksPerTick", 2, 1, 20);
     /** #craft also crafts the ingredients it lacks (logs into planks, planks into sticks...). */

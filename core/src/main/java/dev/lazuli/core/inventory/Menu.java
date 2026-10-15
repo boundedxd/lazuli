@@ -83,6 +83,7 @@ public final class Menu {
                 }
                 slots[c.slot()] = s.withCount(left);
             }
+            case SWAP -> {} // the menu doesn't know where the hotbar is; planners don't use it
             case PICKUP -> {
                 boolean right = c.button() == 1;
                 if (cursor.empty()) {

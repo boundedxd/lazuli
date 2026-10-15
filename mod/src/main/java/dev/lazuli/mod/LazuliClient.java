@@ -85,7 +85,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private ClientLevel lastLevel;
 	/** The job started through the API (see {@link Lazuli}). */
 	private final Tasks tasks = new Tasks();
-	private final ClickDriver clicks = new ClickDriver();
+	private ClickDriver clicks;
 
 	@Override
 	public void onInitializeClient() {
@@ -105,6 +105,7 @@ public final class LazuliClient implements ClientModInitializer {
 		explore = new ExploreProcess(session, this::chat);
 		tunnel = new TunnelProcess(session, settings, this::chat);
 		farm = new FarmProcess(session, settings, this::chat);
+		clicks = new ClickDriver(settings);
 		containers = new ContainerProcess(session, settings, clicks, this::chat);
 		crafts = new CraftProcess(session, settings, clicks, this::chat);
 		RecipeData.get(); // read the recipes in the background now, not on the first #craft
@@ -244,7 +245,10 @@ public final class LazuliClient implements ClientModInitializer {
 		ClientChunkEvents.CHUNK_UNLOAD.register(this::onChunkUnload);
 		// order matters: the recorder logs this tick's movement before the executor turns the view for the next one
 		ClientTickEvents.END_CLIENT_TICK.register(recorder::tick);
-		ClientTickEvents.END_CLIENT_TICK.register(executor::tick);
+		// while the inventory screen is open for clicks the player stands still and the view stays put
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+			if (!ClickDriver.holding()) executor.tick(mc);
+		});
 		// after the executor, which clears the mining target; nothing moves while eating
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
 			if (mc.player == null || mc.level == null) return;

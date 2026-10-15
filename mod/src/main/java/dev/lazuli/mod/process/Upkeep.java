@@ -10,7 +10,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.food.FoodProperties;
-import net.minecraft.world.inventory.ClickType;
+import dev.lazuli.core.inventory.Click;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ItemAttributeModifiers;
@@ -130,16 +130,12 @@ public final class Upkeep {
                 }
             }
             if (bestIdx < 0) continue;
-            int menu = p.inventoryMenu.containerId;
+            var clicks = dev.lazuli.mod.inventory.ClickDriver.get();
+            if (clicks.busy()) return; // something else is using the inventory: next time
             int from = bestIdx < 9 ? 36 + bestIdx : bestIdx;
-            if (worn.isEmpty()) {
-                mc.gameMode.handleInventoryMouseClick(menu, from, 0, ClickType.QUICK_MOVE, p);
-            } else {
-                // pick the new piece up, swap it with the worn one, put the old one where the new one was
-                mc.gameMode.handleInventoryMouseClick(menu, from, 0, ClickType.PICKUP, p);
-                mc.gameMode.handleInventoryMouseClick(menu, ARMOR_MENU_SLOT[a], 0, ClickType.PICKUP, p);
-                mc.gameMode.handleInventoryMouseClick(menu, from, 0, ClickType.PICKUP, p);
-            }
+            // into the armor slot by shift-click; over a worn piece, pick the new one up, swap, put the old one back
+            clicks.add(p.inventoryMenu.containerId, worn.isEmpty() ? java.util.List.of(Click.shift(from))
+                : java.util.List.of(Click.left(from), Click.left(ARMOR_MENU_SLOT[a]), Click.left(from)));
             chat.accept(Chat.info("Putting on better {}", slot.getName()));
             return;
         }

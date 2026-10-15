@@ -16,6 +16,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class KeyboardInputMixin extends ClientInput {
     @Inject(method = "tick", at = @At("TAIL"))
     private void lazuli$override(CallbackInfo ci) {
+        if (dev.lazuli.mod.inventory.ClickDriver.holding()) {
+            // standing still for the inventory screen
+            this.keyPresses = Input.EMPTY;
+            this.moveVector = Vec2.ZERO;
+            return;
+        }
         Controls c = InputDriver.current();
         if (c == null && dev.lazuli.mod.control.FreeCam.active()) {
             // the keys fly the camera; the player stands still unless Lazuli drives it
