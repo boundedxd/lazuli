@@ -99,6 +99,18 @@ public final class Settings {
     /** #getitem takes what it needs from remembered chests within {@link #chestRange} before mining or crafting it. */
     public final Setting<Boolean> getItemChests = bool("getItemChests", true);
     public final Setting<Integer> chestRange = integer("chestRange", 128, 8, 2048);
+    /** #getitem crafts what it needs several times over (planks, sticks...) all at once: fewer steps. */
+    public final Setting<Boolean> getItemBatch = bool("getItemBatch", true);
+    /** #getitem prefers blocks that are in the loaded world around (birch logs when there are birches...). */
+    public final Setting<Boolean> getItemNearby = bool("getItemNearby", true);
+    /** The server hides ores (anti-xray): only ores next to air or water are real, the rest are looked for by digging. */
+    public final Setting<Boolean> antiXray = bool("antiXray", false);
+    /** #mine / #getitem with none found: strip-mine at the ore's best level, or explore for anything else. */
+    public final Setting<Boolean> mineSearch = bool("mineSearch", true);
+    /** Long tunnels of the strip mine, in blocks. */
+    public final Setting<Integer> stripLength = integer("stripLength", 32, 8, 256);
+    /** Searching gives up after this many minutes. */
+    public final Setting<Integer> searchMinutes = integer("searchMinutes", 15, 1, 240);
     /** #getitem may smelt for what it needs. */
     public final Setting<Boolean> getItemSmelt = bool("getItemSmelt", true);
     /** #smelt waits at the furnace until it's done; off: loads it, leaves, and #smelt collect goes back. */

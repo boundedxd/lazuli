@@ -117,8 +117,11 @@ public final class CommandHandler {
             reply(Chat.err("Smelting isn't available here"));
         }
 
-        /** Gets an item from scratch: mines, crafts and smelts what it takes, tools included; count: how many to have. */
-        default void getItem(ItemCount item) {
+        /**
+         * Gets items from scratch: mines, crafts and smelts what it takes, tools included; counts: how many to have. Then
+         * brings them back (and puts them in a chest) if asked.
+         */
+        default void getItem(dev.lazuli.core.craft.ItemRequest request) {
             reply(Chat.err("Getting items isn't available here"));
         }
 
@@ -243,11 +246,7 @@ public final class CommandHandler {
                 else ctx.drop(items);
             }
             case "deposit", "withdraw" -> container(cmd.equals("deposit"), args);
-            case "getitem", "get" -> {
-                List<ItemCount> items = items(args, 0, args.length);
-                if (items == null || items.size() != 1) ctx.reply(Chat.err("Usage: getitem <item> [count]"));
-                else ctx.getItem(items.get(0));
-            }
+            case "getitem", "get" -> getItem(args);
             case "smelt" -> {
                 List<ItemCount> items = args.length == 1 && args[0].equalsIgnoreCase("collect") ? null : items(args, 0, args.length);
                 if (args.length == 1 && args[0].equalsIgnoreCase("collect")) ctx.smeltCollect();
@@ -284,7 +283,8 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
         ctx.reply(Chat.usage(p + "withdraw <item|all> [count] [item [count]...] [x y z]", "take items out of a container"));
         ctx.reply(Chat.usage(p + "craft <item> [count] [item [count]...]", "craft items, making the ingredients too (logs into planks...)"));
-        ctx.reply(Chat.usage(p + "getitem <item> [count]", "get an item from scratch: mines, crafts and smelts what it takes (until you have count)"));
+        ctx.reply(Chat.usage(p + "getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit]",
+            "get items from scratch: mines, crafts and smelts what it takes (until you have count); iron_tools, diamond_armor, iron_gear too"));
         ctx.reply(Chat.usage(p + "smelt <item> [count]", "cook items in a furnace (iron_ingot or raw_iron; blast furnace/smoker when there's one)"));
         ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
         ctx.reply(Chat.usage(p + "find <item>", "which chests (opened before) hold an item"));
@@ -328,6 +328,50 @@ public final class CommandHandler {
         List<ItemCount> items = items(args, 0, n);
         if (items == null) ctx.reply(Chat.err("Usage: {} <item|all> [count] [item [count]...] [x y z]", deposit ? "deposit" : "withdraw"));
         else ctx.container(deposit, items, at);
+    }
+
+    /** getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit] */
+    private void getItem(String[] args) {
+        int then = -1;
+        for (int i = 0; i < args.length && then < 0; i++) if (args[i].equalsIgnoreCase("then")) then = i;
+        List<ItemCount> raw = items(args, 0, then < 0 ? args.length : then);
+        String usage = "Usage: getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit]";
+        if (raw == null) {
+            ctx.reply(Chat.err(usage));
+            return;
+        }
+        List<ItemCount> items = new ArrayList<>();
+        for (ItemCount i : raw) {
+            List<String> set = dev.lazuli.core.craft.ItemSets.expand(i.item());
+            if (set == null) items.add(i);
+            else for (String s : set) items.add(new ItemCount(s, i.count()));
+        }
+        int[] to = null;
+        boolean deposit = false;
+        if (then >= 0) {
+            List<String> rest = List.of(args).subList(then + 1, args.length);
+            if (rest.isEmpty() || rest.size() > 2 || rest.size() == 2 && !store(rest.get(1)) || rest.size() == 2 && store(rest.get(0))) {
+                ctx.reply(Chat.err(usage));
+                return;
+            }
+            String where = rest.get(0).toLowerCase(Locale.ROOT);
+            deposit = rest.size() == 2 || store(where);
+            if (where.equals("back") || where.equals("here")) to = ctx.playerFeet();
+            else if (!store(where)) {
+                var wps = ctx.waypoints();
+                var w = wps == null ? null : wps.get(where, ctx.dimension());
+                if (w == null) {
+                    ctx.reply(Chat.err("No waypoint {} in this dimension", where));
+                    return;
+                }
+                to = new int[]{w.x(), w.y(), w.z()};
+            }
+        }
+        ctx.getItem(new dev.lazuli.core.craft.ItemRequest(items, to, deposit));
+    }
+
+    private static boolean store(String s) {
+        return s.equalsIgnoreCase("deposit") || s.equalsIgnoreCase("store");
     }
 
     /** item [count] pairs from {@code args[from, to)}, a missing count meaning all (-1); null if empty or malformed. */

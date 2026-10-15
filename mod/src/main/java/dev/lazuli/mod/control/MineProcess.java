@@ -41,6 +41,10 @@ import java.util.function.Consumer;
  * #mine: finds the blocks in loaded chunks, paths next to the nearest few (the planner picks whichever is cheapest),
  * breaks them with the crosshair actually on them, and optionally walks over the drops. Runs on top of the
  * {@link PathingSession}: it starts quiet trips and takes over the controls only to aim and break.
+ * <p>
+ * None left (mineSearch): ores are looked for by strip mining at their best level, anything else by exploring, until
+ * some come into view. With antiXray, only ores next to air or water count (the server shows the rest as stone, or
+ * fakes them); strip mining uncovers real ones as it goes.
  */
 public final class MineProcess implements dev.lazuli.mod.process.Process {
     /** How many of the nearest targets one trip may head for. */
@@ -56,7 +60,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     /** Ticks breaking may take before the block counts as unbreakable from here. */
     private static final int BREAK_TIMEOUT = 600;
 
-    private enum Phase { IDLE, TRAVEL, BREAK, PICKUP }
+    private enum Phase { IDLE, TRAVEL, BREAK, PICKUP, SEARCH }
 
     private final PathingSession session;
     private final Settings settings;
@@ -93,7 +97,22 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     private boolean pickupTrip;
     private boolean driving;
 
+    // ---- searching when none are found ----
+    private final dev.lazuli.mod.process.TunnelProcess tunnel;
+    private final dev.lazuli.mod.process.ExploreProcess explore;
+    private final dev.lazuli.mod.process.Trip searchTrip;
+    /** Targets that are ores: what anti-xray hides. */
+    private Set<Block> hidden = Set.of();
+    /** The level to strip-mine at, or null to explore instead; decided the first time it searches. */
+    private Integer stripY;
+    private dev.lazuli.core.mine.StripPattern strip;
+    private boolean searched, descended, legStarted;
+    private int leg, legDone, emptyLegs, searchTicks, descents;
+
     public MineProcess(PathingSession session, Settings settings, BlockView world, Consumer<String> chat) {
+        this.tunnel = new dev.lazuli.mod.process.TunnelProcess(session, settings, m -> {});
+        this.explore = new dev.lazuli.mod.process.ExploreProcess(session, m -> {});
+        this.searchTrip = new dev.lazuli.mod.process.Trip(session);
         this.session = session;
         this.settings = settings;
         this.world = world;
@@ -111,6 +130,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             case TRAVEL -> "looking for";
             case BREAK -> "breaking";
             case PICKUP -> "picking up";
+            case SEARCH -> stripY == null ? "exploring for more" : descended ? "strip mining at y " + stripY : "heading down to y " + stripY;
             case IDLE -> null;
         };
         if (doing == null) return null;
@@ -160,6 +180,12 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         stop(false);
         cancelled = false;
         targets = Set.copyOf(blocks);
+        hidden = blocks.stream().filter(b -> dev.lazuli.core.mine.OreDepth.isOre(BuiltInRegistries.BLOCK.getKey(b).toString()))
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        searched = descended = legStarted = false;
+        stripY = null;
+        strip = null;
+        leg = legDone = emptyLegs = searchTicks = descents = 0;
         // don't bridge with what it's mining
         java.util.Map<String, Integer> keep = new java.util.HashMap<>();
         for (Block b : blocks) if (b.asItem() != net.minecraft.world.item.Items.AIR) keep.put(BuiltInRegistries.ITEM.getKey(b.asItem()).toString(), Integer.MAX_VALUE);
@@ -184,6 +210,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         if (phase == Phase.IDLE) return;
         cancelled = true;
         boolean wasTravelling = phase == Phase.TRAVEL || phase == Phase.PICKUP;
+        stopSearch();
         phase = Phase.IDLE;
         tripStart = -1;
         Tools.keep("mine", null);
@@ -194,6 +221,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     }
 
     private void finish(String msg) {
+        stopSearch();
         phase = Phase.IDLE;
         Tools.keep("mine", null);
         release();
@@ -229,6 +257,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     }
 
     private void scan(LevelChunk chunk, double px, double py, double pz, java.util.PriorityQueue<double[]> best) {
+        boolean antiXray = settings.antiXray.get();
         LevelChunkSection[] sections = chunk.getSections();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         for (int i = 0; i < sections.length; i++) {
@@ -238,8 +267,11 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             for (int y = 0; y < 16; y++)
                 for (int z = 0; z < 16; z++)
                     for (int x = 0; x < 16; x++) {
-                        if (!targets.contains(sec.getBlockState(x, y, z).getBlock())) continue;
+                        Block blk = sec.getBlockState(x, y, z).getBlock();
+                        if (!targets.contains(blk)) continue;
                         int bx = x0 + x, by = y0 + y, bz = z0 + z;
+                        // anti-xray: a buried ore may be a fake (or the real ones show as stone): only trust what's seen
+                        if (antiXray && hidden.contains(blk) && !exposed(bx, by, bz)) continue;
                         long p = Pos.pack(bx, by, bz);
                         if (blacklist.contains(p)) continue;
                         double score = Math.sqrt(sq(bx + 0.5 - px) + sq(by + 0.5 - py) + sq(bz + 0.5 - pz))
@@ -264,13 +296,18 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     }
 
     /** Called for every loaded chunk while mining (new targets are picked up by the next rescan). */
-    public void onChunkLoad(LevelChunk chunk) {}
+    public void onChunkLoad(LevelChunk chunk) {
+        explore.onChunkLoad(chunk);
+    }
 
     /** Called whenever a block changes in the client's world. */
     public void onBlockChanged(BlockPos pos, BlockState state) {
         if (phase == Phase.IDLE) return;
         long p = Pos.pack(pos.getX(), pos.getY(), pos.getZ());
         if (!targets.contains(state.getBlock())) known.remove(p);
+        // uncovered by digging (anti-xray sends the real block once it's next to air): a target now
+        else if (!blacklist.contains(p) && (!settings.antiXray.get() || !hidden.contains(state.getBlock())
+            || exposed(pos.getX(), pos.getY(), pos.getZ()))) known.add(p);
     }
 
     // ---- each tick ----
@@ -293,6 +330,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             case BREAK -> breakTick(mc, player);
             case PICKUP -> pickupTick(mc, player);
             case TRAVEL -> travelTick(mc, player);
+            case SEARCH -> searchTick(mc, player);
             default -> {}
         }
     }
@@ -324,6 +362,11 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         if (left < KEEP / 4 || player.tickCount - lastScan > RESCAN_TICKS) rescan(mc);
         List<Long> next = nearest(player, TRIP_TARGETS);
         if (next.isEmpty()) {
+            if (quantity > 0 && settings.mineSearch.get() && beginSearch(mc, player)) return;
+            if (searched) {
+                finish(Chat.err("Searched {} minutes; no more {} found ({} mined)", settings.searchMinutes.get(), what, mined));
+                return;
+            }
             finish(mined > 0 ? Chat.ok("No more {} in loaded chunks ({} mined)", what, mined)
                 : Chat.err("No reachable {} in loaded chunks", what));
             return;
@@ -333,6 +376,106 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         tripTargets = next;
         BlockPos f = player.blockPosition();
         tripStart = session.start(new GoalAny(goals, what), false, Pos.pack(f.getX(), f.getY(), f.getZ()), true);
+    }
+
+    /** None left in loaded chunks: starts (or goes on) looking for more; false once it's searched long enough. */
+    private boolean beginSearch(Minecraft mc, LocalPlayer player) {
+        if (searchTicks > settings.searchMinutes.get() * 1200) return false;
+        phase = Phase.SEARCH;
+        tripStart = -1;
+        if (!searched) {
+            searched = true;
+            String dim = mc.level.dimension().identifier().getPath();
+            for (Block b : targets) {
+                Integer y = dev.lazuli.core.mine.OreDepth.bestY(BuiltInRegistries.BLOCK.getKey(b).toString(), dim,
+                    mc.level.getMinY(), mc.level.getMaxY());
+                if (y != null && (stripY == null || y < stripY)) stripY = y;
+            }
+            if (stripY != null) {
+                strip = new dev.lazuli.core.mine.StripPattern(net.minecraft.core.Direction.fromYRot(RotationDriver.yaw(player)).get2DDataValue(),
+                    settings.stripLength.get());
+                chat.accept(Chat.info("No {} in sight; strip mining at y {}", what, stripY));
+            } else {
+                chat.accept(Chat.info("No {} in loaded chunks; exploring", what));
+            }
+        }
+        return true;
+    }
+
+    private void stopSearch() {
+        if (legStarted) legDone += tunnel.dug();
+        legStarted = false;
+        tunnel.stop(false);
+        explore.stop(false);
+        searchTrip.cancel();
+    }
+
+    private void searchTick(Minecraft mc, LocalPlayer player) {
+        release();
+        if (++searchTicks > settings.searchMinutes.get() * 1200) {
+            finish(Chat.err("Searched {} minutes without finding {} ({} mined)", settings.searchMinutes.get(), what, mined));
+            return;
+        }
+        // one came into view: mine it (the search goes on from here after)
+        if (player.onGround()) {
+            BlockPos direct = reachable(mc, player);
+            if (direct != null) {
+                stopSearch();
+                beginBreak(direct);
+                return;
+            }
+        }
+        if (searchTicks % 20 == 0) {
+            rescan(mc);
+            if (!nearest(player, 1).isEmpty()) {
+                stopSearch();
+                phase = Phase.TRAVEL;
+                tripStart = -1;
+                return;
+            }
+        }
+        if (stripY == null) {
+            if (!explore.active()) explore.start(mc, null);
+            explore.tick(mc);
+            return;
+        }
+        if (!descended) {
+            if (Math.abs(player.getBlockY() - stripY) <= 2) {
+                descended = true;
+            } else {
+                if (searchTrip.running()) return;
+                PathingSession.State how = searchTrip.ended();
+                searchTrip.clear();
+                if (how == null || how == PathingSession.State.IDLE && ++descents < 3) {
+                    searchTrip.go(new dev.lazuli.core.goal.GoalYLevel(stripY), player);
+                    return;
+                }
+                descended = true; // there, or no way down: strip mine from here
+            }
+        }
+        if (tunnel.active()) {
+            tunnel.tick(mc);
+            return;
+        }
+        if (legStarted) {
+            int d = tunnel.dug();
+            legDone += d;
+            legStarted = false;
+            // the leg's done, or blocked (lava, water, a drop): on to the next one
+            if (legDone >= strip.leg(leg).length() || d == 0) {
+                emptyLegs = d == 0 ? emptyLegs + 1 : 0;
+                if (emptyLegs >= 4) {
+                    finish(Chat.err("Can't strip mine here (blocked every way); {} mined", mined));
+                    return;
+                }
+                leg++;
+                legDone = 0;
+            }
+        }
+        dev.lazuli.core.mine.StripPattern.Leg l = strip.leg(leg);
+        tunnel.start(mc, 2, 1, Math.max(1, l.length() - legDone), net.minecraft.core.Direction.from2DDataValue(l.dir()));
+        legStarted = true;
+        tunnel.tick(mc);
     }
 
     /** Our trip is still being searched for, or walked (a later trip, someone else's or a stop, ends it). */

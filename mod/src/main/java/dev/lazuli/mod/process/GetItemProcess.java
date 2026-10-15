@@ -22,8 +22,9 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * #getitem: plans mine / craft / smelt steps to get an item from what's in the inventory (tools, fuel, crafting table
- * and furnace too), runs the first step with the usual processes, then plans again from the real inventory.
+ * #getitem: plans mine / craft / smelt steps to get items from what's in the inventory (tools, fuel, crafting table
+ * and furnace too), runs the first step with the usual processes, then plans again from the real inventory. Several
+ * items are planned together. Done, it can bring them back somewhere and put them in a chest there.
  */
 public final class GetItemProcess implements Process {
     private static final int MAX_STEPS = 200, SAME_STEP_TRIES = 3;
@@ -31,6 +32,9 @@ public final class GetItemProcess implements Process {
     public enum Outcome { NONE, DONE, FAILED, CANCELLED }
 
     private enum Status { RUNNING, OK, FAILED, CANCELLED }
+
+    /** After getting everything: walking back, putting it away. */
+    private enum Bring { NONE, RETURN, DEPOSIT }
 
     private final Settings settings;
     private final Consumer<String> chat;
@@ -46,11 +50,19 @@ public final class GetItemProcess implements Process {
     private int withdrawBefore;
     private boolean running;
     private Outcome outcome = Outcome.NONE;
-    private String target, lastStep;
-    private int want, steps, repeats;
+    /** What to have: full ids, counts of at least 1. */
+    private List<ItemCount> wants = List.of();
+    private String lastStep;
+    private int steps, repeats;
+    private int[] returnTo;
+    private boolean deposit;
+    private Bring bring = Bring.NONE;
+    private final Trip trip;
     private ItemPlanner.Action current;
 
-    public GetItemProcess(Settings settings, MineProcess mine, CraftProcess crafts, SmeltProcess smelts, Consumer<String> chat) {
+    public GetItemProcess(dev.lazuli.core.session.PathingSession session, Settings settings, MineProcess mine, CraftProcess crafts,
+                          SmeltProcess smelts, Consumer<String> chat) {
+        this.trip = new Trip(session);
         this.settings = settings;
         this.chat = chat;
         this.mine = mine;
@@ -77,8 +89,10 @@ public final class GetItemProcess implements Process {
     @Override
     public String status() {
         if (!running) return null;
-        String s = "Get " + want + " " + name(target);
-        if (withdrawAt != null) s += "  taking " + name(withdrawItem) + " from a chest";
+        String s = "Get " + describe(wants);
+        if (bring == Bring.RETURN) s += "  bringing it back";
+        else if (bring == Bring.DEPOSIT) s += "  putting it away";
+        else if (withdrawAt != null) s += "  taking " + name(withdrawItem) + " from a chest";
         else if (current != null) s += "  step " + (done + 1) + "/" + (done + planned) + ": " + verb(current) + " " + current.count() + " " + name(current.item());
         return s;
     }
@@ -92,17 +106,25 @@ public final class GetItemProcess implements Process {
         return outcome;
     }
 
-    /** Gets {@code item} until the inventory holds at least {@code count} (a negative count: 1). */
-    public void start(Minecraft mc, ItemCount item) {
+    /** Gets each item until the inventory holds at least its count (a negative count: 1), then brings them back if asked. */
+    public void start(Minecraft mc, dev.lazuli.core.craft.ItemRequest request) {
         stop(false);
         outcome = Outcome.NONE;
-        target = Inventories.id(item.item());
-        want = Math.max(1, item.count());
-        Identifier id = Identifier.tryParse(target);
-        if (id == null || BuiltInRegistries.ITEM.getOptional(id).isEmpty()) {
-            end(Outcome.FAILED, Chat.err("Unknown item: {}", item.item()));
-            return;
+        java.util.Map<String, Integer> merged = new java.util.LinkedHashMap<>();
+        for (ItemCount i : request.items()) {
+            String t = Inventories.id(i.item());
+            Identifier id = Identifier.tryParse(t);
+            if (id == null || BuiltInRegistries.ITEM.getOptional(id).isEmpty()) {
+                end(Outcome.FAILED, Chat.err("Unknown item: {}", i.item()));
+                return;
+            }
+            merged.merge(t, Math.max(1, i.count()), Integer::sum);
         }
+        wants = merged.entrySet().stream().map(e -> new ItemCount(e.getKey(), e.getValue())).toList();
+        returnTo = request.returnTo();
+        deposit = request.deposit();
+        bring = Bring.NONE;
+        trip.clear();
         RecipeData.get();
         RecipeData.drops();
         running = true;
@@ -110,7 +132,22 @@ public final class GetItemProcess implements Process {
         lastStep = null;
         steps = repeats = 0;
         done = planned = 0;
-        chat.accept(Chat.ok("Getting {} {}", want, name(target)));
+        chat.accept(Chat.ok("Getting {}", describe(wants)));
+    }
+
+    /** "3 diamond" or "2 items: iron_pickaxe, 16 torch". */
+    private static String describe(List<ItemCount> items) {
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        for (ItemCount i : items) parts.add((i.count() > 1 ? i.count() + " " : "") + name(i.item()));
+        String all = String.join(", ", parts);
+        if (items.size() == 1) return items.get(0).count() + " " + name(items.get(0).item());
+        return all.length() > 40 ? items.size() + " items" : all;
+    }
+
+    /** The first wanted item there isn't enough of yet, or null when it has everything. */
+    private ItemCount missing(LocalPlayer p) {
+        for (ItemCount w : wants) if (count(p, w.item()) < w.count()) return w;
+        return null;
     }
 
     @Override
@@ -123,7 +160,8 @@ public final class GetItemProcess implements Process {
                 case SMELT -> smelts.stop(false);
             }
         }
-        if (withdrawAt != null) containers.stop(false);
+        if (withdrawAt != null || bring == Bring.DEPOSIT) containers.stop(false);
+        trip.cancel();
         end(Outcome.CANCELLED, announce ? Chat.warn("Stopped") : null);
     }
 
@@ -131,6 +169,10 @@ public final class GetItemProcess implements Process {
     public void tick(Minecraft mc) {
         if (!running) return;
         LocalPlayer p = mc.player;
+        if (bring != Bring.NONE) {
+            bringTick(mc, p);
+            return;
+        }
         if (withdrawAt != null) {
             if (containers.active()) return;
             if (containers.outcome() == ContainerProcess.Outcome.CANCELLED) {
@@ -150,7 +192,7 @@ public final class GetItemProcess implements Process {
                     return;
                 }
                 case FAILED -> {
-                    end(Outcome.FAILED, Chat.err("Couldn't {} {}: stuck getting {}", verb(current), name(current.item()), name(target)));
+                    end(Outcome.FAILED, Chat.err("Couldn't {} {}: stuck getting {}", verb(current), name(current.item()), describe(wants)));
                     return;
                 }
                 case CANCELLED -> {
@@ -163,12 +205,13 @@ public final class GetItemProcess implements Process {
                 }
             }
         }
-        if (count(p, target) >= want) {
-            end(Outcome.DONE, Chat.ok("Got {} {}", want, name(target)));
+        ItemCount need = missing(p);
+        if (need == null) {
+            got(mc, p);
             return;
         }
         if (p.containerMenu != p.inventoryMenu) return; // a step's menu still closing
-        if (withdraw(mc, p, target, want - count(p, target))) return;
+        for (ItemCount w : wants) if (withdraw(mc, p, w.item(), w.count() - count(p, w.item()))) return;
         Recipes recipes = RecipeData.get().getNow(null);
         Drops drops = RecipeData.drops().getNow(null);
         if (recipes == null || drops == null) return; // still reading the game's data
@@ -178,16 +221,18 @@ public final class GetItemProcess implements Process {
         }
         ItemPlanner planner = new ItemPlanner(recipes, drops, GetItemProcess::tier, SmeltProcess.burn(mc), smelts.fuels(),
             new ItemPlanner.Rules(settings.getItemMine.get(), settings.getItemSmelt.get(),
-                settings.craftPlaceTable.get() && settings.allowPlace.get(), settings.smeltPlaceFurnace.get() && settings.allowPlace.get()));
+                settings.craftPlaceTable.get() && settings.allowPlace.get(), settings.smeltPlaceFurnace.get() && settings.allowPlace.get()))
+            .batching(settings.getItemBatch.get());
+        if (settings.getItemNearby.get()) planner.nearby(Nearby.scan(mc, settings.antiXray.get()));
         int range = settings.stationRange.get();
-        ItemPlanner.Plan plan = planner.plan(target, want, Inventories.plainCounts(p), pickTier(p),
+        ItemPlanner.Plan plan = planner.plan(wants, Inventories.plainCounts(p), pickTier(p),
             Station.nearest(mc, p, Blocks.CRAFTING_TABLE, range) != null, Station.nearest(mc, p, Blocks.FURNACE, range) != null);
         if (!plan.ok()) {
-            end(Outcome.FAILED, Chat.err("Can't get {}: {}", name(target), plan.problem()));
+            end(Outcome.FAILED, Chat.err("Can't get {}: {}", describe(wants), plan.problem()));
             return;
         }
         if (plan.actions().isEmpty()) {
-            end(Outcome.FAILED, Chat.err("Nothing left to do, but there's no {} (only enchanted or damaged ones?)", name(target)));
+            end(Outcome.FAILED, Chat.err("Nothing left to do, but there's no {} (only enchanted or damaged ones?)", name(need.item())));
             return;
         }
         dev.lazuli.mod.control.Tools.keep("getitem", plan.keep());
@@ -209,6 +254,51 @@ public final class GetItemProcess implements Process {
             case MINE -> mine.start(mc, a.count(), a.blocks());
             case CRAFT -> crafts.start(mc, List.of(new ItemCount(a.item(), a.count())));
             case SMELT -> smelts.start(mc, new ItemCount(a.item(), a.count()), true);
+        }
+    }
+
+    /** Has everything: done, or off to bring it back / put it away first. */
+    private void got(Minecraft mc, LocalPlayer p) {
+        String what = describe(wants);
+        if (returnTo != null) {
+            chat.accept(Chat.ok("Got {}; bringing it back", what));
+            bring = Bring.RETURN;
+            trip.go(new dev.lazuli.core.goal.GoalBlock(returnTo[0], returnTo[1], returnTo[2]), p, true);
+        } else if (deposit) {
+            putAway(mc);
+        } else {
+            end(Outcome.DONE, Chat.ok("Got {}", what));
+        }
+    }
+
+    private void putAway(Minecraft mc) {
+        bring = Bring.DEPOSIT;
+        containers.start(mc, true, wants, null);
+        if (!containers.active()) end(Outcome.FAILED, Chat.err("Got {}, but there's no chest here to put it in", describe(wants)));
+    }
+
+    private void bringTick(Minecraft mc, LocalPlayer p) {
+        if (bring == Bring.RETURN) {
+            if (trip.running()) return;
+            var how = trip.ended();
+            trip.clear();
+            if (how == dev.lazuli.core.session.PathingSession.State.IDLE) {
+                end(Outcome.CANCELLED, null);
+                return;
+            }
+            if (how == dev.lazuli.core.session.PathingSession.State.FAILED) {
+                end(Outcome.FAILED, Chat.err("Got {}, but couldn't get back", describe(wants)));
+                return;
+            }
+            if (deposit) putAway(mc);
+            else end(Outcome.DONE, Chat.ok("Got {} and brought it back", describe(wants)));
+            return;
+        }
+        if (containers.active()) return;
+        switch (containers.outcome()) {
+            case DONE -> end(Outcome.DONE, Chat.ok("Got {} and put it away", describe(wants)));
+            case CANCELLED -> end(Outcome.CANCELLED, null);
+            default -> end(Outcome.FAILED, Chat.err("Got {}, but couldn't put it away", describe(wants)));
         }
     }
 
@@ -256,6 +346,7 @@ public final class GetItemProcess implements Process {
         running = false;
         outcome = how;
         current = null;
+        bring = Bring.NONE;
         if (msg != null) chat.accept(msg);
     }
 

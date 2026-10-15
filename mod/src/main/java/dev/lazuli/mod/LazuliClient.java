@@ -128,7 +128,7 @@ public final class LazuliClient implements ClientModInitializer {
 		containers = new ContainerProcess(session, settings, clicks, this::chat);
 		crafts = new CraftProcess(session, settings, clicks, this::chat);
 		smelts = new SmeltProcess(session, settings, clicks, crafts, this::chat);
-		getItem = new GetItemProcess(settings, mine, crafts, smelts, this::chat);
+		getItem = new GetItemProcess(session, settings, mine, crafts, smelts, this::chat);
 		getItem.useChests(containers, this::chests, LazuliClient::dimension);
 		chestWatcher = new dev.lazuli.mod.inventory.ChestWatcher(settings.chestMemory::get, this::chests, LazuliClient::dimension);
 		RecipeData.drops();
@@ -244,9 +244,9 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
-			public void getItem(ItemCount item) {
+			public void getItem(dev.lazuli.core.craft.ItemRequest request) {
 				LazuliClient.this.stopProcesses(false);
-				getItem.start(Minecraft.getInstance(), item);
+				getItem.start(Minecraft.getInstance(), request);
 			}
 
 			@Override
@@ -436,7 +436,7 @@ public final class LazuliClient implements ClientModInitializer {
 		public Task getItem(String item, int count) {
 			return tasks.run(() -> {
 				stopProcesses(false);
-				getItem.start(Minecraft.getInstance(), new ItemCount(item, count));
+				getItem.start(Minecraft.getInstance(), dev.lazuli.core.craft.ItemRequest.of(item, count));
 				return new Task("get " + item, () -> switch (getItem.outcome()) {
 					case NONE -> null;
 					case DONE -> Task.Result.DONE;

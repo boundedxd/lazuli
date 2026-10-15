@@ -67,8 +67,9 @@ class CommandTest {
             public void smeltCollect() {
                 mined.add("collect");
             }
-            public void getItem(ItemCount item) {
-                mined.add("get " + item);
+            public void getItem(dev.lazuli.core.craft.ItemRequest r) {
+                mined.add("get " + r.items() + (r.returnTo() == null ? "" : " to " + r.returnTo()[0] + " " + r.returnTo()[1] + " " + r.returnTo()[2])
+                    + (r.deposit() ? " deposit" : ""));
             }
             public int[] cameraFeet() { return new int[]{12, 1, 7}; }
             public void toggleFreecam() { mined.add("freecam"); }
@@ -183,11 +184,33 @@ class CommandTest {
     }
 
     @Test
-    void getItemTakesOneItem() {
+    void getItemTakesItemsSetsAndWhereToBringThem() {
         CommandHandler h = handler();
-        for (String c : new String[]{"#getitem iron_pickaxe", "#getitem Torch 16", "#getitem", "#getitem a 1 b 2"}) h.handle(c);
-        assertEquals(List.of("get iron_pickaxe -1", "get torch 16"), mined);
-        assertEquals(2, replies.size(), replies.toString());
+        waypoints.set("home", "overworld", 50, 70, -20);
+        for (String c : new String[]{"#getitem iron_pickaxe", "#getitem Torch 16", "#getitem a 1 b 2", "#get iron_tools",
+            "#getitem diamond_armor 2", "#getitem diamond 5 then back", "#getitem diamond then home deposit",
+            "#getitem coal then deposit", "#getitem stone_gear"}) h.handle(c);
+        assertEquals(List.of("get [iron_pickaxe -1]", "get [torch 16]", "get [a 1, b 2]",
+            "get [iron_pickaxe -1, iron_axe -1, iron_shovel -1, iron_sword -1]",
+            "get [diamond_helmet 2, diamond_chestplate 2, diamond_leggings 2, diamond_boots 2]",
+            "get [diamond 5] to 0 1 0", "get [diamond -1] to 50 70 -20 deposit", "get [coal -1] deposit",
+            "get [stone_pickaxe -1, stone_axe -1, stone_shovel -1, stone_sword -1]"), mined);
+        assertTrue(replies.isEmpty() || replies.stream().noneMatch(r -> r.startsWith("Usage")), replies.toString());
+        mined.clear();
+        for (String c : new String[]{"#getitem", "#getitem diamond then nowhere", "#getitem then back", "#getitem 5 diamond"}) h.handle(c);
+        assertTrue(mined.isEmpty(), mined.toString());
+        assertEquals(4, replies.size(), replies.toString());
+        assertTrue(replies.get(1).contains("nowhere"), replies.toString());
+    }
+
+    @Test
+    void itemSetsExpand() {
+        assertEquals(List.of("minecraft:golden_helmet", "minecraft:golden_chestplate", "minecraft:golden_leggings", "minecraft:golden_boots"),
+            dev.lazuli.core.craft.ItemSets.expand("minecraft:gold_armor"));
+        assertEquals(8, dev.lazuli.core.craft.ItemSets.expand("iron_gear").size());
+        assertEquals(4, dev.lazuli.core.craft.ItemSets.expand("wood_tools").size());
+        assertNull(dev.lazuli.core.craft.ItemSets.expand("iron_pickaxe"));
+        assertNull(dev.lazuli.core.craft.ItemSets.expand("stone_armor"));
     }
 
     @Test

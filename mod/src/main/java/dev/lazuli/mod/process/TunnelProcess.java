@@ -52,13 +52,23 @@ public final class TunnelProcess implements Process {
         return active;
     }
 
+    /** Blocks dug forward so far. */
+    public int dug() {
+        return step;
+    }
+
     /** @param depth blocks to dig, or 0 for no end */
     public void start(Minecraft mc, int height, int width, int depth) {
+        start(mc, height, width, depth, Direction.fromYRot(RotationDriver.yaw(mc.player)));
+    }
+
+    /** Digs toward {@code dir} instead of the way the player faces. */
+    public void start(Minecraft mc, int height, int width, int depth, Direction dir) {
         LocalPlayer p = mc.player;
         this.height = height;
         this.width = width;
         this.depth = depth;
-        dir = Direction.fromYRot(RotationDriver.yaw(p));
+        this.dir = dir;
         origin = p.blockPosition();
         step = 0;
         stuck = 0;

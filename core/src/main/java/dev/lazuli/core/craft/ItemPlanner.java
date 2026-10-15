@@ -1,5 +1,7 @@
 package dev.lazuli.core.craft;
 
+import dev.lazuli.core.inventory.ItemCount;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -56,6 +58,8 @@ public final class ItemPlanner {
     private final ToIntFunction<String> toolTier, burn;
     private final List<String> fuels;
     private final Rules rules;
+    private boolean batching;
+    private ToIntFunction<String> near;
 
     /**
      * @param toolTier for a block id, the pickaxe tier it needs to drop anything (0: none)
@@ -73,6 +77,24 @@ public final class ItemPlanner {
     }
 
     /**
+     * Shorter plans: what's crafted in several steps (planks, sticks...) is crafted all at once in the first of them,
+     * where the inventory allows it then.
+     */
+    public ItemPlanner batching(boolean on) {
+        batching = on;
+        return this;
+    }
+
+    /**
+     * Prefer blocks that are around: for a block id, above 0 if some are in the loaded world, 0 if none are, below 0 if
+     * it can't tell (ores behind anti-xray).
+     */
+    public ItemPlanner nearby(ToIntFunction<String> near) {
+        this.near = near;
+        return this;
+    }
+
+    /**
      * Steps to have at least {@code count} of {@code item}.
      *
      * @param have        plain items in the inventory
@@ -81,13 +103,73 @@ public final class ItemPlanner {
      * @param furnaceNear a furnace is near
      */
     public Plan plan(String item, int count, Map<String, Integer> have, int pickTier, boolean tableNear, boolean furnaceNear) {
+        return plan(List.of(new ItemCount(item, count)), have, pickTier, tableNear, furnaceNear);
+    }
+
+    /** Steps to have all of these (a negative count: 1), planned together so they share steps. */
+    public Plan plan(List<ItemCount> wants, Map<String, Integer> have, int pickTier, boolean tableNear, boolean furnaceNear) {
         Run r = new Run(have, pickTier, tableNear, furnaceNear);
         try {
-            r.get(item, count, 0);
-            return new Plan(List.copyOf(r.actions), null, Map.copyOf(r.keep));
+            for (ItemCount w : wants) {
+                int n = Math.max(1, w.count());
+                r.get(w.item(), n, 0);
+                r.reserve(w.item(), n); // one item's share isn't spent on the next
+            }
+            List<Action> actions = batching ? batch(r.actions, have, wants) : List.copyOf(r.actions);
+            return new Plan(actions, null, Map.copyOf(r.keep));
         } catch (Stuck e) {
             return new Plan(List.of(), e.getMessage());
         }
+    }
+
+    /** Each later craft of an item folded into its first craft, where the steps still work out that way. */
+    private List<Action> batch(List<Action> actions, Map<String, Integer> have, List<ItemCount> wants) {
+        List<Action> out = new ArrayList<>(actions);
+        for (int i = 0; i < out.size(); i++) {
+            if (out.get(i).kind() != Kind.CRAFT) continue;
+            for (int j = i + 1; j < out.size(); j++) {
+                Action a = out.get(i), b = out.get(j);
+                if (b.kind() != Kind.CRAFT || !b.item().equals(a.item())) continue;
+                List<Action> t = new ArrayList<>(out);
+                t.set(i, new Action(Kind.CRAFT, a.item(), a.count() + b.count(), List.of()));
+                t.remove(j);
+                if (works(t, have, wants)) {
+                    out = t;
+                    j--;
+                }
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    /** Whether the steps, done in order from {@code have}, can each be done and end with everything wanted. */
+    private boolean works(List<Action> actions, Map<String, Integer> have, List<ItemCount> wants) {
+        Map<String, Integer> inv = new HashMap<>(have);
+        for (Action a : actions) {
+            switch (a.kind()) {
+                case MINE -> inv.merge(a.item(), a.count(), Integer::sum);
+                case CRAFT -> {
+                    CraftTree.Result res = CraftTree.resolve(recipes, a.item(), a.count(), inv, true);
+                    if (!res.ok()) return false;
+                    Map<String, Integer> left = new HashMap<>(res.left());
+                    inv.clear();
+                    inv.putAll(left);
+                }
+                case SMELT -> {
+                    String in = null;
+                    for (SmeltRecipe r : recipes.smelting(a.item()))
+                        for (String o : r.input()) if (in == null && inv.getOrDefault(o, 0) >= a.count()) in = o;
+                    if (in == null) return false;
+                    inv.merge(in, -a.count(), Integer::sum);
+                    Map<String, Integer> fuel = Smelting.fuel(fuels, inv, burn, a.count());
+                    if (fuel == null) return false;
+                    fuel.forEach((f, k) -> inv.merge(f, -k, Integer::sum));
+                    inv.merge(a.item(), a.count(), Integer::sum);
+                }
+            }
+        }
+        for (ItemCount w : wants) if (inv.getOrDefault(w.item(), 0) < Math.max(1, w.count())) return false;
+        return true;
     }
 
     private static final class Stuck extends RuntimeException {
@@ -411,9 +493,16 @@ public final class ItemPlanner {
             for (String b : mineable(item)) {
                 int t = toolTier.applyAsInt(b);
                 double tool = t > pickTier ? t < PICKS.length ? cost(PICKS[t], depth + 1) : INF : 0;
-                best = Math.min(best, Drops.abundance(b) + tool);
+                best = Math.min(best, Drops.abundance(b) * nearFactor(b) + tool);
             }
             return best;
+        }
+
+        /** Blocks around are quicker to get than ones it has to go and look for. */
+        double nearFactor(String block) {
+            if (near == null) return 1;
+            int n = near.applyAsInt(block);
+            return n > 0 ? 0.5 : n == 0 ? 3 : 1;
         }
 
         double smeltCost(String item, int depth) {

@@ -98,7 +98,11 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
 3. `#getitem <item> [count]` — DONE, **not yet tested in game**. `core/craft/ItemPlanner` (cheapest of mine / smelt /
    craft per item by rough cost, tool tiers, fuel, table/furnace; `Drops` = block loot tables, `abundance` table) and
    `mod/process/GetItemProcess` (runs the first step via MineProcess/CraftProcess/SmeltProcess, replans from the real
-   inventory each step). Count = how many to *have*. Mining only searches loaded chunks (no explore yet).
+   inventory each step). Count = how many to *have*. Several items / sets (`iron_tools`, `diamond_armor`, `iron_gear`:
+   `core/craft/ItemSets`) are planned together; `then back|<waypoint> [deposit]` brings them back (`ItemRequest`).
+   `getItemBatch` folds repeated crafts into one, `getItemNearby` prefers blocks loaded around (`mod/process/Nearby`).
+   MineProcess with none found (`mineSearch`): strip-mines at `core/mine/OreDepth` best Y (`StripPattern`, via an inner
+   TunnelProcess) or explores; `antiXray` only trusts ores next to air.
 4. Water bucket clutch, boat clutch, auto boats over X water blocks (needs boat physics), minecarts.
 5. Villager trading, chat/command use.
 6. Extras approved: stash/chest memory, nether travel, survival safety (flee/fight, low-HP retreat, sleep, `#back`),

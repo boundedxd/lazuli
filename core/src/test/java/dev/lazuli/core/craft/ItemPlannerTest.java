@@ -196,4 +196,44 @@ class ItemPlannerTest {
         assertFalse(pick.ok());
         assertTrue(pick.problem().contains("crafting table"), pick.problem());
     }
+
+    @Test
+    void severalItemsInOnePlan() {
+        ItemPlanner.Plan both = planner().plan(List.of(new dev.lazuli.core.inventory.ItemCount("minecraft:wooden_pickaxe", 1),
+            new dev.lazuli.core.inventory.ItemCount("minecraft:stick", 8)), Map.of(), 0, true, true);
+        assertTrue(both.ok(), both.toString());
+        // the logs for both in one go
+        assertEquals(1, both.actions().stream().filter(a -> a.kind() == ItemPlanner.Kind.MINE).count(), both.toString());
+        ItemPlanner.Plan pick = planner().plan("minecraft:wooden_pickaxe", 1, Map.of(), 0, true, true);
+        assertTrue(both.actions().get(0).count() > pick.actions().get(0).count(), both.toString());
+        assertTrue(both.keep().get("minecraft:stick") >= 8, both.toString());
+        // what it has of one isn't spent on the other: 4 sticks are kept for the pick, 8 more wanted
+        ItemPlanner.Plan have = planner().plan(List.of(new dev.lazuli.core.inventory.ItemCount("minecraft:stick", 4),
+            new dev.lazuli.core.inventory.ItemCount("minecraft:wooden_pickaxe", 1)), Map.of("minecraft:stick", 4, "minecraft:oak_planks", 3), 0, true, true);
+        assertTrue(have.ok(), have.toString());
+        assertTrue(have.actions().stream().anyMatch(a -> a.item().equals("minecraft:stick")), have.toString());
+    }
+
+    @Test
+    void batchingCraftsEachThingOnce() {
+        ItemPlanner.Plan plain = planner().plan("minecraft:iron_pickaxe", 1, Map.of(), 0, false, false);
+        ItemPlanner.Plan batched = planner().batching(true).plan("minecraft:iron_pickaxe", 1, Map.of(), 0, false, false);
+        assertTrue(batched.ok(), batched.toString());
+        assertTrue(batched.actions().size() < plain.actions().size(), batched + " vs " + plain);
+        for (String item : new String[]{"minecraft:oak_planks", "minecraft:stick"}) {
+            assertEquals(1, batched.actions().stream().filter(a -> a.kind() == ItemPlanner.Kind.CRAFT && a.item().equals(item)).count(),
+                batched.toString());
+        }
+        assertEquals("minecraft:iron_pickaxe", batched.actions().get(batched.actions().size() - 1).item());
+    }
+
+    @Test
+    void prefersBlocksThatAreNearby() {
+        ItemPlanner.Plan p = planner().nearby(b -> b.equals("minecraft:birch_log") ? 1 : 0)
+            .plan("minecraft:wooden_pickaxe", 1, Map.of(), 0, true, true);
+        assertEquals(List.of("minecraft:birch_log"), p.actions().get(0).blocks(), p.toString());
+        // none of either near: any will do, as before
+        ItemPlanner.Plan q = planner().nearby(b -> 0).plan("minecraft:wooden_pickaxe", 1, Map.of(), 0, true, true);
+        assertEquals(2, q.actions().get(0).blocks().size(), q.toString());
+    }
 }
