@@ -82,88 +82,32 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
 ## User preferences (important)
 - Talks casually; wants short answers and **one short plan, not many** ("DONT WRITE 1293 PLANS FOR ONE THING").
 - **At most ONE Sonnet subagent** if any.
-- Don't over-optimize planning speed; ask before long benchmarks; don't build `#sel`/`#build` yet.
+- Don't over-optimize planning speed; ask before long benchmarks.
 - Everything must be toggleable in config.
 
-## Roadmap (the "mission"), in order — status
-1. Eagle bridge — DONE. Tasks + public API + config tabs — DONE. Inventory clicks, `#drop`, `#deposit`/`#withdraw`
-   (chests single/double, barrels, shulkers, ender chests) — DONE, tested in game; multi-item (`#drop chest 1 oak_log 3`).
-2. Crafting — DONE, **not yet tested in game**: `#craft item [count]...`. Vanilla recipes + item tags are read from
-   the game jar (`mod/craft/RecipeData`, `VanillaPackResources`; servers only send unlocked recipes). `CraftProcess`:
-   2x2 in the inventory (clicks on menu 0, no screen), else walks to / places a crafting table.
-   Smelting — DONE, **not yet tested in game**: `#smelt item [count]`, `#smelt collect`. `core/craft/Smelting`
-   (job: input/fast furnace, fuel plan from the `smeltFuels` list), `mod/process/SmeltProcess`; `Station` = shared
-   find/place/walk/open for crafting tables and furnaces. `openInventory` toggle: `ClickDriver` stands still and opens
-   the inventory screen for own-inventory clicks (tool/armor swaps, #drop, 2x2 crafting).
-3. `#getitem <item> [count]` — DONE, **not yet tested in game**. `core/craft/ItemPlanner` (cheapest of mine / smelt /
-   craft per item by rough cost, tool tiers, fuel, table/furnace; `Drops` = block loot tables, `abundance` table) and
-   `mod/process/GetItemProcess` (runs the first step via MineProcess/CraftProcess/SmeltProcess, replans from the real
-   inventory each step). Count = how many to *have*. Several items / sets (`iron_tools`, `diamond_armor`, `iron_gear`:
-   `core/craft/ItemSets`) are planned together; `then back|<waypoint> [deposit]` brings them back (`ItemRequest`).
-   `getItemBatch` folds repeated crafts into one, `getItemNearby` prefers blocks loaded around (`mod/process/Nearby`).
-   MineProcess with none found (`mineSearch`): strip-mines at `core/mine/OreDepth` best Y (`StripPattern`, via an inner
-   TunnelProcess) or explores; `antiXray` only trusts ores next to air.
-4. Water bucket clutch, boat clutch, auto boats over X water blocks (needs boat physics), minecarts.
-5. Villager trading — DONE, **not yet tested in game**: `#trade sharpness 5 mending bread 20`, `#trade list|scan|forget`.
-   `core/trade` (`TradeMemory` file per world like chests, `TradePlanner`: cheapest offers, sells things for emeralds
-   when short `tradeForEmeralds`, gathers what trades cost), `mod/inventory/TradeWatcher` (records offers whenever a
-   trading screen opens, by hand too), `mod/process/TradeProcess` (scan unknown villagers, walk, open, select trade,
-   take result; `tradeLootChests` opens chests near the buyers). #getitem trades when it's the only way or cheaper
-   (`getItemTrade`). Boats: `core/move/Boating` (where a 1.375-wide boat fits, a route wide enough, spin-aware steering).
-   Chat/command use: not yet.
-6. Extras approved: stash/chest memory, nether travel, survival safety (flee/fight, low-HP retreat, sleep, `#back`),
-   waypoints.
-Backlog: neo rework (double/triple neos, edge/run-up starts), parkour onto open trapdoors/fence 3-gap,
-TraceRecorder should record sneak/pitch.
+## Goal
+A legit-looking, fast Baritone replacement that can do whole survival jobs on its own: get any item from scratch
+(mine, craft, smelt, trade, hunt, brew, enchant), move items between chests, travel (walk, parkour, bridge, boat,
+elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
 
-## Handoff (2026-10-16)
-Trading tested in game and works; the config-stops-pathing bug is fixed.
-Newest (built, deployed, pushed, suite green, NOT tested in game):
-- **Chests for #getitem/#brew** — `chestFinal` (take the finished item from a remembered chest) and `chestIngredients`
-  (take materials/ingredients; #brew's #getitem runs with `forIngredients`), replacing `getItemChests`. `mod/process/ChestTake`
-  (shared take-from-nearest-remembered-chest). Potions are remembered as `minecraft:potion@minecraft:swiftness` too
-  (`core/inventory/ItemKeys`, `Inventories.key` adds `@potion`), so #brew can take finished bottles.
-- **Stuck fix** — `LazyDStarLite`: a NaN edge cost counts as impassable (it kept a node inconsistent and burned whole
-  search budgets), plan loops check cancel/deadline. Unstick (`unstickRestart`) no longer #kills + reruns the job (that
-  made #getitem re-get items): `LazuliClient.freshWorker` swaps the planner thread (logs its stack if it was busy) and
-  `PathingSession.restart` plans the same trip again under the same trip number, so processes carry on.
-- **#brew <potion> [count] [splash|lingering]** — `core/craft/Brewing` (vanilla mix table, shortest route from water or a
-  potion on hand), `mod/process/BrewProcess` (fills glass bottles at water, crafts bottles/stand, #getitem for missing
-  ingredients `brewGather`, `brewPlaceStand`).
-- **#enchant <item> [count] [1|2|3]**, **#repair <item>**, **#combine <item> <with>** — `core/craft/Enchanting`,
-  `mod/process/EnchantProcess` (table/anvil via `Station`, which now takes a block predicate; `enchantPlace`).
-- **#fly <x z | x y z | wp>**, far #goto flies (`elytraGoto`, `elytraMinDistance`, `elytraHeight`, `elytraSwapBack`) —
-  `core/physics/ElytraSim` (vanilla glide + rocket), `core/control/ElytraPilot` (MPC over pitches/fire, tested in
-  `ElytraPilotTest`), `mod/process/ElytraProcess` (equip, jump-jump takeoff, fly, land, walk the rest). Guard and
-  Upkeep stay out of the way while fall flying.
+## Where features live (command -> code)
+- `#goto`/`#path` -> PathingSession + PathExecutor (above). Far `#goto` may fly: `mod/process/ElytraProcess`,
+  `core/control/ElytraPilot`, `core/physics/ElytraSim`.
+- `#mine` -> `mod/control/MineProcess` (strip-mines at `core/mine/OreDepth` via TunnelProcess when none known).
+- `#deposit`/`#withdraw`/`#drop`/`#find` -> `mod/process/ContainerProcess`, chest memory `core/storage/ChestMemory`
+  + `mod/inventory/ChestWatcher`; taking from remembered chests for other jobs: `mod/process/ChestTake`.
+- `#craft` -> `mod/process/CraftProcess` + `core/craft/CraftTree`/`Crafter`; recipes from the game jar `mod/craft/RecipeData`.
+- `#smelt` -> `mod/process/SmeltProcess` + `core/craft/Smelting`. Tables/furnaces/stands/anvils: `mod/process/Station`.
+- `#getitem` -> `mod/process/GetItemProcess` + `core/craft/ItemPlanner` (mine/smelt/craft/trade/kill steps, `Drops`,
+  `MobDrops`, `ItemSets`, `ItemRequest`).
+- `#trade` -> `mod/process/TradeProcess`, `core/trade/*`, `mod/inventory/TradeWatcher`.
+- `#brew` -> `mod/process/BrewProcess` + `core/craft/Brewing`. `#enchant`/`#repair`/`#combine` -> `mod/process/EnchantProcess`
+  + `core/craft/Enchanting`.
+- Boats -> `core/move/Boating`, `mod/control/BoatRider`. Water clutch -> `mod/control/Clutch`.
+- Safety -> `mod/process/Guard` (creepers, fight, low HP), `Upkeep` (eat, armor), `SleepProcess`.
+- Others: Follow, Explore, Tunnel, Farm, Hunt processes in `mod/process/`; chat commands from other players `mod/ChatControl`.
+- Item keys (`minecraft:dirt#hash`, potions `@minecraft:swiftness`) -> `core/inventory/ItemKeys`, `mod/inventory/Inventories`.
 
-Older (2026-10-15): crafting, smelting, #getitem, boats tested in game and work.
-Restart the game after every deploy: copying the jar over a running game crashes it on the next class load
-(`ZipFile invalid LOC header`).
-
-Newest work (built, deployed, pushed, suite green, NOT tested in game):
-- **Water clutch** — `mod/control/Clutch` (falling > 3.5 with a water bucket: pitch 90, place on the ground top when
-  in reach, scoop back up: `waterClutch`, `clutchPickup`). Planner: `MoveGraph.withClutch(n)` allows drops up to
-  `clutchFallHeight` onto ground (+`CLUTCH_PENALTY`); `PathingSession.setClutchFall` (set each tick from
-  `PathExecutor` when a bucket is at hand; a change rebuilds). Not in the nether.
-- **Defend** — `Guard` Danger.FIGHT (`defend`): monster within 3 blocks while busy -> stop, aim, full-cooldown hits
-  with best sword/axe; skips creepers/endermen/piglins.
-- **Sorted deposit** — `ContainerProcess` (`depositSorted`): each item to a remembered chest that has it
-  (within `chestRange`), rest to the nearest; `all` split per item.
-- **Stations** — `Station` places its own table/furnace when carrying one and the known one is > 8 blocks or
-  unreachable; picks up what it placed after #craft/#smelt (`pickupStations`; furnace only if a pickaxe).
-- #getitem counts worn armor/offhand/damaged copies (no re-making after a restart); mining down keeps pitch;
-  boat placing swims up first.
-
-- **Trade extras** — `#trade sell <item> [count|all]` (`TradePlanner.sell`, best emeralds/item first),
-  `#trade find <what>` (`TradePlanner.find`), restock wait (`tradeRestockMinutes`: partial plan `Plan.soldOut`, phase
-  RESTOCK re-opens the sellers every minute). `mod/ChatControl` (`chatControl`, `chatControlPlayers`): listed players
-  run commands by chat/whisper (signed chat sender, or `<name> text` / `name whispers to you:` game lines).
-
-- **Hunting** — `core/craft/MobDrops` (entity loot tables: per-kill average; `rarity` table, nether/end = UNKNOWN),
-  `ItemPlanner.Kind.KILL` (`mobs(...)`, `killCost` = rarity / perKill), `mod/process/HuntProcess` (nearest grown mob,
-  `Melee` shared with `Guard`, picks up drops, wanders when none; `getItemHunt`, `huntMinutes`). `#follow <who> [dist]`.
-
-Next up: boat-aware pathing (user said skip for now),
-smarter #farm, mob farming, `#sel fill/clear`.
-Vanilla source when needed: decompile from the loom jar with vineflower (in `~/.gradle/caches/modules-2`).
+## More gotchas
+- Restart the game after every deploy: copying the jar over a running game crashes it on the next class load.
+- Vanilla source when needed: decompile from the loom jar with vineflower (in `~/.gradle/caches/modules-2`).
