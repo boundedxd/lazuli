@@ -125,7 +125,7 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
 - `#sort` -> `core/storage/SortPlan`, `mod/process/SortProcess` (reads each box via `ContainerProcess.onOpen`).
 - Shulker boxes -> `mod/process/ShulkerUnpack` (place, take, pick up; `Station.startPlaced`), chest memory names
   `shulker>id` (`ItemKeys.inShulker`); used through `ChestTake`. Restock -> `core/inventory/Restock`,
-  `mod/process/RestockProcess` (pauses the job like Guard).
+  `mod/process/RestockProcess` (pauses the job like Guard; per-thing toggles in `Settings.restockSpec`, own Restock tab).
 
 ## More gotchas
 - Restart the game after every deploy: copying the jar over a running game crashes it on the next class load.

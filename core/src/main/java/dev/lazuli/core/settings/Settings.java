@@ -138,9 +138,43 @@ public final class Settings {
     public final Setting<Boolean> selEnabled = bool("selEnabled", true);
     /** While a job runs, tops up {@link #restockItems} from known chests (or shulker boxes) when under half. */
     public final Setting<Boolean> restock = bool("restock", true);
-    /** item:amount, or a group (food, pickaxe, axe, shovel, sword, blocks = the throwaway blocks). */
-    public final Setting<String> restockItems = register(new Setting<>("restockItems", "food:16,pickaxe:1,torch:16,blocks:64",
+    /** Each thing restocked, on or off (tools: keep one), with how many to keep for the counted ones. */
+    public final Setting<Boolean> restockFood = bool("restockFood", true);
+    public final Setting<Integer> restockFoodCount = integer("restockFoodCount", 16, 1, 64);
+    public final Setting<Boolean> restockPickaxe = bool("restockPickaxe", true);
+    public final Setting<Boolean> restockAxe = bool("restockAxe", false);
+    public final Setting<Boolean> restockShovel = bool("restockShovel", false);
+    public final Setting<Boolean> restockSword = bool("restockSword", false);
+    public final Setting<Boolean> restockTorch = bool("restockTorch", true);
+    public final Setting<Integer> restockTorchCount = integer("restockTorchCount", 16, 1, 64);
+    public final Setting<Boolean> restockBlocks = bool("restockBlocks", true);
+    public final Setting<Integer> restockBlocksCount = integer("restockBlocksCount", 64, 1, 256);
+    /** Restocks while following someone (#follow) too. */
+    public final Setting<Boolean> restockFollow = bool("restockFollow", false);
+    /** Other items to keep, item:amount (the things with their own toggle are left out of this). */
+    public final Setting<String> restockItems = register(new Setting<>("restockItems", "",
         s -> s.replace(" ", "").toLowerCase(java.util.Locale.ROOT)));
+
+    private static final java.util.Set<String> RESTOCK_OWN = java.util.Set.of("food", "pickaxe", "axe", "shovel", "sword", "torch", "blocks");
+
+    /** The whole restock list: the toggled things, then the other items. */
+    public String restockSpec() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (restockFood.get()) out.add("food:" + restockFoodCount.get());
+        if (restockPickaxe.get()) out.add("pickaxe:1");
+        if (restockAxe.get()) out.add("axe:1");
+        if (restockShovel.get()) out.add("shovel:1");
+        if (restockSword.get()) out.add("sword:1");
+        if (restockTorch.get()) out.add("torch:" + restockTorchCount.get());
+        if (restockBlocks.get()) out.add("blocks:" + restockBlocksCount.get());
+        for (String part : restockItems.get().split(",")) {
+            int c = part.lastIndexOf(':');
+            String name = c < 0 ? part : part.substring(0, c);
+            if (part.isBlank() || RESTOCK_OWN.contains(name) || name.equals("minecraft:torch")) continue;
+            out.add(part);
+        }
+        return String.join(",", out);
+    }
     public final Setting<Integer> chestRange = integer("chestRange", 128, 8, 2048);
     /** #getitem crafts what it needs several times over (planks, sticks...) all at once: fewer steps. */
     public final Setting<Boolean> getItemBatch = bool("getItemBatch", true);

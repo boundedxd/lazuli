@@ -41,4 +41,16 @@ class SettingsTest {
         assertFalse(b.allowSprint.get());
         assertEquals(32, b.evalHorizon.get());
     }
+
+    @Test
+    void restockListIsTheToggledThingsPlusOtherItems() {
+        Settings s = new Settings();
+        assertEquals("food:16,pickaxe:1,torch:16,blocks:64", s.restockSpec());
+        s.restockTorch.set(false);
+        s.restockBlocks.set(false);
+        s.restockSword.set(true);
+        // an old saved list still naming torches and blocks doesn't bring them back
+        s.restockItems.parse("food:16,pickaxe:1,torch:16,blocks:64,arrow:32");
+        assertEquals("food:16,pickaxe:1,sword:1,arrow:32", s.restockSpec());
+    }
 }

@@ -190,6 +190,7 @@ public final class LazuliClient implements ClientModInitializer {
 			for (Process p : processes) if (p != guard && p != restock && p.active()) return true;
 			return false;
 		}, this::chat);
+		restock.skipWhen(() -> follow.active() && !settings.restockFollow.get());
 		breeds = new dev.lazuli.mod.process.BreedProcess(session, settings, this::chat);
 		fishing = new dev.lazuli.mod.process.FishProcess(session, settings, this::chat);
 		portals = new dev.lazuli.mod.process.PortalProcess(session, settings, cache, this::portalMemory, LazuliClient::dimension, this::chat);

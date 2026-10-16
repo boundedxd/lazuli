@@ -42,6 +42,8 @@ public final class RestockProcess implements Process {
     private final Function<Minecraft, ChestMemory> chests;
     private final Function<Minecraft, String> dimension;
     private final BooleanSupplier jobRunning;
+    /** True while restocking shouldn't start (following someone with restockFollow off). */
+    private BooleanSupplier skipWhen = () -> false;
     private final Trip trip;
     private final Map<String, Integer> skipUntil = new HashMap<>();
     private int nextCheck;
@@ -50,6 +52,10 @@ public final class RestockProcess implements Process {
     private dev.lazuli.core.goal.Goal resume;
 
     /** @param jobRunning a process other than this (and the guard) is running */
+    public void skipWhen(BooleanSupplier when) {
+        skipWhen = when;
+    }
+
     public RestockProcess(PathingSession session, Settings settings, ClickDriver clicks, Function<Minecraft, ChestMemory> chests,
                           Function<Minecraft, String> dimension, BooleanSupplier jobRunning, Consumer<String> chat) {
         this.session = session;
@@ -114,10 +120,10 @@ public final class RestockProcess implements Process {
         PathingSession.Snapshot snap = session.snapshot();
         boolean pathing = snap.state() == PathingSession.State.PATHING || session.planning();
         boolean job = jobRunning.getAsBoolean();
-        if (!pathing && !job) return;
+        if (!pathing && !job || skipWhen.getAsBoolean()) return;
         if (Guard.paused() || p.isFallFlying() || mc.screen != null || p.containerMenu != p.inventoryMenu) return;
         if (ClickDriver.get().busy() || ClickDriver.holding()) return;
-        List<Restock.Want> wants = Restock.parse(settings.restockItems.get(),
+        List<Restock.Want> wants = Restock.parse(settings.restockSpec(),
             Arrays.stream(settings.throwawayBlocks.get().split(",")).filter(s -> !s.isBlank()).map(ItemKeys::id).toList());
         java.util.Set<String> skip = new java.util.HashSet<>();
         skipUntil.forEach((k, until) -> {

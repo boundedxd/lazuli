@@ -146,16 +146,6 @@ public final class LazuliConfig implements WalksyLibApi {
                         .range(1, 19, 1)
                         .description(OptionDescription.ofText(() -> "Hunger (out of 20) at or below which it eats.")).build())
                     .build())
-                .group(OptionGroup.builder("Restock")
-                    .option(bool(s.restock, "While busy, refill what's running low from chests you've opened (or shulker boxes); the job waits."))
-                    .option(Options.ofString("Restock items", s.restockItems::get, s.restockItems.defaultValue(), v -> {
-                        try {
-                            s.restockItems.parse(v);
-                        } catch (IllegalArgumentException ignored) {
-                            // keep the previous list
-                        }
-                    }).description(OptionDescription.ofText(() -> "item:amount, comma separated. Groups: food, pickaxe, axe, shovel, sword, blocks. Refills when under half.")).build())
-                    .build())
                 .group(OptionGroup.builder("Danger")
                     .option(bool(s.dodgeCreepers, "Run from a creeper that starts hissing nearby; the job waits."))
                     .option(bool(s.defend, "Fight monsters that come close with the best sword or axe; the job waits."))
@@ -189,6 +179,34 @@ public final class LazuliConfig implements WalksyLibApi {
                     .build())
                 .group(OptionGroup.builder("Death")
                     .option(bool(s.deathWaypoint, "Save a 'death' waypoint where you die; #back goes there."))
+                    .build())
+                .build())
+            .category(Category.builder("Restock")
+                .group(OptionGroup.builder("Restock")
+                    .option(bool(s.restock, "While busy, refill what's running low from chests you've opened (or shulker boxes); the job waits. Refills when under half."))
+                    .option(bool(s.restockFollow, "Also restock while following someone (#follow)."))
+                    .build())
+                .group(OptionGroup.builder("What")
+                    .option(bool(s.restockFood, "Keep food (best first: golden carrots, steak...)."))
+                    .option(Options.ofNumber("Food count", s.restockFoodCount::get, s.restockFoodCount.defaultValue(), s.restockFoodCount::set)
+                        .range(1, 64, 1).description(OptionDescription.ofText(() -> "How much food to keep.")).build())
+                    .option(bool(s.restockPickaxe, "Keep a pickaxe."))
+                    .option(bool(s.restockAxe, "Keep an axe."))
+                    .option(bool(s.restockShovel, "Keep a shovel."))
+                    .option(bool(s.restockSword, "Keep a sword."))
+                    .option(bool(s.restockTorch, "Keep torches."))
+                    .option(Options.ofNumber("Torch count", s.restockTorchCount::get, s.restockTorchCount.defaultValue(), s.restockTorchCount::set)
+                        .range(1, 64, 1).description(OptionDescription.ofText(() -> "How many torches to keep.")).build())
+                    .option(bool(s.restockBlocks, "Keep building blocks (the throwaway blocks: dirt, cobblestone...)."))
+                    .option(Options.ofNumber("Block count", s.restockBlocksCount::get, s.restockBlocksCount.defaultValue(), s.restockBlocksCount::set)
+                        .range(1, 256, 1).description(OptionDescription.ofText(() -> "How many building blocks to keep.")).build())
+                    .option(Options.ofString("Other items", s.restockItems::get, s.restockItems.defaultValue(), v -> {
+                        try {
+                            s.restockItems.parse(v);
+                        } catch (IllegalArgumentException ignored) {
+                            // keep the previous list
+                        }
+                    }).description(OptionDescription.ofText(() -> "More to keep: item:amount, comma separated (e.g. arrow:32,bread:16).")).build())
                     .build())
                 .build())
             .category(Category.builder("Processes")
