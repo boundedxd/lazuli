@@ -123,6 +123,8 @@ public final class LazuliClient implements ClientModInitializer {
 	private dev.lazuli.mod.process.RestockProcess restock;
 	private dev.lazuli.mod.process.SortProcess sorts;
 	private dev.lazuli.mod.process.BuildProcess builds;
+	private dev.lazuli.mod.process.BreedProcess breeds;
+	private dev.lazuli.mod.process.FishProcess fishing;
 	/** Every process; at most one runs at a time. */
 	private java.util.List<Process> processes;
 	/** "[Lazuli] " in blue. */
@@ -182,8 +184,10 @@ public final class LazuliClient implements ClientModInitializer {
 			for (Process p : processes) if (p != guard && p != restock && p.active()) return true;
 			return false;
 		}, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, hunt, getItem, trades, brews,
-			enchants, elytra, sorts, builds, sleeps, restock, guard);
+		breeds = new dev.lazuli.mod.process.BreedProcess(session, settings, this::chat);
+		fishing = new dev.lazuli.mod.process.FishProcess(session, settings, this::chat);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm, breeds, fishing, containers, crafts, smelts, hunt, getItem,
+			trades, brews, enchants, elytra, sorts, builds, sleeps, restock, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -267,6 +271,18 @@ public final class LazuliClient implements ClientModInitializer {
 			public void farm(int range) {
 				LazuliClient.this.stopProcesses(false);
 				farm.start(Minecraft.getInstance(), range);
+			}
+
+			@Override
+			public void breed(java.util.List<String> kinds, int pairs) {
+				LazuliClient.this.stopProcesses(false);
+				breeds.start(Minecraft.getInstance(), kinds, pairs);
+			}
+
+			@Override
+			public void fish(int minutes) {
+				LazuliClient.this.stopProcesses(false);
+				fishing.start(Minecraft.getInstance(), minutes);
 			}
 
 			@Override

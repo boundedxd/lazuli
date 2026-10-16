@@ -166,6 +166,8 @@ public final class Settings {
     public final Setting<Boolean> getItemHunt = bool("getItemHunt", true);
     /** A hunt gives up when it hasn't got enough after this many minutes. */
     public final Setting<Integer> huntMinutes = integer("huntMinutes", 5, 1, 60);
+    /** How far around where it started #breed looks for animals, in blocks. */
+    public final Setting<Integer> breedRange = integer("breedRange", 24, 4, 96);
     /** How far #trade looks for villagers (and walks to them), in blocks. */
     public final Setting<Integer> tradeRange = integer("tradeRange", 96, 16, 512);
     /** #trade with what it wants sold out: buys what's left, then waits up to this many minutes for a restock (0: no wait). */

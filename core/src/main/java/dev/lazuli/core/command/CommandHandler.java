@@ -94,6 +94,16 @@ public final class CommandHandler {
             reply(Chat.err("Farming isn't available here"));
         }
 
+        /** Feeds animals in pairs so they breed; {@code kinds} entity ids (empty: any), {@code pairs} 0: as many as it can. */
+        default void breed(List<String> kinds, int pairs) {
+            reply(Chat.err("Breeding isn't available here"));
+        }
+
+        /** Fishes at the nearest open water; minutes 0: until stopped. */
+        default void fish(int minutes) {
+            reply(Chat.err("Fishing isn't available here"));
+        }
+
         /** Throws out items (ids like {@code dirt}, or "all" for everything); a negative count: all of it. */
         default void drop(List<ItemCount> items) {
             reply(Chat.err("Dropping isn't available here"));
@@ -313,6 +323,20 @@ public final class CommandHandler {
                 else if (args.length == 1) ctx.farm(Math.max(1, integer(args[0])));
                 else ctx.reply(Chat.err("Usage: farm [range]"));
             }
+            case "breed" -> {
+                List<String> kinds = new ArrayList<>();
+                int n = 0;
+                for (String a : args) {
+                    if (a.matches("[0-9]+")) n = Integer.parseInt(a);
+                    else kinds.add(a.contains(":") ? a.toLowerCase(Locale.ROOT) : "minecraft:" + a.toLowerCase(Locale.ROOT));
+                }
+                ctx.breed(kinds, n);
+            }
+            case "fish" -> {
+                if (args.length == 0) ctx.fish(0);
+                else if (args.length == 1 && args[0].matches("[0-9]+")) ctx.fish(Integer.parseInt(args[0]));
+                else ctx.reply(Chat.err("Usage: fish [minutes]"));
+            }
             case "drop" -> {
                 List<ItemCount> items = items(args, 0, args.length);
                 if (items == null) ctx.reply(Chat.err("Usage: drop <item|all> [count] [item [count]...]"));
@@ -378,6 +402,8 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "explore [x z]", "walk into chunks never loaded, spiralling out"));
         ctx.reply(Chat.usage(p + "tunnel [height width depth]", "dig straight ahead (default 2x1, no end)"));
         ctx.reply(Chat.usage(p + "farm [range]", "harvest and replant crops around here"));
+        ctx.reply(Chat.usage(p + "breed [animal...] [pairs]", "feed animals two at a time so they breed (any kind it has food for)"));
+        ctx.reply(Chat.usage(p + "fish [minutes]", "fish at the nearest open water (until stopped without minutes)"));
         ctx.reply(Chat.usage(p + "drop <item|all> [count] [item [count]...]", "throw items out of the inventory (all of them without a count)"));
         ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
         ctx.reply(Chat.usage(p + "withdraw <item|all> [count] [item [count]...] [x y z]", "take items out of a container"));

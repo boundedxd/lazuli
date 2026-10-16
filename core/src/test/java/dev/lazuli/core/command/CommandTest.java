@@ -52,6 +52,12 @@ class CommandTest {
             public void farm(int range) {
                 mined.add("farm " + range);
             }
+            public void breed(List<String> kinds, int pairs) {
+                mined.add("breed " + kinds + " " + pairs);
+            }
+            public void fish(int minutes) {
+                mined.add("fish " + minutes);
+            }
             public void container(boolean deposit, List<ItemCount> items, int[] at) {
                 mined.add((deposit ? "deposit " : "withdraw ") + items + (at == null ? "" : " at " + at[0] + " " + at[1] + " " + at[2]));
             }
@@ -391,5 +397,12 @@ class CommandTest {
         assertEquals(List.of("fill 0 1 -1 to 3 3 0 minecraft:stone", "clear 0 1 -1 to 3 3 0", "sort 16", "sort 10"), mined);
         h.handle("#sel reset");
         assertNull(h.selection().box());
+    }
+
+    @Test
+    void breedAndFish() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#breed", "#breed cow sheep 3", "#breed 2", "#fish", "#fish 10"}) h.handle(c);
+        assertEquals(List.of("breed [] 0", "breed [minecraft:cow, minecraft:sheep] 3", "breed [] 2", "fish 0", "fish 10"), mined);
     }
 }
