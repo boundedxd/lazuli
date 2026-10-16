@@ -39,13 +39,14 @@ public final class TradePlanner {
         }
     }
 
-    public record Plan(List<Step> steps, String problem) {
+    /** @param soldOut some of what's wanted is sold out now (a restock would get the rest) */
+    public record Plan(List<Step> steps, String problem, boolean soldOut) {
         public boolean ok() {
             return problem == null;
         }
 
         static Plan fail(String problem) {
-            return new Plan(List.of(), problem);
+            return new Plan(List.of(), problem, false);
         }
     }
 
@@ -60,6 +61,13 @@ public final class TradePlanner {
      */
     public static Plan plan(List<Want> wants, ToIntFunction<Want> haveWant, Map<String, Integer> have, List<Trader> traders,
                             int px, int py, int pz, boolean sell, ToDoubleFunction<String> gatherCost) {
+        return plan(wants, haveWant, have, traders, px, py, pz, sell, gatherCost, false);
+    }
+
+    /** @param partial short of stock: plan what's for sale now (see {@link Plan#soldOut}) instead of failing */
+    public static Plan plan(List<Want> wants, ToIntFunction<Want> haveWant, Map<String, Integer> have, List<Trader> traders,
+                            int px, int py, int pz, boolean sell, ToDoubleFunction<String> gatherCost, boolean partial) {
+        boolean soldOut = false;
         Map<String, Integer> inv = new HashMap<>(have);
         Map<String, Integer> uses = new HashMap<>(); // offer key -> times still possible
         Map<String, Integer> costs = new LinkedHashMap<>();
@@ -68,8 +76,21 @@ public final class TradePlanner {
             int missing = w.count() - haveWant.applyAsInt(w);
             if (missing <= 0) continue;
             List<Step> cands = new ArrayList<>();
-            for (Trader t : traders) for (Offer o : t.offers()) if (o.gives(w) && left(uses, t, o) > 0) cands.add(Step.trade(t, o, 0));
-            if (cands.isEmpty()) return Plan.fail("no villager I've seen sells " + w.describe());
+            boolean offered = false;
+            for (Trader t : traders) {
+                for (Offer o : t.offers()) {
+                    if (!o.gives(w)) continue;
+                    offered = true;
+                    if (left(uses, t, o) > 0) cands.add(Step.trade(t, o, 0));
+                }
+            }
+            if (cands.isEmpty()) {
+                if (offered && partial) {
+                    soldOut = true;
+                    continue;
+                }
+                return Plan.fail(offered ? w.describe() + " is sold out" : "no villager I've seen sells " + w.describe());
+            }
             cands.sort(Comparator.comparingDouble(s -> price(s.offer(), inv, gatherCost) / s.offer().result().count()
                 + Math.sqrt(s.trader().distSq(px, py, pz)) * WALK));
             for (Step c : cands) {
@@ -82,7 +103,8 @@ public final class TradePlanner {
                 if (o.costB() != null) costs.merge(o.costB().item(), o.costB().count() * times, Integer::sum);
                 buys.add(Step.trade(c.trader(), o, times));
             }
-            if (missing > 0) return Plan.fail("only " + (w.count() - haveWant.applyAsInt(w) - missing) + " " + w.describe() + " for sale");
+            if (missing > 0 && partial) soldOut = true;
+            else if (missing > 0) return Plan.fail("only " + (w.count() - haveWant.applyAsInt(w) - missing) + " " + w.describe() + " for sale");
         }
         // paid from the inventory first
         Map<String, Integer> gather = new LinkedHashMap<>();
@@ -143,7 +165,51 @@ public final class TradePlanner {
         gather.forEach((i, n) -> steps.add(Step.gather(i, n)));
         steps.addAll(sells);
         steps.addAll(buys);
-        return new Plan(List.copyOf(steps), null);
+        return new Plan(List.copyOf(steps), null, soldOut);
+    }
+
+    /**
+     * Selling {@code count} of {@code item} (at most what the inventory has) for emeralds: the best-paying buyers first
+     * (emeralds per item, then nearest), whole trades only.
+     */
+    public static Plan sell(String item, int count, Map<String, Integer> have, List<Trader> traders, int px, int py, int pz) {
+        List<Step> buyers = new ArrayList<>();
+        for (Trader t : traders) {
+            for (Offer o : t.offers()) {
+                if (o.costA().item().equals(item) && o.costB() == null && o.result().item().equals(EMERALD) && o.left() > 0) {
+                    buyers.add(Step.trade(t, o, 0));
+                }
+            }
+        }
+        if (buyers.isEmpty()) return Plan.fail("no villager I've seen buys " + Offer.name(item) + " (or they're sold out)");
+        buyers.sort(Comparator.comparingDouble((Step s) -> -(double) s.offer().result().count() / s.offer().costA().count())
+            .thenComparingDouble(s -> s.trader().distSq(px, py, pz)));
+        int left = Math.min(count, have.getOrDefault(item, 0));
+        List<Step> steps = new ArrayList<>();
+        for (Step b : buyers) {
+            int per = b.offer().costA().count(), times = Math.min(b.offer().left(), left / per);
+            if (times <= 0) continue;
+            steps.add(Step.trade(b.trader(), b.offer(), times));
+            left -= times * per;
+        }
+        if (steps.isEmpty()) {
+            return Plan.fail("not enough " + Offer.name(item) + " for one trade (" + buyers.get(0).offer().costA().count() + " each)");
+        }
+        return new Plan(List.copyOf(steps), null, false);
+    }
+
+    /** Every known offer of {@code w} (sold out too), the cheapest per item first, then the nearest. */
+    public static List<Step> find(Want w, List<Trader> traders, int px, int py, int pz) {
+        List<Step> out = new ArrayList<>();
+        for (Trader t : traders) for (Offer o : t.offers()) if (o.gives(w)) out.add(Step.trade(t, o, 0));
+        out.sort(Comparator.comparingDouble((Step s) -> (worth(s.offer().costA()) + worth(s.offer().costB())) / s.offer().result().count())
+            .thenComparingDouble(s -> s.trader().distSq(px, py, pz)));
+        return out;
+    }
+
+    /** Emeralds count whole, anything else (a book, sticks) a little. */
+    private static double worth(ItemCount c) {
+        return c == null ? 0 : c.item().equals(EMERALD) ? c.count() : c.count() * 0.25;
     }
 
     /** Rough work to pay for one trade of {@code o}. */

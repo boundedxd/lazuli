@@ -138,4 +138,59 @@ class TradePlannerTest {
         assertEquals(buys(1, "minecraft:paper", 24), t.offers().get(1));
         assertTrue(Files.size(f) > 0);
     }
+
+    private static Offer buysLeft(int i, String item, int n, int emeralds, int left) {
+        return new Offer(i, new ItemCount(item, n), null, new ItemCount(EMERALD, emeralds), null, 0, left);
+    }
+
+    @Test
+    void sellsToTheBestPayingBuyerFirst() {
+        String wheat = "minecraft:wheat";
+        Trader poor = trader("a", "farmer", 5, buysLeft(0, wheat, 20, 1, 16));
+        Trader rich = trader("b", "farmer", 40, buysLeft(0, wheat, 10, 1, 2));
+        var p = TradePlanner.sell(wheat, 64, Map.of(wheat, 64), List.of(poor, rich), 0, 64, 0);
+        assertTrue(p.ok(), p.problem());
+        assertEquals(2, p.steps().size());
+        assertEquals("b", p.steps().get(0).trader().id()); // 1 emerald per 10 beats 1 per 20
+        assertEquals(2, p.steps().get(0).times());
+        assertEquals(2, p.steps().get(1).times()); // the 44 left: two more lots of 20
+    }
+
+    @Test
+    void sellingWhatNobodyBuysFails() {
+        var p = TradePlanner.sell("minecraft:dirt", 10, Map.of("minecraft:dirt", 10), List.of(trader("a", "farmer", 5,
+            buysLeft(0, "minecraft:wheat", 20, 1, 16))), 0, 64, 0);
+        assertFalse(p.ok());
+    }
+
+    @Test
+    void partialBuysWhatsLeftAndSaysItsSoldOut() {
+        String bread = "minecraft:bread";
+        Offer few = new Offer(0, new ItemCount(EMERALD, 1), null, new ItemCount(bread, 6), null, 0, 2);
+        Trader t = trader("a", "farmer", 5, few);
+        var strict = TradePlanner.plan(List.of(new Want(bread, null, 0, 20)), w -> 0, Map.of(EMERALD, 10), List.of(t), 0, 64, 0,
+            false, i -> NO);
+        assertFalse(strict.ok());
+        var p = TradePlanner.plan(List.of(new Want(bread, null, 0, 20)), w -> 0, Map.of(EMERALD, 10), List.of(t), 0, 64, 0,
+            false, i -> NO, true);
+        assertTrue(p.ok(), p.problem());
+        assertTrue(p.soldOut());
+        assertEquals(2, p.steps().get(0).times());
+        // all sold out: nothing to do now, but a restock would help
+        Offer none = new Offer(0, new ItemCount(EMERALD, 1), null, new ItemCount(bread, 6), null, 0, 0);
+        var later = TradePlanner.plan(List.of(new Want(bread, null, 0, 20)), w -> 0, Map.of(EMERALD, 10),
+            List.of(trader("a", "farmer", 5, none)), 0, 64, 0, false, i -> NO, true);
+        assertTrue(later.ok());
+        assertTrue(later.soldOut());
+        assertTrue(later.steps().isEmpty());
+    }
+
+    @Test
+    void findListsTheCheapestOffersFirst() {
+        Trader a = trader("a", "librarian", 50, book(0, 30, "minecraft:mending", 1));
+        Trader b = trader("b", "librarian", 5, book(0, 12, "minecraft:mending", 1));
+        Trader c = trader("c", "librarian", 1, book(0, 5, "minecraft:sharpness", 1));
+        var found = TradePlanner.find(new Want(EBOOK, "minecraft:mending", 1, 1), List.of(a, b, c), 0, 64, 0);
+        assertEquals(List.of("b", "a"), found.stream().map(s -> s.trader().id()).toList());
+    }
 }

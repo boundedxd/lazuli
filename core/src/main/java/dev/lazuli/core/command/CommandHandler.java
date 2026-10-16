@@ -165,6 +165,11 @@ public final class CommandHandler {
             reply(Chat.err("Trading isn't available here"));
         }
 
+        /** Sells {@code count} of {@code item} (negative: all of it) to villagers for emeralds. */
+        default void tradeSell(String item, int count) {
+            reply(Chat.err("Trading isn't available here"));
+        }
+
         /** Walks to the villagers around whose trades aren't known and looks at them. */
         default void tradeScan() {
             reply(Chat.err("Trading isn't available here"));
@@ -311,6 +316,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "find <item>", "which chests (opened before) hold an item"));
         ctx.reply(Chat.usage(p + "trade <enchant [level]|item [count]>...", "trade with villagers, e.g. " + p + "trade sharpness 5 (sells string, sticks... for emeralds first if need be)"));
         ctx.reply(Chat.usage(p + "trade list | scan | forget", "the trades seen so far | go look at the villagers around | forget them"));
+        ctx.reply(Chat.usage(p + "trade sell <item> [count|all] | find <enchant [level]|item>", "sell for emeralds | who sells it, cheapest first"));
         ctx.reply(Chat.usage(p + "sleep", "sleep in the nearest bed (or one from the hotbar) until morning"));
         ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
         ctx.reply(Chat.usage(p + "kill", "when something's stuck: reset everything (planner thread, keys, jobs), then any command works again"));
@@ -518,13 +524,52 @@ public final class CommandHandler {
 
     /** trade <enchant [level]|item [count]>... | list | scan | forget */
     private void trade(String[] args) {
-        String usage = "Usage: trade <enchant [level]|item [count]>... | list | scan | forget";
+        String usage = "Usage: trade <enchant [level]|item [count]>... | list | scan | forget | sell <item> [count|all] | find <what>";
         if (args.length == 0) {
             ctx.reply(Chat.err(usage));
             return;
         }
         switch (args[0].toLowerCase(Locale.ROOT)) {
             case "scan" -> ctx.tradeScan();
+            case "sell" -> {
+                if (args.length < 2 || args.length > 3) {
+                    ctx.reply(Chat.err("Usage: trade sell <item> [count|all]"));
+                    return;
+                }
+                String id = args[1].toLowerCase(Locale.ROOT);
+                id = id.contains(":") ? id : "minecraft:" + id;
+                int count = -1;
+                if (args.length == 3 && !args[2].equalsIgnoreCase("all")) {
+                    try {
+                        count = Integer.parseInt(args[2]);
+                    } catch (NumberFormatException e) {
+                        ctx.reply(Chat.err("Usage: trade sell <item> [count|all]"));
+                        return;
+                    }
+                }
+                ctx.tradeSell(id, count);
+            }
+            case "find", "search" -> {
+                var mem = ctx.trades();
+                var wants = args.length > 1 ? dev.lazuli.core.trade.Want.parse(java.util.Arrays.copyOfRange(args, 1, args.length), ctx::isEnchantment) : null;
+                if (mem == null || wants == null) {
+                    ctx.reply(Chat.err(mem == null ? "Trade memory is off" : "Usage: trade find <enchant [level]|item>"));
+                    return;
+                }
+                int[] f = ctx.playerFeet();
+                var found = dev.lazuli.core.trade.TradePlanner.find(wants.get(0), mem.all(ctx.dimension()), f[0], f[1], f[2]);
+                if (found.isEmpty()) {
+                    ctx.reply(Chat.info("No villager seen here sells {}", wants.get(0).describe()));
+                    return;
+                }
+                ctx.reply(Chat.info("{} offers of {}, cheapest first:", found.size(), wants.get(0).describe()));
+                for (int i = 0; i < Math.min(5, found.size()); i++) {
+                    var s = found.get(i);
+                    var t = s.trader();
+                    ctx.reply(Chat.pair("  " + s.offer().describe() + " (" + t.profession() + " at " + t.x() + " " + t.y() + " " + t.z() + ", "
+                        + (int) Math.sqrt(t.distSq(f[0], f[1], f[2])) + "m)", s.offer().left() > 0 ? s.offer().left() + " left" : "sold out"));
+                }
+            }
             case "forget", "clear" -> {
                 var mem = ctx.trades();
                 if (mem != null) mem.clear();

@@ -174,6 +174,17 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(Options.ofNumber("Trade range", s.tradeRange::get, s.tradeRange.defaultValue(), s.tradeRange::set)
                         .range(16, 512, 16)
                         .description(OptionDescription.ofText(() -> "How far #trade looks for villagers, in blocks.")).build())
+                    .option(Options.ofNumber("Restock wait (min)", s.tradeRestockMinutes::get, s.tradeRestockMinutes.defaultValue(), s.tradeRestockMinutes::set)
+                        .range(0, 60, 1)
+                        .description(OptionDescription.ofText(() -> "Sold out: buy what's left, then wait this long for the villagers to restock (0: don't wait).")).build())
+                    .option(bool(s.chatControl, "Let the players listed below run commands by saying them in chat or whispering them."))
+                    .option(Options.ofString("Chat control players", s.chatControlPlayers::get, s.chatControlPlayers.defaultValue(), v -> {
+                        try {
+                            s.chatControlPlayers.parse(v);
+                        } catch (IllegalArgumentException ignored) {
+                            // keep the previous list
+                        }
+                    }).build())
                     .build())
                 .group(OptionGroup.builder("Follow and farm")
                     .option(Options.ofNumber("Follow distance", s.followRadius::get, s.followRadius.defaultValue(), s.followRadius::set)

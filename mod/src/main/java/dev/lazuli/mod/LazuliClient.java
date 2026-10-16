@@ -292,6 +292,12 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public void tradeSell(String item, int count) {
+				LazuliClient.this.stopProcesses(false);
+				trades.sell(Minecraft.getInstance(), item, count);
+			}
+
+			@Override
 			public void tradeScan() {
 				LazuliClient.this.stopProcesses(false);
 				trades.scan(Minecraft.getInstance());
@@ -353,6 +359,13 @@ public final class LazuliClient implements ClientModInitializer {
 			} catch (RuntimeException e) {
 				chat(Chat.err("Error: {}", e.getMessage()));
 				return false;
+			}
+		});
+		dev.lazuli.mod.ChatControl.register(settings, line -> {
+			try {
+				runCommand(line);
+			} catch (RuntimeException e) {
+				chat(Chat.err("Error: {}", e.getMessage()));
 			}
 		});
 		ClientChunkEvents.CHUNK_LOAD.register(this::onChunkLoad);

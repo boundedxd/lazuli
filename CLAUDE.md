@@ -136,6 +136,11 @@ Newest work (built, deployed, pushed, suite green, NOT tested in game):
 - #getitem counts worn armor/offhand/damaged copies (no re-making after a restart); mining down keeps pitch;
   boat placing swims up first.
 
-Next up: trading "chat use" (ask the user what it means), boat-aware pathing (user said skip for now),
+- **Trade extras** — `#trade sell <item> [count|all]` (`TradePlanner.sell`, best emeralds/item first),
+  `#trade find <what>` (`TradePlanner.find`), restock wait (`tradeRestockMinutes`: partial plan `Plan.soldOut`, phase
+  RESTOCK re-opens the sellers every minute). `mod/ChatControl` (`chatControl`, `chatControlPlayers`): listed players
+  run commands by chat/whisper (signed chat sender, or `<name> text` / `name whispers to you:` game lines).
+
+Next up: boat-aware pathing (user said skip for now),
 smarter #farm, mob farming, `#sel fill/clear`.
 Vanilla source when needed: decompile from the loom jar with vineflower (in `~/.gradle/caches/modules-2`).

@@ -133,6 +133,13 @@ public final class Settings {
     public final Setting<Boolean> getItemTrade = bool("getItemTrade", true);
     /** How far #trade looks for villagers (and walks to them), in blocks. */
     public final Setting<Integer> tradeRange = integer("tradeRange", 96, 16, 512);
+    /** #trade with what it wants sold out: buys what's left, then waits up to this many minutes for a restock (0: no wait). */
+    public final Setting<Integer> tradeRestockMinutes = integer("tradeRestockMinutes", 10, 0, 60);
+    /** Lets the players in chatControlPlayers run commands by saying them in chat (or whispering). */
+    public final Setting<Boolean> chatControl = bool("chatControl", false);
+    /** Who may (names, comma separated). */
+    public final Setting<String> chatControlPlayers = register(new Setting<>("chatControlPlayers", "",
+        s -> s.replace(" ", "")));
     /** #getitem may smelt for what it needs. */
     public final Setting<Boolean> getItemSmelt = bool("getItemSmelt", true);
     /** #smelt waits at the furnace until it's done; off: loads it, leaves, and #smelt collect goes back. */
