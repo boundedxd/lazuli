@@ -367,7 +367,7 @@ public final class LazuliClient implements ClientModInitializer {
 			} catch (RuntimeException e) {
 				chat(Chat.err("Error: {}", e.getMessage()));
 			}
-		});
+		}, this::chat);
 		ClientChunkEvents.CHUNK_LOAD.register(this::onChunkLoad);
 		ClientChunkEvents.CHUNK_UNLOAD.register(this::onChunkUnload);
 		// order matters: the recorder logs this tick's movement before the executor turns the view for the next one

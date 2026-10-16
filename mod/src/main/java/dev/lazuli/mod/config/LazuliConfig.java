@@ -178,13 +178,9 @@ public final class LazuliConfig implements WalksyLibApi {
                         .range(0, 60, 1)
                         .description(OptionDescription.ofText(() -> "Sold out: buy what's left, then wait this long for the villagers to restock (0: don't wait).")).build())
                     .option(bool(s.chatControl, "Let the players listed below run commands by saying them in chat or whispering them."))
-                    .option(Options.ofString("Chat control players", s.chatControlPlayers::get, s.chatControlPlayers.defaultValue(), v -> {
-                        try {
-                            s.chatControlPlayers.parse(v);
-                        } catch (IllegalArgumentException ignored) {
-                            // keep the previous list
-                        }
-                    }).build())
+                    .option(Options.ofSelectionList("Chat control players", () -> names(s.chatControlPlayers.get()),
+                            names(s.chatControlPlayers.defaultValue()), v -> s.chatControlPlayers.parse(String.join(",", v)), ListEntries.onlinePlayers())
+                        .description(OptionDescription.ofText(() -> "Who may run commands from chat (pick online players or type a name).")).build())
                     .build())
                 .group(OptionGroup.builder("Follow and farm")
                     .option(Options.ofNumber("Follow distance", s.followRadius::get, s.followRadius.defaultValue(), s.followRadius::set)
@@ -255,6 +251,10 @@ public final class LazuliConfig implements WalksyLibApi {
                 v -> setting.parse(String.join(",", v)), entries)
             .reorderable()
             .description(OptionDescription.ofText(() -> description)).build();
+    }
+
+    private static java.util.List<String> names(String csv) {
+        return java.util.Arrays.stream(csv.split(",")).filter(x -> !x.isBlank()).toList();
     }
 
     private static java.util.List<String> ids(String csv) {
