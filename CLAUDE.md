@@ -107,6 +107,11 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
 - Safety -> `mod/process/Guard` (creepers, fight, low HP), `Upkeep` (eat, armor), `SleepProcess`.
 - Others: Follow, Explore, Tunnel, Farm, Hunt processes in `mod/process/`; chat commands from other players `mod/ChatControl`.
 - Item keys (`minecraft:dirt#hash`, potions `@minecraft:swiftness`) -> `core/inventory/ItemKeys`, `mod/inventory/Inventories`.
+- `#sel pos1|pos2|fill|clear|reset` -> `core/area/Selection`, `mod/process/BuildProcess` (box drawn by `LazuliRenderer`).
+- `#sort` -> `core/storage/SortPlan`, `mod/process/SortProcess` (reads each box via `ContainerProcess.onOpen`).
+- Shulker boxes -> `mod/process/ShulkerUnpack` (place, take, pick up; `Station.startPlaced`), chest memory names
+  `shulker>id` (`ItemKeys.inShulker`); used through `ChestTake`. Restock -> `core/inventory/Restock`,
+  `mod/process/RestockProcess` (pauses the job like Guard).
 
 ## More gotchas
 - Restart the game after every deploy: copying the jar over a running game crashes it on the next class load.
