@@ -141,6 +141,10 @@ Newest work (built, deployed, pushed, suite green, NOT tested in game):
   RESTOCK re-opens the sellers every minute). `mod/ChatControl` (`chatControl`, `chatControlPlayers`): listed players
   run commands by chat/whisper (signed chat sender, or `<name> text` / `name whispers to you:` game lines).
 
+- **Hunting** — `core/craft/MobDrops` (entity loot tables: per-kill average; `rarity` table, nether/end = UNKNOWN),
+  `ItemPlanner.Kind.KILL` (`mobs(...)`, `killCost` = rarity / perKill), `mod/process/HuntProcess` (nearest grown mob,
+  `Melee` shared with `Guard`, picks up drops, wanders when none; `getItemHunt`, `huntMinutes`). `#follow <who> [dist]`.
+
 Next up: boat-aware pathing (user said skip for now),
 smarter #farm, mob farming, `#sel fill/clear`.
 Vanilla source when needed: decompile from the loom jar with vineflower (in `~/.gradle/caches/modules-2`).
