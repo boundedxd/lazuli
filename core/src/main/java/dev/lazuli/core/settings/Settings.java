@@ -213,6 +213,20 @@ public final class Settings {
     public final Setting<Integer> evalHorizon = integer("evalHorizon", 32, 1, 4096);
     public final Setting<Double> heuristicWeight = decimal("heuristicWeight", 1.2, 1.0, 10.0);
     public final Setting<Boolean> renderPath = bool("renderPath", true);
+    /** The HUD status as a Material card (off: the plain text panel). */
+    public final Setting<Boolean> hudCard = bool("hudCard", true);
+    /** Corner radius of the HUD card and minimap, in pixels. */
+    public final Setting<Integer> hudCorner = integer("hudCorner", 6, 0, 16);
+    /** Show the minimap (top right). */
+    public final Setting<Boolean> minimap = bool("minimap", true);
+    /** Minimap width and height, in pixels. */
+    public final Setting<Integer> minimapSize = integer("minimapSize", 96, 48, 192);
+    /** Minimap zoom: 1 shows about 32 blocks each way, 2 half of that, 0.5 twice as much. */
+    public final Setting<Double> minimapZoom = decimal("minimapZoom", 1.0, 0.5, 4.0);
+    /** The minimap turns with you (off: north is up). */
+    public final Setting<Boolean> minimapRotate = bool("minimapRotate", false);
+    /** Draw the path, goal and waypoints on the minimap. */
+    public final Setting<Boolean> minimapPath = bool("minimapPath", true);
     public final Setting<String> prefix = register(new Setting<>("prefix", "#", s -> {
         if (s.isEmpty() || s.contains(" ")) throw new IllegalArgumentException("prefix must be non-empty and contain no spaces");
         return s;

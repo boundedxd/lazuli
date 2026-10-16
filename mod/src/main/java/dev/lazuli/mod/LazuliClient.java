@@ -549,6 +549,7 @@ public final class LazuliClient implements ClientModInitializer {
 		});
 		ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("lazuli", "status"), renderer::renderHud);
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("lazuli", "minimap"), renderer::renderMinimap);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, mc) -> {
 			lastLevel = null;
 			FreeCam.off();
