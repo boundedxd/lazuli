@@ -45,9 +45,49 @@ public final class TrackField implements RaceLine {
     /** How far the finish line reaches to each side of the start (to the walls, or the edge, on each side). */
     private double lineLeft = LINE_HALF, lineRight = LINE_HALF;
 
+    /** Water only (a crossing by boat in the open): no land cells, no jumps, and the boat sits down in the water. */
+    private boolean water;
+
     private TrackField(BlockView w, boolean lap) {
         this.w = w;
         this.lap = lap;
+    }
+
+    /**
+     * Over water only, from the cell above the water block (x, y - 1, z) to within {@code radius} of (gx, gz) at any
+     * height: a boat crossing a lake or river, where the shore at the water's own level is no use (it can't climb out).
+     */
+    public static TrackField water(BlockView w, int x, int y, int z, int gx, int gz, double radius, int maxCells) {
+        TrackField f = new TrackField(w, false);
+        f.water = true;
+        if (!f.isCell(x, y, z)) return null;
+        f.explore(x, y, z, maxCells);
+        boolean any = false;
+        double[] seed = new double[f.n];
+        Arrays.fill(seed, Double.NaN);
+        for (int i = 0; i < f.n; i++) {
+            long c = f.cells[i];
+            if (Math.hypot(Pos.x(c) - gx, Pos.z(c) - gz) <= radius) {
+                seed[i] = 0;
+                any = true;
+            }
+        }
+        if (!any) return null;
+        f.field(seed);
+        return f.dist[f.index.get(Pos.pack(x, y, z))] < Double.MAX_VALUE ? f : null;
+    }
+
+    /**
+     * A cell of this track. On water only, for a water crossing: and not in a one block wide channel (shore on both
+     * sides), which a boat 1.375 wide can't get through; two wide it can, its middle on the line between them.
+     */
+    private boolean isCell(int x, int y, int z) {
+        if (!water) return cell(w, x, y, z);
+        return afloat(x, y, z) && (afloat(x - 1, y, z) || afloat(x + 1, y, z)) && (afloat(x, y, z - 1) || afloat(x, y, z + 1));
+    }
+
+    private boolean afloat(int x, int y, int z) {
+        return cell(w, x, y, z) && w.physics(x, y - 1, z).has(BlockPhysics.WATER);
     }
 
     /**
@@ -158,18 +198,18 @@ public final class TrackField implements RaceLine {
                 if (d[0] != 0 && d[1] != 0 && (!open(w, cx + d[0], cy, cz) || !open(w, cx, cy, cz + d[1]))) continue;
                 if (!open(w, nx, cy, nz)) continue;
                 long m = Long.MIN_VALUE;
-                if (cell(w, nx, cy, nz)) m = Pos.pack(nx, cy, nz);
+                if (isCell(nx, cy, nz)) m = Pos.pack(nx, cy, nz);
                 else {
                     for (int dy = 1; dy <= MAX_DROP; dy++) {
                         if (!open(w, nx, cy - dy, nz)) break;
-                        if (cell(w, nx, cy - dy, nz)) {
+                        if (isCell(nx, cy - dy, nz)) {
                             m = Pos.pack(nx, cy - dy, nz);
                             break;
                         }
                     }
                 }
                 if (m == Long.MIN_VALUE) {
-                    edge = true; // nothing below there: the void, worth a look across
+                    edge |= !water; // nothing below there: the void, worth a look across (on water: just the shore)
                     continue;
                 }
                 if (lap && crosses(cx + 0.5, cz + 0.5, Pos.x(m) + 0.5, Pos.z(m) + 0.5) != 0) continue;
@@ -220,7 +260,7 @@ public final class TrackField implements RaceLine {
             if (!open(w, nx, y, nz)) return Long.MIN_VALUE;
             for (int dy = 0; dy <= MAX_DROP; dy++) {
                 if (!open(w, nx, y - dy, nz) && dy > 0) break;
-                if (cell(w, nx, y - dy, nz)) {
+                if (isCell(nx, y - dy, nz)) {
                     return overVoid && d >= 2 ? Pos.pack(nx, y - dy, nz) : Long.MIN_VALUE;
                 }
             }
@@ -302,7 +342,7 @@ public final class TrackField implements RaceLine {
 
     private boolean walled(long c) {
         int x = Pos.x(c), y = Pos.y(c), z = Pos.z(c);
-        for (int[] d : DIRS) if (!open(w, x + d[0], y, z + d[1])) return true;
+        for (int[] d : DIRS) if (water ? !isCell(x + d[0], y, z + d[1]) : !open(w, x + d[0], y, z + d[1])) return true;
         return false;
     }
 
@@ -313,7 +353,7 @@ public final class TrackField implements RaceLine {
         double px = -hz * dir, pz = hx * dir;
         for (double d = 0.5; d <= LINE_HALF; d += 0.5) {
             int cx = (int) Math.floor(lx + px * d), cz = (int) Math.floor(lz + pz * d);
-            if (!cell(w, cx, y, cz)) return d + 0.5;
+            if (!isCell(cx, y, cz)) return d + 0.5;
         }
         return LINE_HALF;
     }
@@ -370,8 +410,10 @@ public final class TrackField implements RaceLine {
 
     /** The field at a point: blended from the cells around it on its level (or where it would land, in the air). */
     private double at(double x, double y, double z) {
-        int by = (int) Math.floor(y + 0.01);
+        // afloat, a boat's bottom is about halfway down the water block: its cell is the one above that
+        int by = (int) Math.floor(water ? y + 0.9 : y + 0.01);
         int fx = (int) Math.floor(x), fz = (int) Math.floor(z);
+        if (water && !under(x, by, z)) return Double.NaN;
         if (!under(x, by, z)) {
             // in the air (or its middle just off the edge): the level it'll come down on, else nowhere
             int land = Integer.MIN_VALUE;

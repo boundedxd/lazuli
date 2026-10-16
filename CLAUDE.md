@@ -103,7 +103,8 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
 - `#trade` -> `mod/process/TradeProcess`, `core/trade/*`, `mod/inventory/TradeWatcher`.
 - `#brew` -> `mod/process/BrewProcess` + `core/craft/Brewing`. `#enchant`/`#repair`/`#combine` -> `mod/process/EnchantProcess`
   + `core/craft/Enchanting`.
-- Boats -> `core/move/Boating`, `mod/control/BoatRider`. Water clutch -> `mod/control/Clutch`.
+- Boats -> `mod/control/BoatRider` (place/mount waits out lag; drives with `IceRacer` over `TrackField.water`, a
+  water-only field that skips 1-wide channels; `BoatCrossingTest`), `core/move/Boating.fits`. Water clutch -> `mod/control/Clutch`.
 - Safety -> `mod/process/Guard` (creepers, fight, low HP, fight-or-flee via `core/control/Threat`), `mod/control/Combat`
   (bow with `core/control/Archery` aim, shield), `Upkeep` (eat, armor, totem/shield offhand), `SleepProcess`.
   Paths avoid mobs/lava edges: `core/move/Hazards` priced in `MoveGraph.danger`, fed by `Guard.hazards` every 10 ticks
