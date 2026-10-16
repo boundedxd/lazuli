@@ -117,32 +117,25 @@ Backlog: neo rework (double/triple neos, edge/run-up starts), parkour onto open 
 TraceRecorder should record sneak/pitch. Known bug (skipped, user thinks other mods): changing config sometimes stops
 pathing from starting until restart.
 
-## Handoff (2026-10-15, last commit 020274c)
-Everything below is built, deployed to Prism, pushed, core suite green (288) — but **none of it tested in game yet**.
-Ask the user how it went before building more on top.
+## Handoff (2026-10-15)
+User says crafting, smelting, #getitem, boats are tested in game and work; **trading is not tested yet**.
+Restart the game after every deploy: copying the jar over a running game crashes it on the next class load
+(`ZipFile invalid LOC header`).
 
-Recent work, newest first:
-- **Trading** (020274c) — `#trade sharpness 5 mending bread 20` (roman numerals ok), `#trade list|scan|forget`.
-  Client can't read a villager's offers from NBT; only when its trading screen opens. `TradeWatcher` records every
-  open (hand or bot) via `UseEntityCallback` + `MerchantMenu.getOffers()` into `TradeMemory`
-  (`config/lazuli/trades/<world>.txt`). `TradeProcess` phases: PLAN → GATHER (own inner `GetItemProcess`) / LOOT
-  (quiet inner `ContainerProcess` opens unknown chests ≤16 blocks of buyers) / GO → OPEN (aim + `gameMode.interact`)
-  → TRADE (select = `setSelectionHint` + `tryMoveItems` + `ServerboundSelectTradePacket`, then `Click.left(2)` to
-  cursor and `Click.left(slot)` to put down; done counted from inventory gain). Replans after each step.
-  `GetItemProcess.tradeFor` hands an item to `TradeProcess` when making it fails or costs more
-  (`ItemPlanner.cost` vs `TradeProcess.cost`); failed trades go in `noTrade` and it falls back to making.
-  **Riskiest part: the trade clicks** (result slot refill timing, `reselects` giving up after 3).
-- **Boats** — `core/move/Boating`: `fits` (water/air in the 3x3 at water level, air above: the boat is 1.375 wide),
-  `route` (A* on the water surface, +5 per tight cell), `steer` (counter-steers since spin coasts 9x the last turn).
-  `BoatRider` places on `placeSpot` (nearest fitting cell in reach, else swims), follows the route.
-- **Swim air** — `Swimmer`: goes up below 45% air, stays until full + 15 ticks with the head out; bobbing out of the
-  water no longer resets `breathing`.
-- **Stuck fix** (1fb826b) — `PathExecutor.watchdog` also runs while a search is out; progress = ~1 block sideways
-  or a block up/down. `unstickRestart`: `LazuliClient.restartJob` quietly `#kill`s and reruns `lastJob`
-  (chat muted 2s). Known limit: a restarted `#mine 64` restarts its count.
-- **#getitem extras** (d4fef74) — several items/sets, `then back|<waypoint> [deposit]`, `getItemBatch`,
-  `getItemNearby`, `mineSearch` (strip mine at `OreDepth` best Y / explore), `antiXray`.
+Newest work (built, deployed, pushed, suite green, NOT tested in game):
+- **Water clutch** — `mod/control/Clutch` (falling > 3.5 with a water bucket: pitch 90, place on the ground top when
+  in reach, scoop back up: `waterClutch`, `clutchPickup`). Planner: `MoveGraph.withClutch(n)` allows drops up to
+  `clutchFallHeight` onto ground (+`CLUTCH_PENALTY`); `PathingSession.setClutchFall` (set each tick from
+  `PathExecutor` when a bucket is at hand; a change rebuilds). Not in the nether.
+- **Defend** — `Guard` Danger.FIGHT (`defend`): monster within 3 blocks while busy -> stop, aim, full-cooldown hits
+  with best sword/axe; skips creepers/endermen/piglins.
+- **Sorted deposit** — `ContainerProcess` (`depositSorted`): each item to a remembered chest that has it
+  (within `chestRange`), rest to the nearest; `all` split per item.
+- **Stations** — `Station` places its own table/furnace when carrying one and the known one is > 8 blocks or
+  unreachable; picks up what it placed after #craft/#smelt (`pickupStations`; furnace only if a pickaxe).
+- #getitem counts worn armor/offhand/damaged copies (no re-making after a restart); mining down keeps pitch;
+  boat placing swims up first.
 
-Next up (user's list): test the above in game, then the trading "chat/command use" part, water bucket clutch,
-boat-aware *pathing* (planner cost for boat crossings), smarter #farm, mob farming, `#sel fill/clear`.
+Next up: trading "chat use" (ask the user what it means), boat-aware pathing (user said skip for now),
+smarter #farm, mob farming, `#sel fill/clear`.
 Vanilla source when needed: decompile from the loom jar with vineflower (in `~/.gradle/caches/modules-2`).
