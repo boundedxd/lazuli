@@ -81,6 +81,9 @@ class CommandTest {
             public void runRoutine(String name, List<String> steps, int times) {
                 mined.add("run " + name + " " + steps + " x" + times);
             }
+            public void schematic(String mode, String file, int[] at) {
+                mined.add("schem " + mode + " " + file + (at == null ? "" : " " + java.util.Arrays.toString(at)));
+            }
             public void getItemDry(List<ItemCount> items) {
                 mined.add("dry " + items);
             }
@@ -447,5 +450,12 @@ class CommandTest {
             "run iron [#mine 8 iron_ore, #smelt raw_iron 8, #deposit iron_ingot] x3",
             "run iron [#mine 8 iron_ore, #smelt raw_iron 8, #deposit iron_ingot] x0"), mined);
         assertTrue(replies.get(replies.size() - 1).contains("No routine nope"), replies.toString());
+    }
+
+    @Test
+    void buildCommands() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#build house", "#build house 10 ~ -5", "#build list", "#build materials house"}) h.handle(c);
+        assertEquals(List.of("schem build house", "schem build house [10, 1, -5]", "schem list null", "schem materials house"), mined);
     }
 }

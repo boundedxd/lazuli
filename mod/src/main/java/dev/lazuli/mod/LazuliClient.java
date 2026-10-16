@@ -285,6 +285,60 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public void schematic(String mode, String file, int[] at) {
+				Minecraft mc = Minecraft.getInstance();
+				java.util.List<java.nio.file.Path> dirs = java.util.List.of(
+					FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("schematics"),
+					FabricLoader.getInstance().getGameDir().resolve("schematics"));
+				if (mode.equals("list")) {
+					int n = 0;
+					for (var d : dirs) {
+						if (!java.nio.file.Files.isDirectory(d)) continue;
+						try (var files = java.nio.file.Files.list(d)) {
+							for (var f : (Iterable<java.nio.file.Path>) files::iterator) {
+								String name = f.getFileName().toString();
+								if (name.endsWith(".litematic") || name.endsWith(".schem") || name.endsWith(".nbt")) {
+									reply(Chat.info("{}", name));
+									n++;
+								}
+							}
+						} catch (java.io.IOException ignored) {
+							// unreadable folder: skip it
+						}
+					}
+					if (n == 0) reply(Chat.info("No schematics in {} or {}", dirs.get(0), dirs.get(1)));
+					return;
+				}
+				java.nio.file.Path path = null;
+				for (var d : dirs)
+					for (String ext : new String[]{"", ".litematic", ".schem", ".nbt"})
+						if (path == null && java.nio.file.Files.isRegularFile(d.resolve(file + ext))) path = d.resolve(file + ext);
+				if (path == null) {
+					reply(Chat.err("No schematic {} ({}build list)", file, settings.prefix.get()));
+					return;
+				}
+				dev.lazuli.core.schematic.Schematic s;
+				try {
+					s = dev.lazuli.core.schematic.Schematic.load(path);
+				} catch (Exception e) {
+					reply(Chat.err("Can't read {}: {}", path.getFileName(), e.getMessage()));
+					return;
+				}
+				if (mode.equals("materials")) {
+					reply(Chat.info("{}: {}x{}x{}, {} blocks", path.getFileName(), s.sizeX(), s.sizeY(), s.sizeZ(), s.blocks().size()));
+					for (String line : dev.lazuli.mod.process.BuildProcess.materials(mc, s)) reply(line);
+					return;
+				}
+				if (!settings.buildEnabled.get()) {
+					reply(Chat.err("#build is off (buildEnabled)"));
+					return;
+				}
+				int[] o = at != null ? at : playerFeet();
+				LazuliClient.this.stopProcesses(false);
+				builds.startSchematic(mc, path.getFileName().toString(), s, new BlockPos(o[0], o[1], o[2]));
+			}
+
+			@Override
 			public dev.lazuli.core.task.Routines routines() {
 				return routines;
 			}

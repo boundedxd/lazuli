@@ -166,6 +166,10 @@ public final class Settings {
     public final Setting<Boolean> getItemHunt = bool("getItemHunt", true);
     /** A hunt gives up when it hasn't got enough after this many minutes. */
     public final Setting<Integer> huntMinutes = integer("huntMinutes", 5, 1, 60);
+    /** #build may place schematics (break wrong blocks and place the right ones). */
+    public final Setting<Boolean> buildEnabled = bool("buildEnabled", true);
+    /** #build out of a block (none in the chests either): leave those spots and build the rest (off: stop). */
+    public final Setting<Boolean> buildSkipMissing = bool("buildSkipMissing", false);
     /** #iceboat's search: runs kept each round (more: better lines, more time). */
     public final Setting<Integer> iceboatBeam = integer("iceboatBeam", 64, 8, 512);
     /** #iceboat's search: milliseconds per tick it may think (a tick is 50). */

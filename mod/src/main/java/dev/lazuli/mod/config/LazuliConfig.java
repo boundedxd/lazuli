@@ -199,6 +199,8 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(bool(s.selEnabled, "#sel fill and #sel clear may place and break the blocks in the selected box."))
                     .option(bool(s.chestFinal, "#getitem and #brew take the finished item from a chest you've opened if one has it."))
                     .option(bool(s.shulkers, "Taking items also looks in shulker boxes: one you carry (placed, opened, picked back up) or one in a known chest."))
+                    .option(bool(s.buildEnabled, "#build may place schematics (.litematic, .schem, .nbt): breaks wrong blocks, places the right ones."))
+                    .option(bool(s.buildSkipMissing, "#build out of a block: leave those spots and build the rest instead of stopping."))
                     .option(bool(s.chestIngredients, "#getitem and #brew take ingredients and materials from chests you've opened instead of getting them."))
                     .option(bool(s.getItemBatch, "#getitem crafts planks, sticks... all at once instead of over several steps."))
                     .option(bool(s.getItemNearby, "#getitem prefers blocks that are loaded around you (the trees here, the stone here)."))

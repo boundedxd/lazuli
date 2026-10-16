@@ -25,8 +25,11 @@ import java.util.function.Consumer;
 
 /**
  * #sel clear / #sel fill: breaks every block in the box (top layer first), or places a block in every empty spot
- * (bottom layer first, each against one already there). Within the lowest (or highest) layer left it works on the spot
+ * (bottom layer first, each against one already there). #build: a schematic, each spot its own block: a wrong block
+ * there is broken first, then the right one placed, bottom layer first. Within the layer it works on the spot
  * nearest the player, walking closer when it's out of reach; spots it can't get to are skipped and counted.
+ * <p>
+ * A schematic's blocks are matched by kind: a stair or log placed facing another way than drawn still counts.
  */
 public final class BuildProcess implements Process {
     private static final int TRIES = 3, ACT_TICKS = 100, PLACE_WAIT = 6;
@@ -40,6 +43,9 @@ public final class BuildProcess implements Process {
     private Selection.Box box;
     /** The block to place (item id), or null to clear. */
     private String block;
+    /** #build: the block wanted at each spot (null for #sel), and the schematic's name. */
+    private java.util.Map<BlockPos, net.minecraft.world.level.block.state.BlockState> plan;
+    private String planName;
     private boolean running;
     /** Spots still to do, by layer in working order. */
     private List<List<BlockPos>> layers;
@@ -69,7 +75,7 @@ public final class BuildProcess implements Process {
     @Override
     public String status() {
         if (!running) return null;
-        return (block == null ? "Clear" : "Fill " + name(block)) + "  " + done + "/" + total
+        return (plan != null ? "Build " + planName : block == null ? "Clear" : "Fill " + name(block)) + "  " + done + "/" + total
             + (take != null && take.active() ? "  (getting more)" : "");
     }
 
@@ -89,6 +95,7 @@ public final class BuildProcess implements Process {
         }
         this.box = box;
         this.block = block;
+        this.plan = null;
         layers = new ArrayList<>();
         int lastY = Integer.MIN_VALUE;
         for (int[] q : box.order(block == null, p.getBlockX(), p.getBlockY(), p.getBlockZ())) {
@@ -113,6 +120,74 @@ public final class BuildProcess implements Process {
         chat.accept(Chat.ok("{} {} blocks", block == null ? "Clearing" : "Filling with " + name(block) + ":", total));
     }
 
+    /**
+     * #build: places a schematic with its lowest corner at {@code origin}; blocks the game doesn't know (or that have no
+     * item) are left out and counted.
+     */
+    public void startSchematic(Minecraft mc, String name, dev.lazuli.core.schematic.Schematic s, BlockPos origin) {
+        stop(false);
+        LocalPlayer p = mc.player;
+        plan = new java.util.HashMap<>();
+        java.util.Map<String, net.minecraft.world.level.block.state.BlockState> parsed = new java.util.HashMap<>();
+        int unknown = 0;
+        for (var b : s.blocks()) {
+            var st = parsed.computeIfAbsent(b.state(), BuildProcess::parse);
+            if (st == null || st.getBlock().asItem() == net.minecraft.world.item.Items.AIR) {
+                unknown++;
+                continue;
+            }
+            plan.put(origin.offset(b.x(), b.y(), b.z()), st);
+        }
+        planName = name;
+        block = null;
+        box = new Selection.Box(origin.getX(), origin.getY(), origin.getZ(), origin.getX() + Math.max(0, s.sizeX() - 1),
+            origin.getY() + Math.max(0, s.sizeY() - 1), origin.getZ() + Math.max(0, s.sizeZ() - 1));
+        // bottom layer first; each layer gets ordered by distance as it's worked on
+        java.util.TreeMap<Integer, List<BlockPos>> byY = new java.util.TreeMap<>();
+        for (BlockPos b : plan.keySet()) byY.computeIfAbsent(b.getY(), k -> new ArrayList<>()).add(b);
+        layers = new ArrayList<>(byY.values());
+        layer = 0;
+        target = null;
+        done = refills = 0;
+        skipped.clear();
+        total = 0;
+        for (List<BlockPos> l : layers) for (BlockPos b : l) if (todo(mc, b)) total++;
+        if (total == 0) {
+            chat.accept(Chat.ok("{} is already built there", name));
+            plan = null;
+            return;
+        }
+        running = true;
+        trip.clear();
+        chat.accept(Chat.ok("Building {} at {}: {} blocks to place or fix{}", name, origin.toShortString(), total,
+            unknown > 0 ? " (" + unknown + " left out: unknown blocks, or ones with no item)" : ""));
+    }
+
+    /** "minecraft:oak_stairs[facing=east]" into a block state, or null if the game doesn't know it. */
+    private static net.minecraft.world.level.block.state.BlockState parse(String state) {
+        try {
+            return net.minecraft.commands.arguments.blocks.BlockStateParser.parseForBlock(
+                net.minecraft.core.registries.BuiltInRegistries.BLOCK, state, false).blockState();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** The item placed at {@code b}: the schematic's block there, or the fill block. */
+    private String itemFor(BlockPos b) {
+        if (plan == null) return block;
+        var st = plan.get(b);
+        return st == null ? null : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(st.getBlock().asItem()).toString();
+    }
+
+    /** Something has to be broken at {@code b} (clearing, or a wrong block where the schematic wants another). */
+    private boolean breaking(Minecraft mc, BlockPos b) {
+        if (plan == null) return block == null;
+        var s = mc.level.getBlockState(b);
+        var want = plan.get(b);
+        return want != null && !s.canBeReplaced() && s.getBlock() != want.getBlock();
+    }
+
     @Override
     public void stop(boolean announce) {
         if (!running) return;
@@ -123,6 +198,11 @@ public final class BuildProcess implements Process {
     /** Still something to do at {@code b}: a block to break, or room for one. */
     private boolean todo(Minecraft mc, BlockPos b) {
         var s = mc.level.getBlockState(b);
+        if (plan != null) {
+            var want = plan.get(b);
+            if (want == null || s.getBlock() == want.getBlock()) return false;
+            return s.canBeReplaced() || s.getDestroySpeed(mc.level, b) >= 0;
+        }
         if (block == null) {
             if (s.isAir() || !s.getFluidState().isEmpty() && s.getCollisionShape(mc.level, b).isEmpty()) return false;
             return s.getDestroySpeed(mc.level, b) >= 0;
@@ -141,8 +221,13 @@ public final class BuildProcess implements Process {
         if (take != null && take.active()) {
             if (take.tick(mc, p) == ChestTake.Result.RUNNING) return;
             if (take.got(p) == 0) {
-                end(Chat.err("Out of {} ({} of {} done)", name(block), done, total));
-                return;
+                String item = target == null ? block : itemFor(target);
+                if (plan != null && settings.buildSkipMissing.get() && target != null) {
+                    skip(p); // none in the chests either: build the rest
+                } else {
+                    end(Chat.err("Out of {} ({} of {} done)", name(item), done, total));
+                    return;
+                }
             }
         }
         if (target != null && !todo(mc, target)) {
@@ -156,7 +241,7 @@ public final class BuildProcess implements Process {
             skip(p);
             return;
         }
-        if (block == null) clear(mc, p);
+        if (breaking(mc, target)) clear(mc, p);
         else fill(mc, p);
     }
 
@@ -174,7 +259,7 @@ public final class BuildProcess implements Process {
                     continue;
                 }
                 // filling: not where the player stands, and only against something
-                if (block != null && (occupied(p, b) || against(mc, b) == null)) {
+                if (!breaking(mc, b) && (occupied(p, b) || against(mc, b) == null)) {
                     if (deferred == null) deferred = b;
                     continue;
                 }
@@ -209,7 +294,7 @@ public final class BuildProcess implements Process {
             }
             layer++;
         }
-        end(skipped.isEmpty() ? Chat.ok("{} done: {} blocks", block == null ? "Clearing" : "Filling", done)
+        end(skipped.isEmpty() ? Chat.ok("{} done: {} blocks", plan != null ? planName : block == null ? "Clearing" : "Filling", done)
             : Chat.warn("Done: {} blocks, {} skipped (couldn't get to them)", done, skipped.size()));
         return false;
     }
@@ -243,18 +328,23 @@ public final class BuildProcess implements Process {
 
     /** The block in hand, swapped in (or refilled from a chest); false while that's happening. */
     private boolean hold(Minecraft mc, LocalPlayer p) {
+        String item = itemFor(target);
         var inv = p.getInventory();
-        if (Inventories.key(inv.getItem(inv.getSelectedSlot())).equals(block)) return true;
+        if (Inventories.key(inv.getItem(inv.getSelectedSlot())).equals(item)) return true;
         int slot = -1;
-        for (int i = 0; i < 36; i++) if (Inventories.key(inv.getItem(i)).equals(block)) slot = slot < 0 || i < 9 && slot >= 9 ? i : slot;
+        for (int i = 0; i < 36; i++) if (Inventories.key(inv.getItem(i)).equals(item)) slot = slot < 0 || i < 9 && slot >= 9 ? i : slot;
         if (slot < 0) {
             input.release();
             if (take != null && settings.chestIngredients.get() && refills++ < 20
-                && take.start(mc, p, block, Math.min(64 * 9, total - done), pl -> held(pl))) {
-                chat.accept(Chat.info("Out of {}: getting more", name(block)));
+                && take.start(mc, p, item, Math.min(64 * 9, needed(mc, item)), pl -> held(pl, item))) {
+                chat.accept(Chat.info("Out of {}: getting more", name(item)));
                 return false;
             }
-            end(Chat.err("Out of {} ({} of {} done)", name(block), done, total));
+            if (plan != null && settings.buildSkipMissing.get()) {
+                skip(p); // build the rest; this one's left out
+                return false;
+            }
+            end(Chat.err("Out of {} ({} of {} done)", name(item), done, total));
             return false;
         }
         if (slot < 9) inv.setSelectedSlot(slot);
@@ -262,10 +352,37 @@ public final class BuildProcess implements Process {
         return false;
     }
 
-    private int held(LocalPlayer p) {
+    private int held(LocalPlayer p, String item) {
         int n = 0;
-        for (int i = 0; i < 36; i++) if (Inventories.key(p.getInventory().getItem(i)).equals(block)) n += p.getInventory().getItem(i).getCount();
+        for (int i = 0; i < 36; i++) if (Inventories.key(p.getInventory().getItem(i)).equals(item)) n += p.getInventory().getItem(i).getCount();
         return n;
+    }
+
+    /** How many more of {@code item} the rest of the job places. */
+    private int needed(Minecraft mc, String item) {
+        if (plan == null) return total - done;
+        int n = 0;
+        for (int l = layer; l < layers.size(); l++)
+            for (BlockPos b : layers.get(l)) if (!breaking(mc, b) && item.equals(itemFor(b)) && todo(mc, b)) n++;
+        return Math.max(1, n);
+    }
+
+    /** #build materials: what the schematic takes against what's in the inventory. */
+    public static List<String> materials(Minecraft mc, dev.lazuli.core.schematic.Schematic s) {
+        java.util.Map<String, Integer> items = new java.util.TreeMap<>();
+        for (var e : s.materials().entrySet()) {
+            var st = parse(e.getKey());
+            if (st == null) continue;
+            String item = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(st.getBlock().asItem()).toString();
+            if (!item.equals("minecraft:air")) items.merge(item, e.getValue(), Integer::sum);
+        }
+        List<String> out = new ArrayList<>();
+        var have = Inventories.plainCounts(mc.player);
+        items.entrySet().stream().sorted(java.util.Map.Entry.<String, Integer>comparingByValue().reversed()).forEach(e -> {
+            int h = have.getOrDefault(e.getKey(), 0);
+            out.add((h >= e.getValue() ? Chat.GREEN : Chat.RED) + e.getValue() + " " + name(e.getKey()) + Chat.GRAY + " (have " + h + ")");
+        });
+        return out;
     }
 
     /** Out of reach or sight: walk closer (a few times, then skip it). */
@@ -319,6 +436,7 @@ public final class BuildProcess implements Process {
 
     private void end(String msg) {
         running = false;
+        plan = null;
         target = null;
         trip.cancel();
         input.release();

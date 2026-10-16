@@ -107,6 +107,11 @@ public final class CommandHandler {
             reply(Chat.err("Ice boat racing isn't available here"));
         }
 
+        /** #build: {@code mode} "build" (file at {@code at}, null: here), "list", "materials" (file). */
+        default void schematic(String mode, String file, int[] at) {
+            reply(Chat.err("Schematics aren't available here"));
+        }
+
         /** Saved routines (null: none here). */
         default dev.lazuli.core.task.Routines routines() {
             return null;
@@ -370,6 +375,16 @@ public final class CommandHandler {
             }
             case "portal", "portals" -> ctx.portal(cmd.equals("portals") || args.length > 0 && args[0].equalsIgnoreCase("list"));
             case "iceboat", "race" -> iceboat(args);
+            case "build", "schematic", "schem" -> {
+                int[] f = ctx.playerFeet();
+                if (args.length == 0) ctx.reply(Chat.err("Usage: build <file> [x y z] | list | materials <file>"));
+                else if (args[0].equalsIgnoreCase("list")) ctx.schematic("list", null, null);
+                else if (args[0].equalsIgnoreCase("materials") && args.length == 2) ctx.schematic("materials", args[1], null);
+                else if (args.length == 1) ctx.schematic("build", args[0], null);
+                else if (args.length == 4 && coordinate(args[1]) && coordinate(args[2]) && coordinate(args[3])) {
+                    ctx.schematic("build", args[0], new int[]{coord(args[1], f[0]), coord(args[2], f[1]), coord(args[3], f[2])});
+                } else ctx.reply(Chat.err("Usage: build <file> [x y z] | list | materials <file>"));
+            }
             case "queue" -> {
                 List<String> steps = steps(String.join(" ", args), prefix);
                 if (steps.isEmpty()) ctx.reply(Chat.err("Usage: queue <command> ; <command> ; ..."));
@@ -449,6 +464,8 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "breed [animal...] [pairs]", "feed animals two at a time so they breed (any kind it has food for)"));
         ctx.reply(Chat.usage(p + "iceboat <x z | x y z> | lap [n] | record [name] | line [name|off]",
             "race the boat you're in: to a point or laps round the track (worked out from the blocks), or along a line you drove"));
+        ctx.reply(Chat.usage(p + "build <file> [x y z] | list | materials <file>",
+            "build a schematic (.litematic, .schem, .nbt from config/lazuli/schematics or schematics/), its lowest corner at x y z (here)"));
         ctx.reply(Chat.usage(p + "queue <command> ; <command> ; ...", "run commands one after another (each once the last is done)"));
         ctx.reply(Chat.usage(p + "routine add <name> <command> ; <command> ... | <name> [times|forever] | list | del <name> | stop",
             "save a chain of commands and run it again and again"));
