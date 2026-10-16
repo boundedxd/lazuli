@@ -21,6 +21,12 @@ public final class Settings {
     /** Break the boat after getting out, to take it along. */
     public final Setting<Boolean> boatPickup = bool("boatPickup", true);
     public final Setting<Integer> maxFallHeight = integer("maxFallHeight", 3, 0, 20);
+    /** Place water under itself before landing from a fall that would hurt (water bucket in the inventory). */
+    public final Setting<Boolean> waterClutch = bool("waterClutch", true);
+    /** With a water bucket, the path may drop this far onto solid ground and clutch (0: never on purpose). */
+    public final Setting<Integer> clutchFallHeight = integer("clutchFallHeight", 30, 0, 200);
+    /** Scoop the clutch water back up after landing. */
+    public final Setting<Boolean> clutchPickup = bool("clutchPickup", true);
     public final Setting<Boolean> allowParkour = bool("allowParkour", true);
     public final Setting<Boolean> allowBreak = bool("allowBreak", true);
     public final Setting<Boolean> allowPlace = bool("allowPlace", true);

@@ -49,6 +49,7 @@ public final class PathExecutor {
     private final Interactor interactor;
     private final Swimmer swimmer;
     private final BoatRider boat;
+    private final Clutch clutch;
     private final Torcher torcher;
     private final java.util.function.Consumer<String> chat;
     /** Watchdog: where the player was when nothing last happened, for how long, and the re-plans tried there. */
@@ -78,6 +79,7 @@ public final class PathExecutor {
         this.swimmer = new Swimmer(world);
         this.boat = new BoatRider(world, settings);
         this.torcher = new Torcher(settings);
+        this.clutch = new Clutch(settings);
     }
 
     public void tick(Minecraft mc) {
@@ -157,7 +159,14 @@ public final class PathExecutor {
         } else if (idx >= 0) {
             // move only as far as the world allows: up to the next block to break or place, never into the gap after it
             List<Long> walkable = path.subList(0, Builder.walkableEnd(world, path, idx, WALK_HORIZON) + 1);
-            planner.setMaxFall(settings.maxFallHeight.get());
+            // a long drop the path clutches just ahead: the planner may take it (nowhere else)
+            int fall = settings.maxFallHeight.get();
+            if (settings.waterClutch.get() && Clutch.ready(mc, player)) {
+                for (int i = idx; i + 1 < Math.min(path.size(), idx + 4); i++) {
+                    if (Pos.y(path.get(i)) - Pos.y(path.get(i + 1)) > fall) fall = Math.max(fall, settings.clutchFallHeight.get());
+                }
+            }
+            planner.setMaxFall(fall);
             planner.setFlicks(settings.allowFlicks.get());
             c = planner.plan(state, walkable, idx, sprint, maxTurn);
             if (c == null && !player.onGround()) c = InputPlanner.airBrake(state, settings.allowFlicks.get());
@@ -183,6 +192,14 @@ public final class PathExecutor {
         if (settings.unstick.get()) watchdog(player, snap, block, eating, false);
         if (c == null) c = new Controls(false, false, false, curYaw, curPitch);
         if (!sprint && c.sprint()) c = new Controls(c.forward(), c.back(), c.jump(), false, c.targetYaw(), c.targetPitch(), c.strafe(), c.sneak());
+        // falling far with a water bucket: look down and clutch (steering stays the path's)
+        Clutch.Aim ca = clutch.tick(mc, player);
+        if (ca != null) {
+            c = ca.still() ? new Controls(false, false, false, false, c.targetYaw(), ca.pitch(), 0, false)
+                : new Controls(c.forward(), c.back(), c.jump(), c.sprint(), c.targetYaw(), ca.pitch(), c.strafe(), c.sneak());
+            interacting = true;
+        }
+        session.setClutchFall(settings.waterClutch.get() && Clutch.ready(mc, player) ? settings.clutchFallHeight.get() : 0);
         float yaw = InputPlanner.approach(curYaw, c.targetYaw(), maxTurn);
         float pitchSpeed = interacting ? maxTurn : PITCH_SPEED;
         float pitch = curPitch + Math.max(-pitchSpeed, Math.min(pitchSpeed, c.targetPitch() - curPitch));

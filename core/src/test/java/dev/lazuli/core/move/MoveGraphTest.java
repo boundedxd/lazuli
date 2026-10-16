@@ -49,6 +49,23 @@ class MoveGraphTest {
     }
 
     @Test
+    void waterClutchAllowsLongerDrops() {
+        // a 20-block drop onto stone: only with a water bucket to clutch, and dearer than the fall alone
+        GridWorld w = new GridWorld(BlockKind.AIR).set(0, 30, 0, BlockKind.SOLID).set(1, 10, 0, BlockKind.SOLID);
+        long top = Pos.pack(0, 31, 0), bottom = Pos.pack(1, 11, 0);
+        assertEquals(INF, new MoveGraph(w, 3, true).optimisticCost(top, bottom));
+        MoveGraph g = new MoveGraph(w, 3, true).withClutch(24);
+        assertEquals(Costs.SPRINT_ONE + Costs.fallTicks(20) + MoveGraph.CLUTCH_PENALTY, g.optimisticCost(top, bottom), 1e-9);
+        assertEquals(INF, new MoveGraph(w, 3, true).withClutch(16).optimisticCost(top, bottom));
+        Set<Long> succ = new HashSet<>();
+        g.successors(top, succ::add);
+        assertTrue(succ.contains(bottom));
+        Set<Long> pred = new HashSet<>();
+        g.predecessors(bottom, pred::add);
+        assertTrue(pred.contains(top));
+    }
+
+    @Test
     void dangerAndObstacleAreNotWalkable() {
         GridWorld w = GridWorld.flatFloor(-5, -5, 5, 5).set(1, 1, 0, BlockKind.DANGER).set(-1, 0, 0, BlockKind.DANGER);
         MoveGraph g = new MoveGraph(w, 3, true);

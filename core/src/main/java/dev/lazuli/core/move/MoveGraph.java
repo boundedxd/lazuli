@@ -35,6 +35,10 @@ public final class MoveGraph implements Graph {
     private final double heuristicWeight;
     private final boolean parkour;
     private final Digging dig;
+    /** Drops up to this many blocks onto solid ground are fine too (a water bucket to clutch with); 0: none. */
+    private int clutchFall;
+    /** Extra cost (ticks) of a clutched drop: aiming, placing and picking the water up again, and the risk. */
+    public static final double CLUTCH_PENALTY = 20;
 
     private final dev.lazuli.core.util.LongMap<Boolean> nearGap = new dev.lazuli.core.util.LongMap<>(1024);
     private final dev.lazuli.core.util.EdgeMap jumpTicks = new dev.lazuli.core.util.EdgeMap(256);
@@ -64,6 +68,12 @@ public final class MoveGraph implements Graph {
         this.flat = sprint ? Costs.SPRINT_ONE : Costs.WALK_ONE;
         this.heuristicWeight = heuristicWeight;
         this.parkour = parkour;
+    }
+
+    /** Allows drops up to {@code blocks} (more than maxFall) onto solid footing, clutched with a water bucket. */
+    public MoveGraph withClutch(int blocks) {
+        this.clutchFall = blocks > maxFall ? blocks : 0;
+        return this;
     }
 
     public static boolean passable(BlockKind k) {
@@ -224,10 +234,11 @@ public final class MoveGraph implements Graph {
         }
         // drop: move over at u's height, then fall down v's column
         int blocks = (int) Math.ceil(-dh - 1e-6);
-        if (blocks > maxFall) return INF;
+        boolean clutch = blocks > maxFall;
+        if (clutch && blocks > clutchFall) return INF;
         if (!Standing.passage(w, ux, uz, vx, vz, fu, fu + Standing.BODY)) return INF;
         if (!Standing.clear(w, vx + 0.2, vz + 0.2, vx + 0.8, vz + 0.8, fv, fu + Standing.BODY)) return INF;
-        return flat + Costs.fallTicks(blocks);
+        return flat + Costs.fallTicks(blocks) + (clutch ? CLUTCH_PENALTY : 0);
     }
 
     private double jumpCost(long u, long v) {
@@ -408,11 +419,17 @@ public final class MoveGraph implements Graph {
         if (!Double.isNaN(feet(u))) {
             // a drop too deep to survive, unless it ends in water
             for (int[] d : DIRS) {
-                for (int dy = -maxFall - 2; dy >= -WATER_DROP; dy--) {
+                for (int dy = -maxFall - 2; dy >= -Math.max(WATER_DROP, clutchFall + 2); dy--) {
                     long v = Pos.offset(u, d[0], dy, d[1]);
                     BlockKind k = w.get(Pos.x(v), Pos.y(v), Pos.z(v));
                     if (k == BlockKind.AIR) continue;
-                    if (swims(v)) out.accept(v);
+                    if (swims(v)) {
+                        if (-dy <= WATER_DROP) out.accept(v);
+                    } else if (dy + 1 < -maxFall - 1) {
+                        // ground: clutching onto the cell above it
+                        long above = Pos.offset(v, 0, 1, 0);
+                        if (-(dy + 1) <= clutchFall + 1 && isNode(above)) out.accept(above);
+                    }
                     break;
                 }
             }
@@ -444,6 +461,15 @@ public final class MoveGraph implements Graph {
             // whoever can drop into this water from high above
             for (int[] d : DIRS) {
                 for (int dy = maxFall + 2; dy <= WATER_DROP; dy++) {
+                    long u = Pos.offset(v, d[0], dy, d[1]);
+                    if (!Double.isNaN(feet(u))) out.accept(u);
+                }
+            }
+        }
+        if (clutchFall > 0 && !Double.isNaN(feet(v))) {
+            // whoever can drop onto this ground from high above, clutching
+            for (int[] d : DIRS) {
+                for (int dy = maxFall + 2; dy <= clutchFall + 1; dy++) {
                     long u = Pos.offset(v, d[0], dy, d[1]);
                     if (!Double.isNaN(feet(u))) out.accept(u);
                 }
@@ -481,6 +507,6 @@ public final class MoveGraph implements Graph {
 
     @Override
     public int verticalReach() {
-        return Math.max(maxFall, WATER_DROP) + 4;
+        return Math.max(Math.max(maxFall, clutchFall), WATER_DROP) + 4;
     }
 }

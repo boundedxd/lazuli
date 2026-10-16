@@ -177,7 +177,19 @@ public final class PathingSession {
         in = new Interaction(in.allowBreak() && settings.allowBreak.get(), in.allowPlace() && settings.allowPlace.get(),
             in.throwaways(), in.breakTime());
         return new MoveGraph(world, settings.maxFallHeight.get(), settings.allowSprint.get(),
-            settings.heuristicWeight.get(), settings.allowParkour.get(), in);
+            settings.heuristicWeight.get(), settings.allowParkour.get(), in).withClutch(clutchFall);
+    }
+
+    private volatile int clutchFall;
+
+    /**
+     * Drops up to this many blocks are fine (0: just maxFallHeight): there's a water bucket to clutch with. A change
+     * re-plans the trip under way, so it never counts on a bucket that's gone.
+     */
+    public void setClutchFall(int blocks) {
+        if (blocks == clutchFall) return;
+        clutchFall = blocks;
+        if (snapshot.state() == State.PATHING) rebuild();
     }
 
     public void stop() {
