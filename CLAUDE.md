@@ -119,6 +119,10 @@ TraceRecorder should record sneak/pitch.
 ## Handoff (2026-10-16)
 Trading tested in game and works; the config-stops-pathing bug is fixed.
 Newest (built, deployed, pushed, suite green, NOT tested in game):
+- **Chests for #getitem/#brew** — `chestFinal` (take the finished item from a remembered chest) and `chestIngredients`
+  (take materials/ingredients; #brew's #getitem runs with `forIngredients`), replacing `getItemChests`. `mod/process/ChestTake`
+  (shared take-from-nearest-remembered-chest). Potions are remembered as `minecraft:potion@minecraft:swiftness` too
+  (`core/inventory/ItemKeys`, `Inventories.key` adds `@potion`), so #brew can take finished bottles.
 - **Stuck fix** — `LazyDStarLite`: a NaN edge cost counts as impassable (it kept a node inconsistent and burned whole
   search budgets), plan loops check cancel/deadline. Unstick (`unstickRestart`) no longer #kills + reruns the job (that
   made #getitem re-get items): `LazuliClient.freshWorker` swaps the planner thread (logs its stack if it was busy) and

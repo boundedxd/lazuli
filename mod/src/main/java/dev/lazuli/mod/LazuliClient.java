@@ -165,6 +165,7 @@ public final class LazuliClient implements ClientModInitializer {
 		getItem.useTrades(trades);
 		brews = new dev.lazuli.mod.process.BrewProcess(session, settings, clicks, crafts, this::chat);
 		brews.useGetItem(getItem);
+		brews.useChests(containers, this::chests, LazuliClient::dimension);
 		enchants = new dev.lazuli.mod.process.EnchantProcess(session, settings, clicks, this::chat);
 		elytra = new dev.lazuli.mod.process.ElytraProcess(session, settings, clicks, this::chat);
 		RecipeData.drops();

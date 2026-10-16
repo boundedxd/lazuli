@@ -108,8 +108,10 @@ public final class Settings {
     public final Setting<Boolean> chestMemory = bool("chestMemory", true);
     /** #deposit without a container puts each item into a remembered chest that already holds it (else the nearest). */
     public final Setting<Boolean> depositSorted = bool("depositSorted", true);
-    /** #getitem takes what it needs from remembered chests within {@link #chestRange} before mining or crafting it. */
-    public final Setting<Boolean> getItemChests = bool("getItemChests", true);
+    /** #getitem / #brew take the finished thing asked for from a remembered chest within {@link #chestRange} if one has it. */
+    public final Setting<Boolean> chestFinal = bool("chestFinal", true);
+    /** #getitem / #brew take what they make it from (ingredients, materials) from remembered chests instead of getting them. */
+    public final Setting<Boolean> chestIngredients = bool("chestIngredients", true);
     public final Setting<Integer> chestRange = integer("chestRange", 128, 8, 2048);
     /** #getitem crafts what it needs several times over (planks, sticks...) all at once: fewer steps. */
     public final Setting<Boolean> getItemBatch = bool("getItemBatch", true);

@@ -47,10 +47,11 @@ public final class GetItemProcess implements Process {
     private ContainerProcess containers;
     private java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests;
     private java.util.function.Function<Minecraft, String> dimension;
-    /** Taking an item out of a remembered chest: where, what, and how many there were before. */
-    private net.minecraft.core.BlockPos withdrawAt;
+    /** Taking an item out of a remembered chest, and which. */
+    private ChestTake take;
     private String withdrawItem;
-    private int withdrawBefore;
+    /** Started for another job's ingredients (#brew): what it wants counts as ingredients for the chest settings. */
+    private boolean forIngredients;
     private boolean running;
     private Outcome outcome = Outcome.NONE;
     /** What to have: full ids, counts of at least 1. */
@@ -82,8 +83,7 @@ public final class GetItemProcess implements Process {
         return running;
     }
 
-    /** Lets it take what it needs from chests opened before (getItemChests). */
-    private HuntProcess hunt;
+        private HuntProcess hunt;
 
     /** Hunting for mob drops (getItemHunt). */
     public void useHunt(HuntProcess hunt) {
@@ -91,11 +91,13 @@ public final class GetItemProcess implements Process {
         RecipeData.mobDrops();
     }
 
+    /** Lets it take what it needs from chests opened before (chestFinal, chestIngredients). */
     public void useChests(ContainerProcess containers, java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests,
                           java.util.function.Function<Minecraft, String> dimension) {
         this.containers = containers;
         this.chests = chests;
         this.dimension = dimension;
+        this.take = new ChestTake(settings, containers, chests, dimension);
     }
 
     /** Lets it trade with villagers for an item when that's the only way or cheaper (getItemTrade). */
@@ -112,7 +114,7 @@ public final class GetItemProcess implements Process {
         String s = "Get " + describe(wants);
         if (bring == Bring.RETURN) s += "  bringing it back";
         else if (bring == Bring.DEPOSIT) s += "  putting it away";
-        else if (withdrawAt != null) s += "  taking " + name(withdrawItem) + " from a chest";
+        else if (take != null && take.active()) s += "  taking " + name(withdrawItem) + " from a chest";
         else if (trading != null) s += "  trading for " + name(trading.item());
         else if (current != null) s += "  step " + (done + 1) + "/" + (done + planned) + ": " + verb(current) + " " + current.count() + " " + name(current.item());
         return s;
@@ -129,7 +131,13 @@ public final class GetItemProcess implements Process {
 
     /** Gets each item until the inventory holds at least its count (a negative count: 1), then brings them back if asked. */
     public void start(Minecraft mc, dev.lazuli.core.craft.ItemRequest request) {
+        start(mc, request, false);
+    }
+
+    /** @param forIngredients the items are for another job (#brew): chestIngredients decides on chests for all of them */
+    public void start(Minecraft mc, dev.lazuli.core.craft.ItemRequest request, boolean forIngredients) {
         stop(false);
+        this.forIngredients = forIngredients;
         outcome = Outcome.NONE;
         java.util.Map<String, Integer> merged = new java.util.LinkedHashMap<>();
         for (ItemCount i : request.items()) {
@@ -184,7 +192,8 @@ public final class GetItemProcess implements Process {
                 case KILL -> hunt.stop(false);
             }
         }
-        if (withdrawAt != null || bring == Bring.DEPOSIT) containers.stop(false);
+        if (take != null) take.stop();
+        if (bring == Bring.DEPOSIT) containers.stop(false);
         if (trading != null) trade.stop(false);
         trading = null;
         trip.cancel();
@@ -199,18 +208,17 @@ public final class GetItemProcess implements Process {
             bringTick(mc, p);
             return;
         }
-        if (withdrawAt != null) {
-            if (containers.active()) return;
-            if (containers.outcome() == ContainerProcess.Outcome.CANCELLED) {
-                end(Outcome.CANCELLED, null);
-                return;
+        if (take != null && take.active()) {
+            switch (take.tick(mc, p)) {
+                case RUNNING -> {
+                    return;
+                }
+                case CANCELLED -> {
+                    end(Outcome.CANCELLED, null);
+                    return;
+                }
+                case DONE -> done++;
             }
-            // couldn't get to it or open it: don't count on that chest again
-            if (count(p, withdrawItem) <= withdrawBefore && containers.outcome() == ContainerProcess.Outcome.FAILED) {
-                chests.apply(mc).forget(dimension.apply(mc), withdrawAt.getX(), withdrawAt.getY(), withdrawAt.getZ());
-            }
-            withdrawAt = null;
-            done++;
         }
         if (trading != null) {
             if (trade.active()) return;
@@ -249,7 +257,7 @@ public final class GetItemProcess implements Process {
             return;
         }
         if (p.containerMenu != p.inventoryMenu) return; // a step's menu still closing
-        for (ItemCount w : wants) if (withdraw(mc, p, w.item(), w.count() - count(p, w.item()))) return;
+        for (ItemCount w : wants) if (withdraw(mc, p, w.item(), w.count() - count(p, w.item()), !forIngredients)) return;
         Recipes recipes = RecipeData.get().getNow(null);
         Drops drops = RecipeData.drops().getNow(null);
         if (recipes == null || drops == null) return; // still reading the game's data
@@ -281,7 +289,7 @@ public final class GetItemProcess implements Process {
         dev.lazuli.mod.control.Tools.keep("getitem", plan.keep());
         ItemPlanner.Action a = plan.actions().get(0);
         // what the first step makes is lying in a chest: take it instead
-        if (withdraw(mc, p, a.item(), a.count())) return;
+        if (withdraw(mc, p, a.item(), a.count(), !forIngredients && wants.stream().anyMatch(w -> w.item().equals(a.item())))) return;
         String key = a.toString();
         repeats = key.equals(lastStep) ? repeats + 1 : 0;
         lastStep = key;
@@ -368,24 +376,15 @@ public final class GetItemProcess implements Process {
         }
     }
 
-    /** Starts taking {@code n} of {@code item} from the nearest remembered chest holding some; false if there's none. */
-    private boolean withdraw(Minecraft mc, LocalPlayer p, String item, int n) {
-        if (n <= 0 || containers == null || !settings.getItemChests.get() || !settings.chestMemory.get()) return false;
-        var mem = chests.apply(mc);
+    /**
+     * Starts taking {@code n} of {@code item} from the nearest remembered chest holding some; false if there's none.
+     * @param finished whether it's the thing asked for (chestFinal) rather than something to make it with (chestIngredients)
+     */
+    private boolean withdraw(Minecraft mc, LocalPlayer p, String item, int n, boolean finished) {
+        if (take == null || !(finished ? settings.chestFinal.get() : settings.chestIngredients.get())) return false;
         String id = Inventories.id(item);
-        var bp = p.blockPosition();
-        var spot = mem.nearest(id, dimension.apply(mc), bp.getX(), bp.getY(), bp.getZ(), settings.chestRange.get());
-        if (spot == null) return false;
-        withdrawAt = new net.minecraft.core.BlockPos(spot.x(), spot.y(), spot.z());
         withdrawItem = id;
-        withdrawBefore = count(p, id);
-        containers.start(mc, false, List.of(new ItemCount(id, Math.min(n, spot.count()))), withdrawAt);
-        if (!containers.active()) {
-            mem.forget(spot.dim(), spot.x(), spot.y(), spot.z());
-            withdrawAt = null;
-            return false;
-        }
-        return true;
+        return take.start(mc, p, id, n, pl -> count(pl, id));
     }
 
     private Status status(ItemPlanner.Action a) {

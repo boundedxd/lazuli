@@ -64,7 +64,7 @@ public final class ChestWatcher {
         Map<String, Integer> items = new HashMap<>();
         for (int i = 0; i < size; i++) {
             ItemStack s = menu.getSlot(i).getItem();
-            if (!s.isEmpty()) items.merge(BuiltInRegistries.ITEM.getKey(s.getItem()).toString(), s.getCount(), Integer::sum);
+            if (!s.isEmpty()) for (String id : Inventories.memoryIds(s)) items.merge(id, s.getCount(), Integer::sum);
         }
         ChestMemory m = memory.apply(mc);
         String dim = dimension.apply(mc);

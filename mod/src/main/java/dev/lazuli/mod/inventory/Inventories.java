@@ -20,23 +20,37 @@ public final class Inventories {
     public static final int[] PLAYER_MAIN = Menu.range(9, 45);
     public static final int OFFHAND = 45;
 
-    /** {@link Stack#item()} for a game stack: its id, plus a hash of whatever keeps it from stacking with a plain one. */
+    /** {@link Stack#item()} for a game stack: its id, plus a hash of whatever keeps it from stacking with a plain one
+     * (and a potion's kind, see {@link dev.lazuli.core.inventory.ItemKeys}). */
     public static String key(ItemStack s) {
         String id = BuiltInRegistries.ITEM.getKey(s.getItem()).toString();
-        return s.getComponentsPatch().isEmpty() ? id : id + "#" + s.getComponentsPatch().hashCode();
+        if (s.getComponentsPatch().isEmpty()) return id;
+        String kind = potionKind(s);
+        return id + "#" + s.getComponentsPatch().hashCode() + (kind == null ? "" : "@" + kind);
+    }
+
+    /** What a chest remembers a stack as: its id, and for a potion also "id@potion" (so #brew can find it). */
+    public static List<String> memoryIds(ItemStack s) {
+        String id = BuiltInRegistries.ITEM.getKey(s.getItem()).toString();
+        String kind = potionKind(s);
+        return kind == null ? List.of(id) : List.of(id, id + "@" + kind);
+    }
+
+    /** A bottle's (or tipped arrow's) potion id, or null. */
+    public static String potionKind(ItemStack s) {
+        var pc = s.get(net.minecraft.core.component.DataComponents.POTION_CONTENTS);
+        if (pc == null) return null;
+        return pc.potion().flatMap(net.minecraft.core.Holder::unwrapKey).map(k -> k.identifier().toString()).orElse(null);
     }
 
     /** Matches stacks of {@code name} (an id, namespace optional, whatever its enchantments...); "all" matches anything. */
     public static Predicate<String> matcher(String name) {
-        if (name.equals("all")) return k -> true;
-        String id = name.contains(":") ? name : "minecraft:" + name.toLowerCase(Locale.ROOT);
-        return k -> k.equals(id) || k.startsWith(id + "#");
+        return dev.lazuli.core.inventory.ItemKeys.matcher(name);
     }
 
     /** A full item id: "Raw_Iron" -> "minecraft:raw_iron". */
     public static String id(String name) {
-        String n = name.toLowerCase(Locale.ROOT);
-        return n.contains(":") ? n : "minecraft:" + n;
+        return dev.lazuli.core.inventory.ItemKeys.id(name);
     }
 
     /** Plain items (nothing enchanted, named or damaged) in the main inventory and hotbar, by id. */

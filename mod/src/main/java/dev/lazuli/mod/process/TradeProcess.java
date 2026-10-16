@@ -401,7 +401,7 @@ public final class TradeProcess implements Process {
             new ItemPlanner.Rules(settings.getItemMine.get(), settings.getItemSmelt.get(),
                 settings.craftPlaceTable.get() && settings.allowPlace.get(), settings.smeltPlaceFurnace.get() && settings.allowPlace.get()));
         Map<String, Integer> have = Inventories.plainCounts(p);
-        Map<String, Integer> stored = settings.chestMemory.get() && settings.getItemChests.get() ? chests.apply(mc).totals(dimension.apply(mc)) : Map.of();
+        Map<String, Integer> stored = settings.chestMemory.get() && settings.chestIngredients.get() ? chests.apply(mc).totals(dimension.apply(mc)) : Map.of();
         int pick = GetItemProcess.pickTier(p);
         Map<String, Double> memo = new java.util.HashMap<>();
         return item -> memo.computeIfAbsent(item, i -> stored.getOrDefault(i, 0) > 0 ? 0.05 : planner.cost(i, have, pick));

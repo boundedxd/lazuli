@@ -52,7 +52,7 @@ public final class BrewProcess implements Process {
     /** Ticks with nothing brewing before it gives up; ticks filling bottles may take. */
     private static final int STALL_TICKS = 200, FILL_TICKS = 600, USE_EVERY = 6;
 
-    private enum Phase { IDLE, GATHER, MAKE, FILL, STATION, BREW, COLLECT, PICKUP }
+    private enum Phase { IDLE, TAKE, GATHER, MAKE, FILL, STATION, BREW, COLLECT, PICKUP }
 
     public enum Outcome { NONE, DONE, FAILED, CANCELLED }
 
@@ -64,6 +64,9 @@ public final class BrewProcess implements Process {
     private final Trip trip;
     private final InputDriver input = new InputDriver();
     private GetItemProcess getItem;
+    /** Taking finished bottles from a remembered chest (chestFinal), and how many came from chests. */
+    private ChestTake take;
+    private int fromChests;
     private Phase phase = Phase.IDLE;
     private Outcome outcome = Outcome.NONE;
     private String potion;
@@ -84,6 +87,12 @@ public final class BrewProcess implements Process {
         this.trip = new Trip(session);
     }
 
+    /** Takes finished bottles from remembered chests (chestFinal). */
+    public void useChests(ContainerProcess containers, java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests,
+                          java.util.function.Function<Minecraft, String> dimension) {
+        this.take = new ChestTake(settings, containers, chests, dimension);
+    }
+
     /** Fetches missing ingredients with #getitem (brewGather). */
     public void useGetItem(GetItemProcess getItem) {
         this.getItem = getItem;
@@ -102,6 +111,7 @@ public final class BrewProcess implements Process {
     public String status() {
         if (phase == Phase.IDLE) return null;
         String doing = switch (phase) {
+            case TAKE -> "taking some from a chest";
             case GATHER -> "getting ingredients";
             case MAKE -> "crafting";
             case FILL -> "filling bottles";
@@ -129,11 +139,41 @@ public final class BrewProcess implements Process {
         this.potion = Brewing.id(potion);
         this.form = form;
         this.count = Math.max(1, count);
-        made = 0;
+        made = fromChests = 0;
         gathered = false;
         standPos = null;
         chat.accept(Chat.ok("Brewing {} {}{}", this.count, name(this.potion), form == Brewing.Form.DRINK ? "" : " (" + form.name().toLowerCase() + ")"));
-        plan(mc);
+        if (!takeFinished(mc)) plan(mc);
+    }
+
+    /** The bottle item for the form asked for. */
+    private String bottleItem() {
+        return switch (form) {
+            case DRINK -> "minecraft:potion";
+            case SPLASH -> "minecraft:splash_potion";
+            case LINGERING -> "minecraft:lingering_potion";
+        };
+    }
+
+    /** Starts taking finished bottles from a remembered chest (chestFinal); false if off or none known. */
+    private boolean takeFinished(Minecraft mc) {
+        if (take == null || !settings.chestFinal.get() || count - made <= 0) return false;
+        String item = bottleItem();
+        String key = dev.lazuli.core.inventory.ItemKeys.potion(item, potion);
+        if (!take.start(mc, mc.player, key, count - made, pl -> held(pl, item, potion))) return false;
+        enter(Phase.TAKE, mc.player);
+        return true;
+    }
+
+    /** Bottles of {@code potion} as {@code item} in the main inventory and hotbar. */
+    private static int held(LocalPlayer p, String item, String potion) {
+        int n = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = p.getInventory().getItem(i);
+            if (!s.isEmpty() && Inventories.id(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(s.getItem()).toString()).equals(item)
+                && potion.equals(potion(s))) n += s.getCount();
+        }
+        return n;
     }
 
     /** Works out the next thing to do from the inventory: get ingredients, make bottles or a stand, fill, or brew. */
@@ -220,7 +260,7 @@ public final class BrewProcess implements Process {
         gathered = true;
         enter(Phase.GATHER, mc.player);
         chat.accept(Chat.info("Getting {} first", ItemCount.describe(items.stream().map(i -> new ItemCount(name(i.item()), i.count())).toList())));
-        getItem.start(mc, new ItemRequest(items, null, false));
+        getItem.start(mc, new ItemRequest(items, null, false), true);
         return true;
     }
 
@@ -229,6 +269,7 @@ public final class BrewProcess implements Process {
         if (phase == Phase.IDLE) return;
         if (phase == Phase.MAKE) crafts.stop(false);
         if (phase == Phase.GATHER) getItem.stop(false);
+        if (phase == Phase.TAKE) take.stop();
         end(Outcome.CANCELLED, announce ? Chat.warn("Stopped") : null);
     }
 
@@ -241,6 +282,19 @@ public final class BrewProcess implements Process {
             return;
         }
         switch (phase) {
+            case TAKE -> {
+                switch (take.tick(mc, p)) {
+                    case RUNNING -> {}
+                    case CANCELLED -> end(Outcome.CANCELLED, null);
+                    case DONE -> {
+                        int got = Math.min(take.got(p), count - made);
+                        made += got;
+                        fromChests += got;
+                        // got some: another chest may have the rest
+                        if (got == 0 || !takeFinished(mc)) plan(mc);
+                    }
+                }
+            }
             case GATHER -> {
                 if (getItem.active()) return;
                 if (getItem.outcome() == GetItemProcess.Outcome.DONE) plan(mc);
@@ -485,7 +539,8 @@ public final class BrewProcess implements Process {
     }
 
     private void done(LocalPlayer p) {
-        end(Outcome.DONE, Chat.ok("Brewed {} {}", made, name(potion)));
+        end(Outcome.DONE, fromChests == 0 ? Chat.ok("Brewed {} {}", made, name(potion))
+            : Chat.ok("Got {} {} ({} from chests)", made, name(potion), fromChests));
     }
 
     private void fail(String msg) {
