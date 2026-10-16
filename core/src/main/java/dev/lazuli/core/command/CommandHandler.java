@@ -75,7 +75,7 @@ public final class CommandHandler {
          * Follows entities: {@code mode} is players, entities, player (names in {@code args}) or entity (type ids in
          * {@code args}).
          */
-        default void follow(String mode, List<String> args) {
+        default void follow(String mode, List<String> args, int distance) {
             reply(Chat.err("Following isn't available here"));
         }
 
@@ -301,7 +301,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "come", "come to the camera (in freecam: wherever it is)"));
         ctx.reply(Chat.usage(p + "freecam", "fly the camera around; left-click a block to go there"));
         ctx.reply(Chat.usage(p + "mine [quantity] <block> [block...]", "find and mine blocks, e.g. " + p + "mine 16 diamond_ore"));
-        ctx.reply(Chat.usage(p + "follow players | entities | player <name...> | entity <type...>", "keep close to someone"));
+        ctx.reply(Chat.usage(p + "follow players | entities | player <name...> | entity <type...> [distance]", "keep close to someone"));
         ctx.reply(Chat.usage(p + "explore [x z]", "walk into chunks never loaded, spiralling out"));
         ctx.reply(Chat.usage(p + "tunnel [height width depth]", "dig straight ahead (default 2x1, no end)"));
         ctx.reply(Chat.usage(p + "farm [range]", "harvest and replant crops around here"));
@@ -326,8 +326,15 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "record start <name> | stop", "record a movement trace"));
     }
 
-    /** follow players | entities | player <name...> | entity <type...>; a bare name means that player. */
+    /** follow players | entities | player <name...> | entity <type...> [distance]; a bare name means that player. */
     private void follow(String[] args) {
+        // a number last: how close to keep (else followRadius)
+        int distance = 0;
+        if (args.length > 1 && args[args.length - 1].matches("\\d{1,3}")) {
+            distance = Integer.parseInt(args[args.length - 1]);
+            args = Arrays.copyOf(args, args.length - 1);
+        }
+        int d = distance;
         if (args.length == 0) {
             ctx.reply(Chat.err("Usage: follow players | entities | player <name...> | entity <type...>"));
             return;
@@ -335,12 +342,12 @@ public final class CommandHandler {
         String m = args[0].toLowerCase(Locale.ROOT);
         List<String> rest = List.of(Arrays.copyOfRange(args, 1, args.length));
         switch (m) {
-            case "players", "entities" -> ctx.follow(m, List.of());
+            case "players", "entities" -> ctx.follow(m, List.of(), d);
             case "player", "entity" -> {
                 if (rest.isEmpty()) ctx.reply(Chat.err("Usage: follow {} <{}...>", m, m.equals("player") ? "name" : "type"));
-                else ctx.follow(m, rest.stream().map(s -> s.toLowerCase(Locale.ROOT)).toList());
+                else ctx.follow(m, rest.stream().map(s -> s.toLowerCase(Locale.ROOT)).toList(), d);
             }
-            default -> ctx.follow("player", List.of(args)); // follow Steve
+            default -> ctx.follow("player", List.of(args), d); // follow Steve
         }
     }
 

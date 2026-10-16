@@ -64,6 +64,15 @@ public final class FollowProcess implements Process {
         return active;
     }
 
+    /** How close to keep this time (0: followRadius). */
+    private int distance;
+
+    /** Follows at {@code distance} blocks (0: followRadius); see {@link #start(Mode, List)}. */
+    public boolean start(Mode mode, List<String> args, int distance) {
+        this.distance = distance;
+        return start(mode, args);
+    }
+
     /** @param args player names (PLAYER) or entity type ids (ENTITY); ignored otherwise. Returns false if invalid. */
     public boolean start(Mode mode, List<String> args) {
         names.clear();
@@ -131,7 +140,7 @@ public final class FollowProcess implements Process {
         }
         if (waiting) chat.accept(Chat.ok("Following {}", target.getName().getString()));
         waiting = false;
-        int radius = settings.followRadius.get();
+        int radius = distance > 0 ? distance : settings.followRadius.get();
         net.minecraft.world.phys.Vec3 tv = target.getDeltaMovement();
         // entities' client-side motion is often zero (interpolated): use how far it moved since last tick instead
         double mx = target.getX() - target.xo, mz = target.getZ() - target.zo;

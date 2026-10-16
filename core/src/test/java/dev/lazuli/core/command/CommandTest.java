@@ -40,8 +40,8 @@ class CommandTest {
             public void mine(int quantity, List<String> blocks) {
                 mined.add(quantity + " " + blocks);
             }
-            public void follow(String mode, List<String> args) {
-                mined.add("follow " + mode + " " + args);
+            public void follow(String mode, List<String> args, int distance) {
+                mined.add("follow " + mode + " " + args + (distance > 0 ? " at " + distance : ""));
             }
             public void explore(int[] origin) {
                 mined.add("explore " + (origin == null ? "here" : origin[0] + " " + origin[1]));
@@ -234,6 +234,16 @@ class CommandTest {
         h.handle("#follow player");
         h.handle("#explore x 1");
         assertEquals(3, replies.size(), replies.toString());
+    }
+
+    @Test
+    void followTakesADistanceLast() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#follow Notch 5", "#follow players 3", "#follow player Steve Alex 8", "#follow entity zombie 2"}) {
+            h.handle(c);
+        }
+        assertEquals(List.of("follow player [Notch] at 5", "follow players [] at 3", "follow player [steve, alex] at 8",
+            "follow entity [zombie] at 2"), mined);
     }
 
     @Test

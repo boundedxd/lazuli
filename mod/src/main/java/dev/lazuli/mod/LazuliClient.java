@@ -206,9 +206,9 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
-			public void follow(String mode, java.util.List<String> args) {
+			public void follow(String mode, java.util.List<String> args, int distance) {
 				LazuliClient.this.stopProcesses(false);
-				follow.start(FollowProcess.Mode.valueOf(mode.toUpperCase(java.util.Locale.ROOT)), args);
+				follow.start(FollowProcess.Mode.valueOf(mode.toUpperCase(java.util.Locale.ROOT)), args, distance);
 			}
 
 			@Override
