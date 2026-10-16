@@ -125,6 +125,8 @@ public final class LazuliClient implements ClientModInitializer {
 	private dev.lazuli.mod.process.BuildProcess builds;
 	private dev.lazuli.mod.process.BreedProcess breeds;
 	private dev.lazuli.mod.process.FishProcess fishing;
+	private dev.lazuli.mod.process.PortalProcess portals;
+	private final java.util.Map<String, dev.lazuli.core.portal.PortalMemory> portalsByWorld = new java.util.HashMap<>();
 	/** Every process; at most one runs at a time. */
 	private java.util.List<Process> processes;
 	/** "[Lazuli] " in blue. */
@@ -186,7 +188,9 @@ public final class LazuliClient implements ClientModInitializer {
 		}, this::chat);
 		breeds = new dev.lazuli.mod.process.BreedProcess(session, settings, this::chat);
 		fishing = new dev.lazuli.mod.process.FishProcess(session, settings, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm, breeds, fishing, containers, crafts, smelts, hunt, getItem,
+		portals = new dev.lazuli.mod.process.PortalProcess(session, settings, cache, this::portalMemory, LazuliClient::dimension, this::chat);
+		portals.useGetItem(getItem);
+		processes = java.util.List.of(portals, mine, follow, explore, tunnel, farm, breeds, fishing, containers, crafts, smelts, hunt, getItem,
 			trades, brews, enchants, elytra, sorts, builds, sleeps, restock, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
@@ -271,6 +275,33 @@ public final class LazuliClient implements ClientModInitializer {
 			public void farm(int range) {
 				LazuliClient.this.stopProcesses(false);
 				farm.start(Minecraft.getInstance(), range);
+			}
+
+			@Override
+			public void portal(boolean list) {
+				Minecraft mc = Minecraft.getInstance();
+				if (list) {
+					var known = portalMemory(mc).list(LazuliClient.dimension(mc));
+					if (known.isEmpty()) reply(Chat.info("No portals known in {}", LazuliClient.dimension(mc)));
+					for (var k : known) reply(Chat.info("Portal at {} {} {}", k.x(), k.y(), k.z()));
+					return;
+				}
+				LazuliClient.this.stopProcesses(false);
+				if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
+				portals.hop(mc);
+			}
+
+			@Override
+			public boolean netherInstead(dev.lazuli.core.goal.Goal goal) {
+				Minecraft mc = Minecraft.getInstance();
+				if (mc.player == null || portals.active()) return false;
+				int[] at = goal instanceof dev.lazuli.core.goal.GoalBlock b ? new int[]{b.x(), b.z()}
+					: goal instanceof dev.lazuli.core.goal.GoalXZ g ? new int[]{g.x(), g.z()}
+					: goal instanceof dev.lazuli.core.goal.GoalNear n ? new int[]{n.x(), n.z()} : null;
+				if (at == null) return false;
+				if (!portals.route(mc, goal, at[0], at[1])) return false;
+				if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
+				return true;
 			}
 
 			@Override
@@ -762,6 +793,30 @@ public final class LazuliClient implements ClientModInitializer {
 			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("chests").resolve(f)));
 	}
 
+	/** The nether portals seen on this server (or world); kept in memory only with portalMemory off. */
+	private dev.lazuli.core.portal.PortalMemory portalMemory(Minecraft mc) {
+		return portalsByWorld.computeIfAbsent(worldFile(mc), f -> new dev.lazuli.core.portal.PortalMemory(settings.portalMemory.get()
+			? FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("portals").resolve(f) : null));
+	}
+
+	/** Remembers the portal blocks in a chunk just loaded (only sections that have any are looked through). */
+	private void scanPortals(ClientLevel level, LevelChunk chunk) {
+		if (!settings.portalMemory.get()) return;
+		Minecraft mc = Minecraft.getInstance();
+		var sections = chunk.getSections();
+		for (int si = 0; si < sections.length; si++) {
+			var s = sections[si];
+			if (s == null || s.hasOnlyAir() || !s.getStates().maybeHas(st -> st.is(net.minecraft.world.level.block.Blocks.NETHER_PORTAL))) continue;
+			int baseY = level.getMinY() + si * 16;
+			for (int y = 0; y < 16; y++)
+				for (int z = 0; z < 16; z++)
+					for (int x = 0; x < 16; x++) {
+						if (!s.getBlockState(x, y, z).is(net.minecraft.world.level.block.Blocks.NETHER_PORTAL)) continue;
+						portalMemory(mc).add(dimension(mc), chunk.getPos().getMinBlockX() + x, baseY + y, chunk.getPos().getMinBlockZ() + z);
+					}
+		}
+	}
+
 	/** Every villager's trades seen on this server (or world). */
 	private dev.lazuli.core.trade.TradeMemory tradeMemory(Minecraft mc) {
 		return tradesByWorld.computeIfAbsent(worldFile(mc), f -> new dev.lazuli.core.trade.TradeMemory(
@@ -804,6 +859,7 @@ public final class LazuliClient implements ClientModInitializer {
 		session.regionChanged(cx * 16, cache.minY(), cz * 16, cx * 16 + 15, cache.maxY(), cz * 16 + 15);
 		mine.onChunkLoad(chunk);
 		explore.onChunkLoad(chunk);
+		scanPortals(level, chunk);
 	}
 
 	private void onChunkUnload(ClientLevel level, LevelChunk chunk) {
@@ -818,6 +874,10 @@ public final class LazuliClient implements ClientModInitializer {
 		LazuliClient self = instance;
 		if (self == null || level != self.lastLevel) return;
 		self.mine.onBlockChanged(pos, state);
+		if (self.settings.portalMemory.get() && state.is(net.minecraft.world.level.block.Blocks.NETHER_PORTAL)) {
+			Minecraft mc = Minecraft.getInstance();
+			self.portalMemory(mc).add(dimension(mc), pos.getX(), pos.getY(), pos.getZ());
+		}
 		if (!self.cache.set(pos.getX(), pos.getY(), pos.getZ(), BlockClassifier.classify(state), BlockClassifier.physicsId(state))) return;
 		self.session.regionChanged(pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ());
 	}

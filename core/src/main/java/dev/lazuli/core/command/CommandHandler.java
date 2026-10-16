@@ -170,6 +170,16 @@ public final class CommandHandler {
             reply(Chat.err("Flying isn't available here"));
         }
 
+        /** #portal [list]: through the nearest known portal (or one built here), or list the known ones. */
+        default void portal(boolean list) {
+            reply(Chat.err("Portals aren't available here"));
+        }
+
+        /** A goal far enough that the nether is quicker (netherGoto): true if it set off that way. */
+        default boolean netherInstead(Goal goal) {
+            return false;
+        }
+
         /** A goal far enough to fly to instead (elytraGoto): true if it took off for it. */
         default boolean flyInstead(Goal goal) {
             return false;
@@ -332,6 +342,7 @@ public final class CommandHandler {
                 }
                 ctx.breed(kinds, n);
             }
+            case "portal", "portals" -> ctx.portal(cmd.equals("portals") || args.length > 0 && args[0].equalsIgnoreCase("list"));
             case "fish" -> {
                 if (args.length == 0) ctx.fish(0);
                 else if (args.length == 1 && args[0].matches("[0-9]+")) ctx.fish(Integer.parseInt(args[0]));
@@ -418,6 +429,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "sort [range]", "sort the chests and barrels around (default 16 blocks): each item into as few as it fits"));
         ctx.reply(Chat.usage(p + "repair <item>", "repair at an anvil with its material or another one"));
         ctx.reply(Chat.usage(p + "combine <item> <with>", "put two things together at an anvil (an enchanted_book...)"));
+        ctx.reply(Chat.usage(p + "portal [list]", "go through the nearest known nether portal (or build one here) | the ones known here"));
         ctx.reply(Chat.usage(p + "fly <x z | x y z | waypoint>", "fly there with an elytra and rockets (far #goto does too: elytraGoto)"));
         ctx.reply(Chat.usage(p + "find <item>", "which chests (opened before) hold an item"));
         ctx.reply(Chat.usage(p + "trade <enchant [level]|item [count]>...", "trade with villagers, e.g. " + p + "trade sharpness 5 (sells string, sticks... for emeralds first if need be)"));
@@ -880,7 +892,7 @@ public final class CommandHandler {
             ctx.reply(Chat.err("No goal set"));
             return;
         }
-        if (ctx.flyInstead(goal)) return;
+        if (ctx.flyInstead(goal) || ctx.netherInstead(goal)) return;
         int[] f = ctx.playerFeet();
         ctx.session().start(goal, fallback, Pos.pack(f[0], f[1], f[2]));
     }

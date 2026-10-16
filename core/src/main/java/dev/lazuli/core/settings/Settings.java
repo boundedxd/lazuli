@@ -192,6 +192,14 @@ public final class Settings {
     public final Setting<Integer> elytraHeight = integer("elytraHeight", 24, 6, 120);
     /** Put the chestplate back on after landing. */
     public final Setting<Boolean> elytraSwapBack = bool("elytraSwapBack", true);
+    /** A far #goto in the overworld goes through the nether when that's quicker (known portals, or obsidian and flint and steel to build them). */
+    public final Setting<Boolean> netherGoto = bool("netherGoto", true);
+    /** How far a #goto has to be before the nether is considered, in blocks. */
+    public final Setting<Integer> netherMinDistance = integer("netherMinDistance", 1000, 200, 1000000);
+    /** #portal and nether trips fetch missing obsidian and flint and steel with #getitem (off: only with them on hand). */
+    public final Setting<Boolean> portalGather = bool("portalGather", false);
+    /** Remember every nether portal seen, for #portal and nether trips. */
+    public final Setting<Boolean> portalMemory = bool("portalMemory", true);
     /** #enchant / #repair / #combine place an enchanting table or anvil they carry when none is near. */
     public final Setting<Boolean> enchantPlace = bool("enchantPlace", true);
     /** #brew gets missing ingredients, glass bottles or a brewing stand with #getitem first. */

@@ -104,7 +104,13 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
 - `#brew` -> `mod/process/BrewProcess` + `core/craft/Brewing`. `#enchant`/`#repair`/`#combine` -> `mod/process/EnchantProcess`
   + `core/craft/Enchanting`.
 - Boats -> `core/move/Boating`, `mod/control/BoatRider`. Water clutch -> `mod/control/Clutch`.
-- Safety -> `mod/process/Guard` (creepers, fight, low HP), `Upkeep` (eat, armor), `SleepProcess`.
+- Safety -> `mod/process/Guard` (creepers, fight, low HP, fight-or-flee via `core/control/Threat`), `mod/control/Combat`
+  (bow with `core/control/Archery` aim, shield), `Upkeep` (eat, armor, totem/shield offhand), `SleepProcess`.
+  Paths avoid mobs/lava edges: `core/move/Hazards` priced in `MoveGraph.danger`, fed by `Guard.hazards` every 10 ticks
+  through `PathingSession.setHazards`.
+- `#portal` / far `#goto` through the nether -> `mod/process/PortalProcess`, `core/portal/PortalFrame` (build site +
+  frame), `NetherRoute` (worth it?), `PortalMemory` (portals seen, `config/lazuli/portals/`).
+- `#breed` -> `mod/process/BreedProcess`; `#fish` -> `mod/process/FishProcess` (bite flag via `FishingHookAccessor`).
 - Others: Follow, Explore, Tunnel, Farm, Hunt processes in `mod/process/`; chat commands from other players `mod/ChatControl`.
 - Item keys (`minecraft:dirt#hash`, potions `@minecraft:swiftness`) -> `core/inventory/ItemKeys`, `mod/inventory/Inventories`.
 - `#sel pos1|pos2|fill|clear|reset` -> `core/area/Selection`, `mod/process/BuildProcess` (box drawn by `LazuliRenderer`).
