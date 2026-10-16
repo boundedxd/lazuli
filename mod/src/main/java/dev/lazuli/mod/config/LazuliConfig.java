@@ -133,6 +133,7 @@ public final class LazuliConfig implements WalksyLibApi {
                     .build())
                 .group(OptionGroup.builder("Danger")
                     .option(bool(s.dodgeCreepers, "Run from a creeper that starts hissing nearby; the job waits."))
+                    .option(bool(s.defend, "Fight monsters that come close with the best sword or axe; the job waits."))
                     .option(bool(s.lowHpRetreat, "At low health get away from monsters, eat and heal; the job waits."))
                     .option(Options.ofNumber("Retreat at health", s.retreatHealth::get, s.retreatHealth.defaultValue(), s.retreatHealth::set)
                         .range(1, 19, 1)

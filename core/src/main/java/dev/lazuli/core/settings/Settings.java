@@ -67,6 +67,8 @@ public final class Settings {
     public final Setting<Boolean> sleepPickupBed = bool("sleepPickupBed", true);
     /** While busy, run from a creeper that starts hissing close by (the job waits). */
     public final Setting<Boolean> dodgeCreepers = bool("dodgeCreepers", true);
+    /** While busy, fight monsters that come within reach (best sword or axe, full swings); the job waits. */
+    public final Setting<Boolean> defend = bool("defend", true);
     /** While busy, at {@link #retreatHealth} or less: get away from monsters, eat and wait to heal (the job waits). */
     public final Setting<Boolean> lowHpRetreat = bool("lowHpRetreat", true);
     public final Setting<Integer> retreatHealth = integer("retreatHealth", 8, 1, 19);

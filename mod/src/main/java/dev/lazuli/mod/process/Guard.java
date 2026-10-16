@@ -20,11 +20,12 @@ import java.util.function.Consumer;
  * job carry on:
  * <ul>
  *   <li>dodgeCreepers: a creeper starts to hiss close by, so it runs out of the blast;</li>
- *   <li>lowHpRetreat: health drops to retreatHealth, so it gets away from monsters, eats and waits until healed.</li>
+ *   <li>lowHpRetreat: health drops to retreatHealth, so it gets away from monsters, eats and waits until healed;</li>
+ *   <li>defend: a monster comes within reach, so it turns and hits it (full swings, best weapon) until it's gone.</li>
  * </ul>
  */
 public final class Guard implements Process {
-    private enum Danger { NONE, CREEPER, LOW_HP }
+    private enum Danger { NONE, CREEPER, LOW_HP, FIGHT }
 
     /** How close a hissing creeper has to be to run, and how far away it runs. */
     private static final double CREEPER_NEAR = 6, CREEPER_SAFE = 9;
@@ -33,6 +34,9 @@ public final class Guard implements Process {
     /** Healing gives up after this long (no food, no regeneration) and lets the job go on. */
     private static final int HEAL_TICKS = 20 * 120;
     private static final int FLEE_TRIES = 3;
+    /** A monster this close starts a fight; it's chased this far; a fight gives up after FIGHT_TICKS. */
+    private static final double FIGHT_NEAR = 3.0, FIGHT_CHASE = 6, MELEE = 2.9;
+    private static final int FIGHT_TICKS = 20 * 30;
 
     private static volatile boolean active, healing;
     /** The last trip number when it took over: process trips up to it were cut short, not failed. */
@@ -44,6 +48,7 @@ public final class Guard implements Process {
     private final BooleanSupplier jobRunning;
     private final Trip trip;
     private Danger danger = Danger.NONE;
+    private final dev.lazuli.mod.control.InputDriver input = new dev.lazuli.mod.control.InputDriver();
     /** A plain trip (#goto, no job) cut short: started again after. */
     private dev.lazuli.core.goal.Goal resume;
     private int since, flees;
@@ -83,6 +88,7 @@ public final class Guard implements Process {
         LocalPlayer p = Minecraft.getInstance().player;
         return switch (danger) {
             case CREEPER -> "Running from a creeper";
+            case FIGHT -> "Fighting";
             case LOW_HP -> "Healing" + (p == null ? "" : " " + (int) p.getHealth() + "/" + (int) p.getMaxHealth());
             case NONE -> null;
         };
@@ -103,6 +109,7 @@ public final class Guard implements Process {
     }
 
     private void end() {
+        input.release();
         active = healing = false;
         danger = Danger.NONE;
         trip.clear();
@@ -146,8 +153,66 @@ public final class Guard implements Process {
                 List<LivingEntity> mobs = enemies(mc, p, MOB_NEAR);
                 if (!mobs.isEmpty()) flee(p, mobs, FLEE);
             }
+            case FIGHT -> {
+                LivingEntity t = nearestFoe(mc, p, FIGHT_CHASE);
+                if (t == null || since > FIGHT_TICKS || p.getHealth() <= settings.retreatHealth.get() && settings.lowHpRetreat.get()) {
+                    release();
+                    return;
+                }
+                fight(mc, p, t);
+            }
             case NONE -> release();
         }
+    }
+
+    /** Turns to the target, walks up if it's out of reach, and swings once the cooldown is full and it's in the crosshair. */
+    private void fight(Minecraft mc, LocalPlayer p, LivingEntity t) {
+        weapon(p);
+        Vec3 at = t.position().add(0, t.getBbHeight() * 0.6, 0);
+        double dx = at.x - p.getX(), dy = at.y - p.getEyeY(), dz = at.z - p.getZ();
+        float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
+        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)));
+        float maxTurn = settings.rotationSpeed.get().floatValue();
+        float yaw0 = dev.lazuli.mod.control.RotationDriver.yaw(p), pitch0 = dev.lazuli.mod.control.RotationDriver.pitch(p);
+        float nyaw = dev.lazuli.core.control.InputPlanner.approach(yaw0, yaw, maxTurn);
+        float npitch = pitch0 + Math.max(-maxTurn, Math.min(maxTurn, pitch - pitch0));
+        double dist = p.distanceTo(t);
+        boolean close = dist <= MELEE;
+        input.apply(mc, new dev.lazuli.core.control.Controls(!close && dist > 1.5, false, false, false, yaw, pitch, 0, false),
+            nyaw, npitch, settings.freeLook.get());
+        // the crosshair on it: the view ray passes through its box
+        Vec3 eye = p.getEyePosition(), dir = Vec3.directionFromRotation(npitch, nyaw);
+        boolean onIt = t.getBoundingBox().inflate(0.1).clip(eye, eye.add(dir.scale(MELEE + 0.5))).isPresent();
+        if (close && onIt && p.hasLineOfSight(t) && p.getAttackStrengthScale(0.5f) >= 0.95f) {
+            mc.gameMode.attack(p, t);
+            p.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+        }
+    }
+
+    /** The best sword (else axe) in the hotbar into the hand. */
+    private static void weapon(LocalPlayer p) {
+        int best = -1;
+        double bestDmg = 0;
+        for (int i = 0; i < 9; i++) {
+            var s = p.getInventory().getItem(i);
+            String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(s.getItem()).getPath();
+            if (!id.endsWith("_sword") && !id.endsWith("_axe")) continue;
+            double dmg = tier(id) * 2 + (id.endsWith("_sword") ? 1 : 0);
+            if (dmg > bestDmg) {
+                bestDmg = dmg;
+                best = i;
+            }
+        }
+        if (best >= 0) p.getInventory().setSelectedSlot(best);
+    }
+
+    private static int tier(String id) {
+        if (id.startsWith("netherite")) return 6;
+        if (id.startsWith("diamond")) return 5;
+        if (id.startsWith("iron")) return 4;
+        if (id.startsWith("stone") || id.startsWith("copper")) return 3;
+        if (id.startsWith("golden")) return 2;
+        return 1;
     }
 
     private Danger spot(Minecraft mc, LocalPlayer p) {
@@ -157,6 +222,7 @@ public final class Guard implements Process {
             }
         }
         if (settings.lowHpRetreat.get() && p.getHealth() <= settings.retreatHealth.get()) return Danger.LOW_HP;
+        if (settings.defend.get() && nearestFoe(mc, p, FIGHT_NEAR) != null) return Danger.FIGHT;
         return Danger.NONE;
     }
 
@@ -167,7 +233,9 @@ public final class Guard implements Process {
         since = flees = 0;
         tookOverAt = session.snapshot().trip();
         trip.clear();
-        if (d == Danger.LOW_HP) {
+        if (d == Danger.FIGHT) {
+            session.stop(true); // stand and fight (the job's trip is picked up again after)
+        } else if (d == Danger.LOW_HP) {
             session.stop(true); // stand still to heal (the job's trip is picked up again after)
             chat.accept(Chat.warn("Low health ({} HP): pausing to heal", (int) p.getHealth()));
         } else {
@@ -203,6 +271,26 @@ public final class Guard implements Process {
         Vec3 to = p.position().add(dir.scale(dist));
         trip.go(new GoalXZ((int) Math.floor(to.x), (int) Math.floor(to.z)), p, true);
         tookOverAt = Math.max(tookOverAt, session.snapshot().trip() + 1);
+    }
+
+    /**
+     * The nearest monster within {@code r} worth hitting: not a creeper (hitting one doesn't stop it), not one that's
+     * only dangerous once provoked (endermen, zombified piglins, piglins).
+     */
+    private static LivingEntity nearestFoe(Minecraft mc, LocalPlayer p, double r) {
+        LivingEntity best = null;
+        double bd = r;
+        for (LivingEntity e : enemies(mc, p, r)) {
+            if (e instanceof Creeper || e instanceof net.minecraft.world.entity.monster.EnderMan
+                || e instanceof net.minecraft.world.entity.monster.zombie.ZombifiedPiglin
+                || e instanceof net.minecraft.world.entity.monster.piglin.AbstractPiglin) continue;
+            double d = e.distanceTo(p);
+            if (d < bd && p.hasLineOfSight(e)) {
+                bd = d;
+                best = e;
+            }
+        }
+        return best;
     }
 
     private static List<LivingEntity> creepers(Minecraft mc, LocalPlayer p, double r) {
