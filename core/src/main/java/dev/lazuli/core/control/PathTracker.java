@@ -31,6 +31,11 @@ public final class PathTracker {
         if (idx < 0 && from > 0) idx = exact(path, Math.max(0, from - SEARCH), bx, by, bz);
         if (idx < 0) idx = column(path, from, bx, bz);
         if (idx < 0 && from > 0) idx = column(path, 0, bx, bz);
+        // far from where it was (a boat ride, a long clutch): the exact block anywhere on the path, rather than
+        // sticking to the old spot and heading back there
+        if (idx < 0) {
+            for (int i = 0; i < path.size() && idx < 0; i++) if (path.get(i) == Pos.pack(bx, by, bz)) idx = i;
+        }
         if (idx >= 0) {
             lastIdx = idx;
             return idx;

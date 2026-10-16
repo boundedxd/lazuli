@@ -49,6 +49,8 @@ public final class PathExecutor {
     private final Interactor interactor;
     private final Swimmer swimmer;
     private final BoatRider boat;
+    /** A boat crossing was under way: the first settled tick after it re-plans from there. */
+    private boolean afterBoat;
     private final Clutch clutch;
     private final Torcher torcher;
     private final java.util.function.Consumer<String> chat;
@@ -118,6 +120,14 @@ public final class PathExecutor {
         else if (settled) offPathTicks++;
         // Run-up blocks and corner cuts aren't path nodes: only re-plan from a node, or once clearly off the path.
         if (settled && block != lastBlock && (onNode || offPathTicks > OFF_PATH_TICKS)) {
+            lastBlock = block;
+            session.playerMoved(block);
+        }
+        // out of a boat (at the far shore, or stuck halfway): plan on from right here, wherever that is on the path
+        if (boat.active()) afterBoat = true;
+        else if (afterBoat && settled) {
+            afterBoat = false;
+            tracker.reset();
             lastBlock = block;
             session.playerMoved(block);
         }
