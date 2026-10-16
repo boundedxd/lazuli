@@ -78,8 +78,8 @@ class CommandTest {
             public String dimension() { return "overworld"; }
             public dev.lazuli.core.storage.ChestMemory chests() { return chests; }
             public void sort(int range) { mined.add("sort " + range); }
-            public void selClear(dev.lazuli.core.build.Selection.Box b) { mined.add("clear " + b); }
-            public void selFill(dev.lazuli.core.build.Selection.Box b, String block) { mined.add("fill " + b + " " + block); }
+            public void selClear(dev.lazuli.core.area.Selection.Box b) { mined.add("clear " + b); }
+            public void selFill(dev.lazuli.core.area.Selection.Box b, String block) { mined.add("fill " + b + " " + block); }
         });
     }
 

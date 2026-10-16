@@ -1,6 +1,6 @@
 package dev.lazuli.mod.process;
 
-import dev.lazuli.core.build.Selection;
+import dev.lazuli.core.area.Selection;
 import dev.lazuli.core.chat.Chat;
 import dev.lazuli.core.goal.GoalBlock;
 import dev.lazuli.core.goal.GoalNear;

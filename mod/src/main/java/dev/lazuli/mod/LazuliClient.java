@@ -328,7 +328,7 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
-			public void selClear(dev.lazuli.core.build.Selection.Box box) {
+			public void selClear(dev.lazuli.core.area.Selection.Box box) {
 				if (!settings.selEnabled.get()) {
 					reply(Chat.err("#sel is off (selEnabled)"));
 					return;
@@ -338,7 +338,7 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
-			public void selFill(dev.lazuli.core.build.Selection.Box box, String block) {
+			public void selFill(dev.lazuli.core.area.Selection.Box box, String block) {
 				if (!settings.selEnabled.get()) {
 					reply(Chat.err("#sel is off (selEnabled)"));
 					return;

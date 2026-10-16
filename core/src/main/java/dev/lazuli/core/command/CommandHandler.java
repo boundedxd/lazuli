@@ -146,12 +146,12 @@ public final class CommandHandler {
         }
 
         /** #sel clear: breaks every block in the box. */
-        default void selClear(dev.lazuli.core.build.Selection.Box box) {
+        default void selClear(dev.lazuli.core.area.Selection.Box box) {
             reply(Chat.err("Building isn't available here"));
         }
 
         /** #sel fill: places {@code block} (an item id) in every empty spot of the box. */
-        default void selFill(dev.lazuli.core.build.Selection.Box box, String block) {
+        default void selFill(dev.lazuli.core.area.Selection.Box box, String block) {
             reply(Chat.err("Building isn't available here"));
         }
 
@@ -230,14 +230,14 @@ public final class CommandHandler {
     private Goal goal;
     private boolean fallback;
 
-    private final dev.lazuli.core.build.Selection selection = new dev.lazuli.core.build.Selection();
+    private final dev.lazuli.core.area.Selection selection = new dev.lazuli.core.area.Selection();
 
     public CommandHandler(Context ctx) {
         this.ctx = ctx;
     }
 
     /** #sel's corners (drawn by the mod). */
-    public dev.lazuli.core.build.Selection selection() {
+    public dev.lazuli.core.area.Selection selection() {
         return selection;
     }
 

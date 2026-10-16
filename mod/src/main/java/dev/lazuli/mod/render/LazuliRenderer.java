@@ -105,10 +105,10 @@ public final class LazuliRenderer {
     }
 
     private Supplier<List<dev.lazuli.core.waypoint.Waypoints.Waypoint>> waypoints = List::of;
-    private Supplier<dev.lazuli.core.build.Selection> selection = () -> null;
+    private Supplier<dev.lazuli.core.area.Selection> selection = () -> null;
 
     /** #sel's corners and box, to draw. */
-    public void selection(Supplier<dev.lazuli.core.build.Selection> selection) {
+    public void selection(Supplier<dev.lazuli.core.area.Selection> selection) {
         this.selection = selection;
     }
 
