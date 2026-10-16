@@ -59,6 +59,27 @@ class LazyDStarLiteTest {
         assertEquals(PlanResult.Status.NO_PATH, p.plan(ALL, 1_000_000, ALL).status(), "three: impassable");
     }
 
+    /** An edge whose exact cost comes out NaN (a sim gone wrong) used to spin the search forever, cancel or not. */
+    @Test
+    void aNaNEdgeCostNeverHangsTheSearch() {
+        GridGraph grid = new GridGraph(10, 1, 0.0);
+        long s = Pos.pack(0, 0, 0), t = Pos.pack(9, 0, 9);
+        Graph g = new Graph() {
+            public boolean isNode(long u) { return grid.isNode(u); }
+            public void successors(long u, java.util.function.LongConsumer out) { grid.successors(u, out); }
+            public void predecessors(long v, java.util.function.LongConsumer out) { grid.predecessors(v, out); }
+            public double optimisticCost(long u, long v) { return grid.optimisticCost(u, v); }
+            public double evaluate(long u, long v) { return u == s ? Double.NaN : grid.evaluate(u, v); }
+            public double heuristic(long a, long b) { return grid.heuristic(a, b); }
+            public int horizontalReach() { return grid.horizontalReach(); }
+            public int verticalReach() { return grid.verticalReach(); }
+        };
+        LazyDStarLite p = new LazyDStarLite(g, u -> u == t, new long[]{t}, s);
+        PlanResult r = assertTimeoutPreemptively(java.time.Duration.ofSeconds(5),
+            () -> p.plan(ALL, 1_000_000, ALL, 2_000_000_000L));
+        assertEquals(PlanResult.Status.NO_PATH, r.status(), "every way out of the start is broken");
+    }
+
     @Test
     void budgetExceededInsteadOfHanging() {
         GridGraph g = new GridGraph(60, 3, 0.0);

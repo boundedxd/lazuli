@@ -54,8 +54,8 @@ public final class PathExecutor {
     private final java.util.function.Consumer<String> chat;
     /** Watchdog: where the player was when nothing last happened, for how long, and the re-plans tried there. */
     private Vec3 stallAt = Vec3.ZERO;
-    /** Stuck: quietly kill and rerun the job; false if there's none to rerun (then the trip is planned again). */
-    private java.util.function.BooleanSupplier restart = () -> false;
+    /** Stuck: a fresh planner thread plans the trip again from scratch (given the player's block). */
+    private java.util.function.LongConsumer restart;
     private long stallBlock = NONE;
     private int stallTicks, unsticks;
     /** Ticks of nothing happening before the trip is planned again from scratch (no path yet: the search may be long). */
@@ -70,6 +70,7 @@ public final class PathExecutor {
         this.interactor = new Interactor(world, settings, session, chat);
         this.chat = chat;
         this.session = session;
+        this.restart = session::unstick;
         this.settings = settings;
         this.world = world;
         this.planner = new InputPlanner(world);
@@ -238,13 +239,14 @@ public final class PathExecutor {
             return;
         }
         reset();
-        if (settings.unstickRestart.get() && restart.getAsBoolean()) return; // quietly, like #kill and running it again
         chat.accept(dev.lazuli.core.chat.Chat.warn("Stuck; planning again ({}/{})", unsticks, MAX_UNSTICKS));
-        session.unstick(block);
+        // what #kill fixed, without stopping the job (a hung planner thread never gets to a plain re-plan)
+        if (settings.unstickRestart.get()) restart.accept(block);
+        else session.unstick(block);
     }
 
-    /** What to do when stuck before planning the trip again: true if it restarted the job instead. */
-    public void onStuck(java.util.function.BooleanSupplier restart) {
+    /** How to plan the trip again when stuck (unstickRestart): swap the planner thread, then restart the trip. */
+    public void onStuck(java.util.function.LongConsumer restart) {
         this.restart = restart;
     }
 

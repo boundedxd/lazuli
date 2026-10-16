@@ -164,6 +164,8 @@ public final class LazyDStarLite {
         while (true) {
             List<Long> path;
             while (true) {
+                // checked here too: computeShortestPath only checks while it expands, and these loops can go round without
+                if (cancelled || System.nanoTime() > deadline) return PlanResult.budgetExceeded();
                 if (!computeShortestPath(start, maxExpansions)) return PlanResult.budgetExceeded();
                 if (g(start) == INF) return PlanResult.noPath();
                 path = extractPath(maxPathLength);
@@ -178,8 +180,9 @@ public final class LazyDStarLite {
                 long u = path.get(i), v = path.get(i + 1);
                 Map<Long, Double> fromU = evaluated.computeIfAbsent(u, k -> new HashMap<>());
                 if (fromU.containsKey(v)) continue;
-                double opt = graph.optimisticCost(u, v);
+                double opt = cost(u, v);
                 double exact = graph.evaluate(u, v);
+                if (Double.isNaN(exact)) exact = INF; // a sim gone wrong: never an edge (NaN keeps a node inconsistent forever)
                 if (exact < opt) {
                     throw new IllegalStateException("evaluated cost " + exact + " below optimistic " + opt
                         + " for " + Pos.toString(u) + " -> " + Pos.toString(v));
@@ -315,7 +318,8 @@ public final class LazyDStarLite {
             Double c = fromU.get(v);
             if (c != null) return c;
         }
-        return graph.optimisticCost(u, v);
+        double c = graph.optimisticCost(u, v);
+        return Double.isNaN(c) ? INF : c;
     }
 
     private double h(long a, long b) {

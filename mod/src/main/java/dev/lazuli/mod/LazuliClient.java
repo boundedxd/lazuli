@@ -67,12 +67,29 @@ public final class LazuliClient implements ClientModInitializer {
 	private volatile ExecutorService workerPool = newWorker();
 	private final java.util.concurrent.Executor worker = r -> workerPool.execute(r);
 
+	/** The planner thread itself, to say where it hung. */
+	private static volatile Thread plannerThread;
+
 	private static ExecutorService newWorker() {
 		return Executors.newSingleThreadExecutor(r -> {
 			Thread t = new Thread(r, "lazuli-planner");
 			t.setDaemon(true);
+			plannerThread = t;
 			return t;
 		});
+	}
+
+	/** Swaps in a new planner thread (the old one is interrupted; if it was busy, where it was goes in the log). */
+	private void freshWorker(String why) {
+		Thread t = plannerThread;
+		if (t != null && t.getState() == Thread.State.RUNNABLE) {
+			StringBuilder b = new StringBuilder("planner thread busy when " + why + ":");
+			for (StackTraceElement e : t.getStackTrace()) b.append(System.lineSeparator()).append("	at ").append(e);
+			org.slf4j.LoggerFactory.getLogger("lazuli").warn(b.toString());
+		}
+		ExecutorService old = workerPool;
+		workerPool = newWorker();
+		old.shutdownNow(); // interrupts a hung search; whatever it finds is stale and never published
 	}
 	private TraceRecorder recorder;
 	private LazuliRenderer renderer;
@@ -349,10 +366,10 @@ public final class LazuliClient implements ClientModInitializer {
 			return w == null || !settings.renderWaypoints.get() ? java.util.List.of() : w.list(dimension(mc));
 		});
 
-		executor.onStuck(() -> {
-			if (lastJob == null) return false;
-			restartPending = true;
-			return true;
+		// stuck: what #kill fixed (a fresh planner thread, all trip state forgotten), but the job carries on
+		executor.onStuck(block -> {
+			freshWorker("stuck");
+			session.restart(block);
 		});
 
 		ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
@@ -515,40 +532,12 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 	}
 
-	/** Commands that start a job: rerun quietly when it gets stuck (unstickRestart). */
-	private static final java.util.Set<String> JOBS = java.util.Set.of("goto", "path", "mine", "getitem", "get", "farm",
-		"explore", "tunnel", "follow", "craft", "smelt", "deposit", "withdraw", "sleep", "back", "wp", "waypoint", "come", "trade");
-	/** The command that started what's running, if a command did. */
-	private String lastJob;
-	private volatile boolean restartPending;
-	/** Chat is muted until then (a quiet restart). */
-	private int quietUntil = -1, ticks;
-
-	/** Handles a chat line as a command (false: not one), remembering a job's command for a quiet restart. */
+	/** Handles a chat line as a command (false: not one). */
 	private boolean runCommand(String line) {
-		boolean handled = commands.handle(line);
-		String prefix = settings.prefix.get();
-		if (handled && line.startsWith(prefix)) {
-			String[] w = line.substring(prefix.length()).trim().split("\\s+");
-			String cmd = w[0].toLowerCase(java.util.Locale.ROOT);
-			if (JOBS.contains(cmd) && (!cmd.equals("wp") && !cmd.equals("waypoint") || w.length > 1 && w[1].equalsIgnoreCase("goto"))) lastJob = line;
-			else if (cmd.equals("stop") || cmd.equals("cancel") || cmd.equals("kill")) lastJob = null;
-		}
-		return handled;
+		return commands.handle(line);
 	}
 
-	/** Stuck: what #kill and running the command again does, without a word. */
-	private void restartJob(Minecraft mc) {
-		String job = lastJob;
-		if (job == null || mc.player == null) return;
-		quietUntil = ticks + 40;
-		kill(mc);
-		try {
-			runCommand(job);
-		} catch (RuntimeException e) {
-			lastJob = null;
-		}
-	}
+	private int ticks;
 
 	/** Throws out items ("all": anything) from the main inventory and hotbar; a negative count: all of it. */
 	private void drop(java.util.List<ItemCount> items) {
@@ -576,7 +565,6 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private void stopProcesses(boolean announce) {
-		lastJob = null; // something else is starting (a command sets it again after)
 		for (Process p : processes) p.stop(announce);
 	}
 
@@ -593,9 +581,7 @@ public final class LazuliClient implements ClientModInitializer {
 				org.slf4j.LoggerFactory.getLogger("lazuli").warn("stopping a process failed", e);
 			}
 		}
-		ExecutorService old = workerPool;
-		workerPool = newWorker();
-		old.shutdownNow(); // interrupts a hung search; whatever it finds is stale and never published
+		freshWorker("killed");
 		session.kill();
 		executor.release(mc);
 		new dev.lazuli.mod.control.InputDriver().release();
@@ -627,10 +613,6 @@ public final class LazuliClient implements ClientModInitializer {
 
 	private void onTick(Minecraft mc) {
 		ticks++;
-		if (restartPending) {
-			restartPending = false;
-			restartJob(mc);
-		}
 		tasks.tick();
 		chestWatcher.tick(mc);
 		tradeWatcher.tick(mc);
@@ -694,7 +676,6 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private void chat(String msg) {
-		if (ticks < quietUntil) return;
 		Minecraft mc = Minecraft.getInstance();
 		mc.execute(() -> mc.gui.getChat().addMessage(Component.literal(PREFIX + msg)));
 	}

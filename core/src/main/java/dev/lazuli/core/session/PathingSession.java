@@ -75,6 +75,8 @@ public final class PathingSession {
     // worker-confined
     /** The generation of the trip the worker is running. */
     private long tripGeneration;
+    /** The trip number snapshots carry: the generation that started it, kept through a {@link #restart}. */
+    private long tripId;
     private LazyDStarLite planner;
     private MoveGraph graph;
     private Goal goal;
@@ -128,11 +130,13 @@ public final class PathingSession {
     public long start(Goal goal, boolean fallback, long playerPos, boolean quiet) {
         MoveGraph g = newGraph();
         long gen = generation.incrementAndGet();
+        request = new Request(goal, fallback, quiet, gen);
         planning = true;
         cancelSearch();
         worker.execute(() -> {
             if (generation.get() != gen) return; // stopped or replaced before it began
             tripGeneration = gen;
+            tripId = gen;
             this.goal = goal;
             this.fallback = fallback;
             this.graph = g;
@@ -167,6 +171,42 @@ public final class PathingSession {
             if (snapshot.state() != State.PATHING) return;
             graph = g;
             player = snap(playerPos);
+            invalidStartSince = -1;
+            begin();
+        });
+    }
+
+    /** What the last start asked for, kept on the caller's side so a {@link #restart} doesn't need the old worker. */
+    private record Request(Goal goal, boolean fallback, boolean quiet, long trip) {}
+
+    private volatile Request request;
+
+    /**
+     * Stuck for real (what used to take #kill): call once the worker runs tasks again (the mod swaps in a fresh thread
+     * when the old one hung). Forgets all trip state, as {@link #kill} does, and plans the last trip again from scratch
+     * under its own trip number, so the processes waiting on it carry on as if nothing happened.
+     */
+    public void restart(long playerPos) {
+        Request r = request;
+        if (r == null || snapshot.trip() > r.trip() || snapshot.state() != State.PATHING && !planning) return;
+        long gen = generation.incrementAndGet();
+        cancelSearch();
+        replanQueued.set(false);
+        dirtyQueued.set(false);
+        dirty.clear();
+        planning = true;
+        MoveGraph g = newGraph();
+        worker.execute(() -> {
+            if (generation.get() != gen) return;
+            tripGeneration = gen;
+            tripId = r.trip();
+            goal = r.goal();
+            fallback = r.fallback();
+            quiet = r.quiet();
+            graph = g;
+            player = snap(playerPos);
+            planner = null;
+            segment = null;
             invalidStartSince = -1;
             begin();
         });
@@ -429,7 +469,7 @@ public final class PathingSession {
             begin(); // the current path stays published while the next segment is planned
             return;
         }
-        if (!graph.isNode(player) && snapshot.state() == State.PATHING && snapshot.trip() == tripGeneration
+        if (!graph.isNode(player) && snapshot.state() == State.PATHING && snapshot.trip() == tripId
             && !snapshot.path().isEmpty()) {
             // the block just placed under the jumping player, or mined from under them: they'll land on a node soon
             long now = System.nanoTime();
@@ -477,7 +517,7 @@ public final class PathingSession {
 
     private synchronized void publish(State state, List<Long> path) {
         if (stale()) return;
-        snapshot = new Snapshot(state, List.copyOf(path), goal, versions.incrementAndGet(), tripGeneration);
+        snapshot = new Snapshot(state, List.copyOf(path), goal, versions.incrementAndGet(), tripId);
         planning = false;
     }
 }

@@ -156,6 +156,28 @@ class PathingSessionTest {
     }
 
     @Test
+    void restartRecoversFromADeadWorkerKeepingTheTrip() {
+        // stuck on a hung worker: a fresh thread plans the same trip again, and processes waiting on it never notice
+        GridWorld w = GridWorld.flatFloor(-10, -10, 20, 10);
+        boolean[] dead = {true};
+        java.util.concurrent.Executor worker = r -> { if (!dead[0]) r.run(); };
+        PathingSession s = new PathingSession(w, () -> -64, () -> 319, new Settings(), worker, msgs::add);
+        long trip = s.start(new GoalBlock(10, 1, 0), false, Pos.pack(0, 1, 0), true);
+        s.regionChanged(5, 1, 0, 5, 1, 0);
+        assertTrue(s.planning());
+        dead[0] = false;
+        s.restart(Pos.pack(0, 1, 0));
+        assertEquals(PathingSession.State.PATHING, s.snapshot().state());
+        assertEquals(trip, s.snapshot().trip(), "same trip number");
+        // block changes are picked up again (the lost batch had left them "already queued")
+        w.fill(5, 1, -10, 5, 3, 10, BlockKind.SOLID);
+        s.regionChanged(5, 1, -10, 5, 3, 10);
+        assertTrue(s.snapshot().path().stream().noneMatch(q -> Pos.x(q) == 5), "replanned around the wall");
+        // a later stop or start still gets a higher number
+        assertTrue(s.start(new GoalBlock(10, 1, 0), false, Pos.pack(0, 1, 0)) > trip);
+    }
+
+    @Test
     void killRecoversFromADeadWorker() {
         // a worker that silently lost its tasks (a crash, a hang): the session would wait for them forever
         GridWorld w = GridWorld.flatFloor(-10, -10, 20, 10);
