@@ -76,6 +76,9 @@ class CommandTest {
             public void smeltCollect() {
                 mined.add("collect");
             }
+            public void getItemDry(List<ItemCount> items) {
+                mined.add("dry " + items);
+            }
             public void getItem(dev.lazuli.core.craft.ItemRequest r) {
                 mined.add("get " + r.items() + (r.returnTo() == null ? "" : " to " + r.returnTo()[0] + " " + r.returnTo()[1] + " " + r.returnTo()[2])
                     + (r.deposit() ? " deposit" : ""));
@@ -416,5 +419,14 @@ class CommandTest {
             "#iceboat ~10 64 ~"}) h.handle(c);
         assertEquals(List.of("iceboat line 1 null", "iceboat lap 3 null", "iceboat record 0 track1", "iceboat use 0 off",
             "iceboat goal [100, " + Integer.MIN_VALUE + ", -50] 0 null", "iceboat goal [10, 64, 0] 0 null"), mined);
+    }
+
+    @Test
+    void getItemDryRun() {
+        CommandHandler h = handler();
+        h.handle("#getitem iron_pickaxe 2 dry");
+        assertEquals(1, mined.size());
+        assertTrue(mined.get(0).startsWith("dry "), mined.toString());
+        assertTrue(mined.get(0).contains("iron_pickaxe"), mined.toString());
     }
 }

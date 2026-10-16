@@ -368,6 +368,11 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public void getItemDry(java.util.List<ItemCount> items) {
+				getItem.dryRun(Minecraft.getInstance(), items);
+			}
+
+			@Override
 			public void brew(String potion, dev.lazuli.core.craft.Brewing.Form form, int count) {
 				LazuliClient.this.stopProcesses(false);
 				brews.start(Minecraft.getInstance(), potion, form, count);

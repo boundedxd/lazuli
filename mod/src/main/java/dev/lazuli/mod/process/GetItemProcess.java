@@ -265,18 +265,8 @@ public final class GetItemProcess implements Process {
             end(Outcome.FAILED, Chat.err("Gave up after {} steps", MAX_STEPS));
             return;
         }
-        ItemPlanner planner = new ItemPlanner(recipes, drops, GetItemProcess::tier, SmeltProcess.burn(mc), smelts.fuels(),
-            new ItemPlanner.Rules(settings.getItemMine.get(), settings.getItemSmelt.get(),
-                settings.craftPlaceTable.get() && settings.allowPlace.get(), settings.smeltPlaceFurnace.get() && settings.allowPlace.get()))
-            .batching(settings.getItemBatch.get());
-        if (settings.getItemNearby.get()) planner.nearby(Nearby.scan(mc, settings.antiXray.get()));
-        if (hunt != null && settings.getItemHunt.get()) planner.mobs(RecipeData.mobDrops().getNow(null));
-        int range = settings.stationRange.get();
-        // what it wants and already has counts worn or used too (armor it put on, a damaged pickaxe): never made again
-        Map<String, Integer> have = new HashMap<>(Inventories.plainCounts(p));
-        for (ItemCount w : wants) have.merge(w.item(), count(p, w.item()), Math::max);
-        ItemPlanner.Plan plan = planner.plan(wants, have, pickTier(p),
-            Station.nearest(mc, p, Blocks.CRAFTING_TABLE, range) != null, Station.nearest(mc, p, Blocks.FURNACE, range) != null);
+        ItemPlanner planner = planner(mc, recipes, drops);
+        ItemPlanner.Plan plan = plan(mc, p, planner, wants);
         if (tradeFor(mc, p, need, plan, planner, recipes, drops)) return;
         if (!plan.ok()) {
             end(Outcome.FAILED, Chat.err("Can't get {}: {}", describe(wants), plan.problem()));
@@ -385,6 +375,57 @@ public final class GetItemProcess implements Process {
         String id = Inventories.id(item);
         withdrawItem = id;
         return take.start(mc, p, id, n, pl -> count(pl, id));
+    }
+
+    /** A planner with the settings' rules (what it may mine, smelt, place) and what's around. */
+    private ItemPlanner planner(Minecraft mc, Recipes recipes, Drops drops) {
+        ItemPlanner planner = new ItemPlanner(recipes, drops, GetItemProcess::tier, SmeltProcess.burn(mc), smelts.fuels(),
+            new ItemPlanner.Rules(settings.getItemMine.get(), settings.getItemSmelt.get(),
+                settings.craftPlaceTable.get() && settings.allowPlace.get(), settings.smeltPlaceFurnace.get() && settings.allowPlace.get()))
+            .batching(settings.getItemBatch.get());
+        if (settings.getItemNearby.get()) planner.nearby(Nearby.scan(mc, settings.antiXray.get()));
+        if (hunt != null && settings.getItemHunt.get()) planner.mobs(RecipeData.mobDrops().getNow(null));
+        return planner;
+    }
+
+    /** The steps from what the player has now (stations around count). */
+    private ItemPlanner.Plan plan(Minecraft mc, LocalPlayer p, ItemPlanner planner, List<ItemCount> wants) {
+        int range = settings.stationRange.get();
+        // what it wants and already has counts worn or used too (armor it put on, a damaged pickaxe): never made again
+        Map<String, Integer> have = new HashMap<>(Inventories.plainCounts(p));
+        for (ItemCount w : wants) have.merge(w.item(), count(p, w.item()), Math::max);
+        return planner.plan(wants, have, pickTier(p),
+            Station.nearest(mc, p, Blocks.CRAFTING_TABLE, range) != null, Station.nearest(mc, p, Blocks.FURNACE, range) != null);
+    }
+
+    /** #getitem ... dry: says the steps and a rough time, does nothing. */
+    public void dryRun(Minecraft mc, List<ItemCount> wants) {
+        LocalPlayer p = mc.player;
+        Recipes recipes = RecipeData.get().getNow(null);
+        Drops drops = RecipeData.drops().getNow(null);
+        if (p == null || recipes == null || drops == null) {
+            chat.accept(Chat.warn("Still reading the game's recipes; try again in a moment"));
+            return;
+        }
+        List<ItemCount> resolved = new java.util.ArrayList<>();
+        for (ItemCount w : wants) resolved.add(new ItemCount(Inventories.id(w.item()), w.count()));
+        ItemPlanner.Plan plan = plan(mc, p, planner(mc, recipes, drops), resolved);
+        if (!plan.ok()) {
+            chat.accept(Chat.err("Can't get {}: {} (it might still trade for it)", describe(resolved), plan.problem()));
+            return;
+        }
+        if (plan.actions().isEmpty()) {
+            chat.accept(Chat.ok("Already have {}", describe(resolved)));
+            return;
+        }
+        chat.accept(Chat.info("To get {}: {} steps, about {}", describe(resolved), plan.actions().size(),
+            dev.lazuli.core.craft.PlanEstimate.format(dev.lazuli.core.craft.PlanEstimate.seconds(plan.actions()))));
+        int i = 0;
+        for (ItemPlanner.Action a : plan.actions()) {
+            chat.accept(Chat.info("{}. {} {} {}{} (~{})", ++i, verb(a), a.count(), name(a.item()),
+                a.blocks().isEmpty() ? "" : " from " + String.join(", ", a.blocks().stream().map(GetItemProcess::name).toList()),
+                dev.lazuli.core.craft.PlanEstimate.format(dev.lazuli.core.craft.PlanEstimate.seconds(a))));
+        }
     }
 
     private Status status(ItemPlanner.Action a) {

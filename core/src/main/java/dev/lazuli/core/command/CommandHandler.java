@@ -143,6 +143,11 @@ public final class CommandHandler {
             reply(Chat.err("Getting items isn't available here"));
         }
 
+        /** #getitem ... dry: the steps it would take and a rough time, without doing any of it. */
+        default void getItemDry(List<ItemCount> items) {
+            reply(Chat.err("Getting items isn't available here"));
+        }
+
         /** Brews {@code count} bottles of a potion (fire_resistance, long_swiftness...) in a brewing stand. */
         default void brew(String potion, dev.lazuli.core.craft.Brewing.Form form, int count) {
             reply(Chat.err("Brewing isn't available here"));
@@ -432,6 +437,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "craft <item> [count] [item [count]...]", "craft items, making the ingredients too (logs into planks...)"));
         ctx.reply(Chat.usage(p + "getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit]",
             "get items from scratch: mines, crafts and smelts what it takes (until you have count); iron_tools, diamond_armor, iron_gear too"));
+        ctx.reply(Chat.usage(p + "getitem <item> [count]... dry", "show the steps it would take and about how long, without doing them"));
         ctx.reply(Chat.usage(p + "smelt <item> [count]", "cook items in a furnace (iron_ingot or raw_iron; blast furnace/smoker when there's one)"));
         ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
         ctx.reply(Chat.usage(p + "brew <potion> [count] [splash|lingering]", "brew potions (fire_resistance, long_swiftness...); fills bottles, gets what's missing"));
@@ -518,10 +524,12 @@ public final class CommandHandler {
 
     /** getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit] */
     private void getItem(String[] args) {
+        boolean dry = args.length > 0 && (args[args.length - 1].equalsIgnoreCase("dry") || args[args.length - 1].equalsIgnoreCase("plan"));
+        if (dry) args = Arrays.copyOf(args, args.length - 1);
         int then = -1;
         for (int i = 0; i < args.length && then < 0; i++) if (args[i].equalsIgnoreCase("then")) then = i;
         List<ItemCount> raw = items(args, 0, then < 0 ? args.length : then);
-        String usage = "Usage: getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit]";
+        String usage = "Usage: getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit] [dry]";
         if (raw == null) {
             ctx.reply(Chat.err(usage));
             return;
@@ -531,6 +539,10 @@ public final class CommandHandler {
             List<String> set = dev.lazuli.core.craft.ItemSets.expand(i.item());
             if (set == null) items.add(i);
             else for (String s : set) items.add(new ItemCount(s, i.count()));
+        }
+        if (dry) {
+            ctx.getItemDry(items);
+            return;
         }
         int[] to = null;
         boolean deposit = false;
