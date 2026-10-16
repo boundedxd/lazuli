@@ -186,7 +186,43 @@ public final class MoveGraph implements Graph {
 
     private double computeOptimistic(long u, long v) {
         double c = baseCost(u, v);
-        return c < INF || !dig.enabled() ? c : Math.min(c, dig.cost(u, v, flat, maxFall));
+        if (c >= INF && dig.enabled()) c = Math.min(c, dig.cost(u, v, flat, maxFall));
+        return c < INF ? c + danger(v) : c;
+    }
+
+    /** Mobs near enough to be avoided, and how much a cell next to lava costs (0: not avoided). */
+    private Hazards hazards = Hazards.NONE;
+    private double lavaEdge;
+
+    public MoveGraph withHazards(Hazards h, double lavaEdgeCost) {
+        this.hazards = h;
+        this.lavaEdge = lavaEdgeCost;
+        return this;
+    }
+
+    /** Swaps the mobs; the caller re-prices the cells around the old and new ones. */
+    public void setHazards(Hazards h) {
+        this.hazards = h;
+    }
+
+    public Hazards hazards() {
+        return hazards;
+    }
+
+    /** Extra cost of standing at v: near a mob, or right beside lava (one slip and it's in). */
+    private double danger(long v) {
+        int x = Pos.x(v), y = Pos.y(v), z = Pos.z(v);
+        double c = hazards.cost(x, y, z);
+        if (lavaEdge > 0) {
+            for (int[] d : DIRS) {
+                if (d[0] != 0 && d[1] != 0) continue;
+                if (w.get(x + d[0], y, z + d[1]) == BlockKind.DANGER || w.get(x + d[0], y - 1, z + d[1]) == BlockKind.DANGER) {
+                    c += lavaEdge;
+                    break;
+                }
+            }
+        }
+        return c;
     }
 
     /** Cost of moving through the world as it is. */
@@ -339,7 +375,7 @@ public final class MoveGraph implements Graph {
             jumpTicks.put(u, v, ticks);
         }
         double d = Math.hypot(Pos.x(v) - Pos.x(u), Pos.z(v) - Pos.z(u));
-        return Math.max(opt, ticks + Costs.JUMP_PENALTY + risk(d));
+        return Math.max(opt, ticks + Costs.JUMP_PENALTY + risk(d) + danger(v));
     }
 
     @Override

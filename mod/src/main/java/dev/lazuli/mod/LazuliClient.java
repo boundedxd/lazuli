@@ -718,6 +718,8 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 		wasDead = dead;
 		clicks.tick(mc, settings.clicksPerTick.get());
+		if (ticks % 10 == 0) session.setHazards(mc.player == null || !settings.avoidMobs.get() || hunt.active() || !busy()
+			? dev.lazuli.core.move.Hazards.NONE : dev.lazuli.mod.process.Guard.hazards(mc, mc.player, settings));
 		renderer.tick(mc);
 		renderer.hudTick(mc);
 		FreeCam.tick(mc);

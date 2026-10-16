@@ -4,6 +4,7 @@ import dev.lazuli.core.chat.Chat;
 import dev.lazuli.core.goal.GoalXZ;
 import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
+import dev.lazuli.mod.control.Combat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.LivingEntity;
@@ -21,11 +22,14 @@ import java.util.function.Consumer;
  * <ul>
  *   <li>dodgeCreepers: a creeper starts to hiss close by, so it runs out of the blast;</li>
  *   <li>lowHpRetreat: health drops to retreatHealth, so it gets away from monsters, eats and waits until healed;</li>
- *   <li>defend: a monster comes within reach, so it turns and hits it (full swings, best weapon) until it's gone.</li>
+ *   <li>defend: a monster comes within reach, so it turns and hits it (full swings, best weapon) until it's gone,
+ *   with the shield up between swings (useShield);</li>
+ *   <li>useBow: a skeleton or a creeper is coming, so it shoots it from where it stands (stepping back from one too close);</li>
+ *   <li>fightOrFlee: too many monsters for its health, armor and weapon (see {@link dev.lazuli.core.control.Threat}), so it runs.</li>
  * </ul>
  */
 public final class Guard implements Process {
-    private enum Danger { NONE, CREEPER, LOW_HP, FIGHT }
+    private enum Danger { NONE, CREEPER, LOW_HP, FIGHT, OUTMATCHED }
 
     /** How close a hissing creeper has to be to run, and how far away it runs. */
     private static final double CREEPER_NEAR = 6, CREEPER_SAFE = 9;
@@ -94,6 +98,7 @@ public final class Guard implements Process {
         return switch (danger) {
             case CREEPER -> "Running from a creeper";
             case FIGHT -> "Fighting";
+            case OUTMATCHED -> "Outnumbered: running";
             case LOW_HP -> "Healing" + (p == null ? "" : " " + (int) p.getHealth() + "/" + (int) p.getMaxHealth());
             case NONE -> null;
         };
@@ -114,6 +119,7 @@ public final class Guard implements Process {
     }
 
     private void end() {
+        combat.reset(Minecraft.getInstance());
         input.release();
         active = healing = false;
         danger = Danger.NONE;
@@ -161,18 +167,49 @@ public final class Guard implements Process {
             }
             case FIGHT -> {
                 LivingEntity t = nearestFoe(mc, p, FIGHT_CHASE);
+                if (t == null && Combat.canShoot(p, settings)) t = Combat.rangedFoe(mc, p, BOW_RANGE);
                 if (t == null || since > FIGHT_TICKS || p.getHealth() <= settings.retreatHealth.get() && settings.lowHpRetreat.get()) {
                     release();
                     return;
                 }
+                if (settings.fightOrFlee.get() && outmatched(mc, p)) {
+                    combat.reset(mc);
+                    take(Danger.OUTMATCHED, p);
+                    return;
+                }
                 fight(mc, p, t);
+            }
+            case OUTMATCHED -> {
+                List<LivingEntity> mobs = enemies(mc, p, MOB_NEAR);
+                if (mobs.isEmpty() || since > 20 * 20) {
+                    trip.cancel();
+                    release();
+                    return;
+                }
+                flee(p, mobs, FLEE);
             }
             case NONE -> release();
         }
     }
 
     private void fight(Minecraft mc, LocalPlayer p, LivingEntity t) {
-        dev.lazuli.mod.control.Melee.tick(mc, p, t, input, settings);
+        combat.tick(mc, p, t, input, settings);
+    }
+
+    /** Shooting range for the bow. */
+    private static final double BOW_RANGE = 16;
+    private final Combat combat = new Combat();
+
+    /** Too many monsters around for the player's health, armor and weapon. */
+    private boolean outmatched(Minecraft mc, LocalPlayer p) {
+        List<String> ids = new java.util.ArrayList<>();
+        for (LivingEntity e : enemies(mc, p, 10)) {
+            if (e instanceof net.minecraft.world.entity.monster.EnderMan
+                || e instanceof net.minecraft.world.entity.monster.zombie.ZombifiedPiglin) continue;
+            ids.add(net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).toString());
+        }
+        return ids.size() > 1 && dev.lazuli.core.control.Threat.outmatched(ids, p.getHealth(), p.getArmorValue(),
+            dev.lazuli.mod.control.Melee.bestDamage(p));
     }
 
     private Danger spot(Minecraft mc, LocalPlayer p) {
@@ -182,7 +219,9 @@ public final class Guard implements Process {
             }
         }
         if (settings.lowHpRetreat.get() && p.getHealth() <= settings.retreatHealth.get()) return Danger.LOW_HP;
+        if (settings.fightOrFlee.get() && nearestFoe(mc, p, 8) != null && outmatched(mc, p)) return Danger.OUTMATCHED;
         if (settings.defend.get() && nearestFoe(mc, p, FIGHT_NEAR) != null) return Danger.FIGHT;
+        if (Combat.canShoot(p, settings) && Combat.rangedFoe(mc, p, BOW_RANGE) != null) return Danger.FIGHT;
         return Danger.NONE;
     }
 
@@ -193,7 +232,9 @@ public final class Guard implements Process {
         since = flees = 0;
         tookOverAt = session.snapshot().trip();
         trip.clear();
-        if (d == Danger.FIGHT) {
+        if (d == Danger.OUTMATCHED) {
+            chat.accept(Chat.warn("Too many monsters: running"));
+        } else if (d == Danger.FIGHT) {
             session.stop(true); // stand and fight (the job's trip is picked up again after)
         } else if (d == Danger.LOW_HP) {
             session.stop(true); // stand still to heal (the job's trip is picked up again after)
@@ -251,6 +292,23 @@ public final class Guard implements Process {
             }
         }
         return best;
+    }
+
+    /** Hostile mobs around, for paths to keep away from (neutral ones that only fight back are left out). */
+    public static dev.lazuli.core.move.Hazards hazards(Minecraft mc, LocalPlayer p, Settings settings) {
+        double r = settings.mobAvoidRadius.get(), cost = settings.mobAvoidCost.get();
+        List<dev.lazuli.core.move.Hazards.Hazard> out = new java.util.ArrayList<>();
+        for (LivingEntity e : enemies(mc, p, 40)) {
+            if (e instanceof net.minecraft.world.entity.monster.EnderMan
+                || e instanceof net.minecraft.world.entity.monster.zombie.ZombifiedPiglin) continue;
+            boolean creeper = e instanceof Creeper;
+            // on a 2-block grid, so a mob shuffling about doesn't re-price the trip every time
+            out.add(new dev.lazuli.core.move.Hazards.Hazard(e.getBlockX() & ~1, e.getBlockY(), e.getBlockZ() & ~1,
+                creeper ? r * 1.5 : r, creeper ? cost * 1.5 : cost));
+        }
+        out.sort(java.util.Comparator.comparingInt((dev.lazuli.core.move.Hazards.Hazard h) -> h.x()).thenComparingInt(h -> h.z())
+            .thenComparingInt(h -> h.y()));
+        return dev.lazuli.core.move.Hazards.of(out);
     }
 
     private static List<LivingEntity> creepers(Minecraft mc, LocalPlayer p, double r) {

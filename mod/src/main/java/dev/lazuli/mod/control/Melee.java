@@ -35,7 +35,7 @@ public final class Melee {
         // the crosshair on it: the view ray passes through its box
         Vec3 eye = p.getEyePosition(), dir = Vec3.directionFromRotation(npitch, nyaw);
         boolean onIt = t.getBoundingBox().inflate(0.1).clip(eye, eye.add(dir.scale(REACH + 0.5))).isPresent();
-        if (close && onIt && p.hasLineOfSight(t) && p.getAttackStrengthScale(0.5f) >= 0.95f) {
+        if (close && onIt && !p.isUsingItem() && p.hasLineOfSight(t) && p.getAttackStrengthScale(0.5f) >= 0.95f) {
             mc.gameMode.attack(p, t);
             p.swing(InteractionHand.MAIN_HAND);
         }
@@ -56,6 +56,21 @@ public final class Melee {
             }
         }
         if (best >= 0) p.getInventory().setSelectedSlot(best);
+    }
+
+    /** Attack damage of the best sword or axe in the hotbar (1: fists). */
+    public static double bestDamage(LocalPlayer p) {
+        double best = 1;
+        for (int i = 0; i < 9; i++) {
+            var s = p.getInventory().getItem(i);
+            String id = BuiltInRegistries.ITEM.getKey(s.getItem()).getPath();
+            if (!id.endsWith("_sword") && !id.endsWith("_axe")) continue;
+            var m = s.getOrDefault(net.minecraft.core.component.DataComponents.ATTRIBUTE_MODIFIERS,
+                net.minecraft.world.item.component.ItemAttributeModifiers.EMPTY);
+            best = Math.max(best, m.compute(net.minecraft.world.entity.ai.attributes.Attributes.ATTACK_DAMAGE, 1,
+                net.minecraft.world.entity.EquipmentSlot.MAINHAND));
+        }
+        return best;
     }
 
     private static int tier(String id) {

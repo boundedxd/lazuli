@@ -68,6 +68,26 @@ public final class Upkeep {
         if (p.isFallFlying()) return;
         eat(mc, p, busy);
         if (busy && !eating && settings.autoArmor.get() && mc.screen == null && p.tickCount % ARMOR_EVERY == 0) armor(mc, p);
+        if (!eating && mc.screen == null && p.tickCount % ARMOR_EVERY == 10 && !p.isUsingItem()) offhand(p);
+    }
+
+    /** A totem into the offhand (autoTotem), else a shield (autoShield), from the inventory. */
+    private void offhand(LocalPlayer p) {
+        ItemStack off = p.getOffhandItem();
+        if (off.is(Items.TOTEM_OF_UNDYING)) return;
+        int slot = settings.autoTotem.get() ? find(p, Items.TOTEM_OF_UNDYING) : -1;
+        // a shield only replaces nothing (never something the player put there)
+        if (slot < 0 && settings.autoShield.get() && off.isEmpty()) slot = find(p, Items.SHIELD);
+        if (slot < 0) return;
+        var clicks = dev.lazuli.mod.inventory.ClickDriver.get();
+        if (clicks.busy()) return;
+        clicks.add(p.inventoryMenu.containerId, java.util.List.of(Click.swap(slot < 9 ? 36 + slot : slot, 40)));
+        chat.accept(Chat.info("{} into the offhand", p.getInventory().getItem(slot).getHoverName().getString()));
+    }
+
+    private static int find(LocalPlayer p, net.minecraft.world.item.Item item) {
+        for (int i = 0; i < 36; i++) if (p.getInventory().getItem(i).is(item)) return i;
+        return -1;
     }
 
     private void eat(Minecraft mc, LocalPlayer p, boolean busy) {

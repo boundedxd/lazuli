@@ -72,6 +72,24 @@ public final class Settings {
     /** While busy, at {@link #retreatHealth} or less: get away from monsters, eat and wait to heal (the job waits). */
     public final Setting<Boolean> lowHpRetreat = bool("lowHpRetreat", true);
     public final Setting<Integer> retreatHealth = integer("retreatHealth", 8, 1, 19);
+    /** In a fight, shoot skeletons and creepers that are still a way off with a bow (needs a bow and arrows). */
+    public final Setting<Boolean> useBow = bool("useBow", true);
+    /** In a fight, hold the shield up (offhand) between swings and against arrows. */
+    public final Setting<Boolean> useShield = bool("useShield", true);
+    /** Run instead of fighting when there are too many monsters for its health, armor and weapon. */
+    public final Setting<Boolean> fightOrFlee = bool("fightOrFlee", true);
+    /** Keep a totem of undying in the offhand when there's one in the inventory. */
+    public final Setting<Boolean> autoTotem = bool("autoTotem", true);
+    /** Keep a shield in the offhand (when there's no totem to put there). */
+    public final Setting<Boolean> autoShield = bool("autoShield", true);
+    /** Paths keep away from hostile mobs (the closer, the costlier), going around them when that's not much longer. */
+    public final Setting<Boolean> avoidMobs = bool("avoidMobs", true);
+    /** How far from a mob paths start to bend away, in blocks (creepers: half again). */
+    public final Setting<Integer> mobAvoidRadius = integer("mobAvoidRadius", 6, 2, 16);
+    /** Extra ticks for a cell right at a mob (fading to 0 at the radius). */
+    public final Setting<Integer> mobAvoidCost = integer("mobAvoidCost", 40, 1, 400);
+    /** Paths keep a block away from lava (and fire, cactus...) when there's room. */
+    public final Setting<Boolean> avoidLava = bool("avoidLava", true);
     /** A trip with nothing happening for ~6 seconds is planned again from scratch (what #kill and a rerun would do). */
     public final Setting<Boolean> unstick = bool("unstick", true);
     /** Stuck: also swap in a fresh planner thread and forget all trip state (what #kill did), keeping the job going. */

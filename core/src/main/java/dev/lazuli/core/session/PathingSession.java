@@ -5,6 +5,7 @@ import dev.lazuli.core.goal.Goal;
 import dev.lazuli.core.goal.GoalBlock;
 import dev.lazuli.core.goal.GoalNear;
 import dev.lazuli.core.goal.GoalXZ;
+import dev.lazuli.core.move.Hazards;
 import dev.lazuli.core.move.Interaction;
 import dev.lazuli.core.move.MoveGraph;
 import dev.lazuli.core.move.SafeSpotFinder;
@@ -217,7 +218,31 @@ public final class PathingSession {
         in = new Interaction(in.allowBreak() && settings.allowBreak.get(), in.allowPlace() && settings.allowPlace.get(),
             in.throwaways(), in.breakTime());
         return new MoveGraph(world, settings.maxFallHeight.get(), settings.allowSprint.get(),
-            settings.heuristicWeight.get(), settings.allowParkour.get(), in).withClutch(clutchFall);
+            settings.heuristicWeight.get(), settings.allowParkour.get(), in).withClutch(clutchFall)
+            .withHazards(settings.avoidMobs.get() ? hazards : Hazards.NONE, settings.avoidLava.get() ? LAVA_EDGE : 0);
+    }
+
+    /** Extra ticks for a cell right beside lava. */
+    static final double LAVA_EDGE = 6;
+    private volatile Hazards hazards = Hazards.NONE;
+
+    /**
+     * The mobs to keep away from now (see {@link Hazards}). The trip under way re-prices the cells around the old and
+     * new ones and replans if that changed anything it used.
+     */
+    public void setHazards(Hazards h) {
+        Hazards old = hazards;
+        if (old.sameAs(h)) return;
+        hazards = h;
+        if (!settings.avoidMobs.get()) return;
+        worker.execute(() -> {
+            if (graph == null || planner == null) return;
+            Hazards before = graph.hazards();
+            graph.setHazards(h);
+            List<int[]> boxes = new ArrayList<>(before.boxes());
+            boxes.addAll(h.boxes());
+            if (!boxes.isEmpty() && planner.regionsChanged(boxes) > 0) scheduleReplan();
+        });
     }
 
     private volatile int clutchFall;
