@@ -127,6 +127,9 @@ public final class LazuliClient implements ClientModInitializer {
 	private dev.lazuli.mod.process.FishProcess fishing;
 	private dev.lazuli.mod.process.PortalProcess portals;
 	private dev.lazuli.mod.process.IceBoatProcess iceboat;
+	private final dev.lazuli.core.task.RoutineRunner routine = new dev.lazuli.core.task.RoutineRunner();
+	private final dev.lazuli.core.task.Routines routines = new dev.lazuli.core.task.Routines(
+		FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("routines.txt"));
 	private final java.util.Map<String, dev.lazuli.core.portal.PortalMemory> portalsByWorld = new java.util.HashMap<>();
 	/** Every process; at most one runs at a time. */
 	private java.util.List<Process> processes;
@@ -251,6 +254,7 @@ public final class LazuliClient implements ClientModInitializer {
 			@Override
 			public void stopProcesses() {
 				// #stop and #come: the job, every process and its clicks (the trip is stopped by the command)
+				if (!runningRoutineStep) routine.stop();
 				tasks.cancel();
 				clicks.cancel();
 				LazuliClient.this.stopProcesses(false);
@@ -278,6 +282,25 @@ public final class LazuliClient implements ClientModInitializer {
 			public void farm(int range) {
 				LazuliClient.this.stopProcesses(false);
 				farm.start(Minecraft.getInstance(), range);
+			}
+
+			@Override
+			public dev.lazuli.core.task.Routines routines() {
+				return routines;
+			}
+
+			@Override
+			public void runRoutine(String name, java.util.List<String> steps, int times) {
+				routine.start(name, steps, times);
+				chat(Chat.ok("{}: {} steps{}", name == null ? "Queue" : "Routine " + name, steps.size(),
+					times == 0 ? ", forever" : times > 1 ? ", " + times + " times" : ""));
+			}
+
+			@Override
+			public void stopRoutine() {
+				if (!routine.running()) return;
+				routine.stop();
+				chat(Chat.warn("Routine stopped"));
 			}
 
 			@Override
@@ -707,6 +730,8 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private int ticks;
+	/** A routine is running one of its steps right now. */
+	private boolean runningRoutineStep;
 
 	/** Throws out items ("all": anything) from the main inventory and hotbar; a negative count: all of it. */
 	private void drop(java.util.List<ItemCount> items) {
@@ -765,6 +790,7 @@ public final class LazuliClient implements ClientModInitializer {
 
 	/** Stops the job, every process and the trip (or the search for one). */
 	private void stopAll(boolean announce) {
+		routine.stop();
 		tasks.cancel();
 		boolean any = busy();
 		clicks.cancel();
@@ -783,6 +809,18 @@ public final class LazuliClient implements ClientModInitializer {
 	private void onTick(Minecraft mc) {
 		ticks++;
 		tasks.tick();
+		String routineDone = routine.tick(busy(), line -> {
+			// a step's own command (#come, #stop inside a routine) mustn't end the routine running it
+			runningRoutineStep = true;
+			try {
+				runCommand(line);
+			} catch (RuntimeException e) {
+				chat(Chat.err("Routine step {} failed: {}", line, e.getMessage()));
+			} finally {
+				runningRoutineStep = false;
+			}
+		});
+		if (routineDone != null) chat(Chat.ok(routineDone));
 		chestWatcher.tick(mc);
 		tradeWatcher.tick(mc);
 		boolean dead = mc.player != null && mc.player.isDeadOrDying();

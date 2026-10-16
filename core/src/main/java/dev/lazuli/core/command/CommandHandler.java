@@ -107,6 +107,19 @@ public final class CommandHandler {
             reply(Chat.err("Ice boat racing isn't available here"));
         }
 
+        /** Saved routines (null: none here). */
+        default dev.lazuli.core.task.Routines routines() {
+            return null;
+        }
+
+        /** Runs commands one after another, {@code times} times over (0: forever); name null for a plain #queue. */
+        default void runRoutine(String name, List<String> steps, int times) {
+            reply(Chat.err("Routines aren't available here"));
+        }
+
+        default void stopRoutine() {
+        }
+
         /** Fishes at the nearest open water; minutes 0: until stopped. */
         default void fish(int minutes) {
             reply(Chat.err("Fishing isn't available here"));
@@ -357,6 +370,12 @@ public final class CommandHandler {
             }
             case "portal", "portals" -> ctx.portal(cmd.equals("portals") || args.length > 0 && args[0].equalsIgnoreCase("list"));
             case "iceboat", "race" -> iceboat(args);
+            case "queue" -> {
+                List<String> steps = steps(String.join(" ", args), prefix);
+                if (steps.isEmpty()) ctx.reply(Chat.err("Usage: queue <command> ; <command> ; ..."));
+                else ctx.runRoutine(null, steps, 1);
+            }
+            case "routine", "routines", "r" -> routine(args, prefix);
             case "fish" -> {
                 if (args.length == 0) ctx.fish(0);
                 else if (args.length == 1 && args[0].matches("[0-9]+")) ctx.fish(Integer.parseInt(args[0]));
@@ -430,6 +449,9 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "breed [animal...] [pairs]", "feed animals two at a time so they breed (any kind it has food for)"));
         ctx.reply(Chat.usage(p + "iceboat <x z | x y z> | lap [n] | record [name] | line [name|off]",
             "race the boat you're in: to a point or laps round the track (worked out from the blocks), or along a line you drove"));
+        ctx.reply(Chat.usage(p + "queue <command> ; <command> ; ...", "run commands one after another (each once the last is done)"));
+        ctx.reply(Chat.usage(p + "routine add <name> <command> ; <command> ... | <name> [times|forever] | list | del <name> | stop",
+            "save a chain of commands and run it again and again"));
         ctx.reply(Chat.usage(p + "fish [minutes]", "fish at the nearest open water (until stopped without minutes)"));
         ctx.reply(Chat.usage(p + "drop <item|all> [count] [item [count]...]", "throw items out of the inventory (all of them without a count)"));
         ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
@@ -459,6 +481,70 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "settings", "list every setting"));
         ctx.reply(Chat.usage(p + "config", "open the settings screen"));
         ctx.reply(Chat.usage(p + "record start <name> | stop", "record a movement trace"));
+    }
+
+    /** "mine 8 iron_ore ; #smelt raw_iron 8": the commands, each with the prefix. */
+    private static List<String> steps(String text, String prefix) {
+        List<String> out = new ArrayList<>();
+        for (String s : dev.lazuli.core.task.Routines.split(text)) out.add(s.startsWith(prefix) ? s : prefix + s);
+        return out;
+    }
+
+    /** routine add <name> <cmd ; cmd> | <name> [times|forever] | run <name> [...] | list | del <name> | stop */
+    private void routine(String[] args, String prefix) {
+        String usage = "Usage: routine add <name> <command> ; <command> ... | <name> [times|forever] | list | del <name> | stop";
+        var store = ctx.routines();
+        if (args.length == 0 || store == null) {
+            ctx.reply(Chat.err(store == null ? "Routines aren't available here" : usage));
+            return;
+        }
+        String sub = args[0].toLowerCase(Locale.ROOT);
+        switch (sub) {
+            case "add", "save", "set" -> {
+                if (args.length < 3) {
+                    ctx.reply(Chat.err(usage));
+                    return;
+                }
+                List<String> steps = steps(String.join(" ", Arrays.copyOfRange(args, 2, args.length)), prefix);
+                store.set(args[1], steps);
+                ctx.reply(Chat.ok("Routine {}: {} steps ({}routine {} to run it)", args[1], steps.size(), prefix, args[1]));
+            }
+            case "del", "delete", "remove" -> {
+                if (args.length != 2) ctx.reply(Chat.err(usage));
+                else if (store.remove(args[1])) ctx.reply(Chat.ok("Deleted routine {}", args[1]));
+                else ctx.reply(Chat.err("No routine {}", args[1]));
+            }
+            case "list" -> {
+                var all = store.list();
+                if (all.isEmpty()) ctx.reply(Chat.info("No routines yet ({}routine add <name> <command> ; ...)", prefix));
+                all.forEach((n, s) -> ctx.reply(Chat.info("{}: {}", n, String.join(" ; ", s))));
+            }
+            case "stop", "cancel" -> ctx.stopRoutine();
+            default -> {
+                int at = sub.equals("run") ? 1 : 0;
+                if (args.length <= at) {
+                    ctx.reply(Chat.err(usage));
+                    return;
+                }
+                String name = args[at];
+                List<String> steps = store.get(name);
+                if (steps == null) {
+                    ctx.reply(Chat.err("No routine {} ({}routine list)", name, prefix));
+                    return;
+                }
+                int times = 1;
+                if (args.length > at + 1) {
+                    String t = args[at + 1];
+                    if (t.equalsIgnoreCase("forever") || t.equalsIgnoreCase("loop")) times = 0;
+                    else if (number(t)) times = Math.max(1, integer(t));
+                    else {
+                        ctx.reply(Chat.err(usage));
+                        return;
+                    }
+                }
+                ctx.runRoutine(name, steps, times);
+            }
+        }
     }
 
     /** iceboat <x z | x y z> | lap [n] | record [name] | line [name|off]; bare: race the recorded line. */

@@ -76,6 +76,11 @@ class CommandTest {
             public void smeltCollect() {
                 mined.add("collect");
             }
+            private final dev.lazuli.core.task.Routines store = new dev.lazuli.core.task.Routines(null);
+            public dev.lazuli.core.task.Routines routines() { return store; }
+            public void runRoutine(String name, List<String> steps, int times) {
+                mined.add("run " + name + " " + steps + " x" + times);
+            }
             public void getItemDry(List<ItemCount> items) {
                 mined.add("dry " + items);
             }
@@ -428,5 +433,19 @@ class CommandTest {
         assertEquals(1, mined.size());
         assertTrue(mined.get(0).startsWith("dry "), mined.toString());
         assertTrue(mined.get(0).contains("iron_pickaxe"), mined.toString());
+    }
+
+    @Test
+    void queueAndRoutines() {
+        CommandHandler h = handler();
+        h.handle("#queue mine 8 iron_ore ; #smelt raw_iron 8");
+        h.handle("#routine add iron mine 8 iron_ore ; smelt raw_iron 8 ; deposit iron_ingot");
+        h.handle("#routine iron 3");
+        h.handle("#routine run iron forever");
+        h.handle("#routine nope");
+        assertEquals(List.of("run null [#mine 8 iron_ore, #smelt raw_iron 8] x1",
+            "run iron [#mine 8 iron_ore, #smelt raw_iron 8, #deposit iron_ingot] x3",
+            "run iron [#mine 8 iron_ore, #smelt raw_iron 8, #deposit iron_ingot] x0"), mined);
+        assertTrue(replies.get(replies.size() - 1).contains("No routine nope"), replies.toString());
     }
 }

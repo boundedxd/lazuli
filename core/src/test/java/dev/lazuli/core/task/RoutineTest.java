@@ -1,0 +1,80 @@
+package dev.lazuli.core.task;
+
+import org.junit.jupiter.api.Test;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class RoutineTest {
+    /** Runs the runner with each command keeping Lazuli busy for {@code busyFor} ticks (0: over at once). */
+    private static List<String> drive(RoutineRunner r, int busyFor, int ticks, List<String> messages) {
+        List<String> ran = new ArrayList<>();
+        int[] busyLeft = {0};
+        for (int t = 0; t < ticks; t++) {
+            boolean busy = busyLeft[0] > 0;
+            if (busy) busyLeft[0]--;
+            String m = r.tick(busy, cmd -> {
+                ran.add(cmd);
+                busyLeft[0] = busyFor;
+            });
+            if (m != null) messages.add(m);
+        }
+        return ran;
+    }
+
+    @Test
+    void runsEachStepAfterTheLastIsDone() {
+        RoutineRunner r = new RoutineRunner();
+        r.start("iron", List.of("#mine 8 iron_ore", "#smelt raw_iron 8", "#deposit iron_ingot"), 1);
+        List<String> msgs = new ArrayList<>();
+        List<String> ran = drive(r, 30, 200, msgs);
+        assertEquals(List.of("#mine 8 iron_ore", "#smelt raw_iron 8", "#deposit iron_ingot"), ran);
+        assertEquals(List.of("iron done"), msgs);
+        assertFalse(r.running());
+    }
+
+    @Test
+    void waitsForAStepToFinish() {
+        RoutineRunner r = new RoutineRunner();
+        r.start("x", List.of("a", "b"), 1);
+        List<String> ran = drive(r, 100, 50, new ArrayList<>());
+        assertEquals(List.of("a"), ran); // a is still going
+    }
+
+    @Test
+    void instantCommandsMoveOnAfterAMoment() {
+        RoutineRunner r = new RoutineRunner();
+        r.start(null, List.of("#set allowSprint false", "#drop dirt"), 1);
+        List<String> msgs = new ArrayList<>();
+        assertEquals(List.of("#set allowSprint false", "#drop dirt"), drive(r, 0, 40, msgs));
+        assertEquals(List.of("Queue done"), msgs);
+    }
+
+    @Test
+    void repeatsAndForever() {
+        RoutineRunner r = new RoutineRunner();
+        r.start("loop", List.of("a", "b"), 3);
+        assertEquals(List.of("a", "b", "a", "b", "a", "b"), drive(r, 5, 500, new ArrayList<>()));
+        r.start("loop", List.of("a"), 0);
+        assertTrue(drive(r, 5, 500, new ArrayList<>()).size() > 20);
+        assertTrue(r.running());
+        assertTrue(r.status().contains("forever"));
+        r.stop();
+        assertFalse(r.running());
+    }
+
+    @Test
+    void savesRoutines() throws Exception {
+        Path f = Files.createTempDirectory("lazuli").resolve("routines.txt");
+        Routines rs = new Routines(f);
+        rs.set("Iron", Routines.split("#mine 8 iron_ore ; #smelt raw_iron 8;#deposit iron_ingot"));
+        Routines again = new Routines(f);
+        assertEquals(List.of("#mine 8 iron_ore", "#smelt raw_iron 8", "#deposit iron_ingot"), again.get("iron"));
+        assertTrue(again.remove("IRON"));
+        assertNull(new Routines(f).get("iron"));
+    }
+}
