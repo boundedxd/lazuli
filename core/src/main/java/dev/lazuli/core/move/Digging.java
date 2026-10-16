@@ -52,7 +52,11 @@ public final class Digging {
 
     /** Forgets cached kinds inside these boxes ({x0, y0, z0, x1, y1, z1} each). */
     public void invalidate(List<int[]> boxes) {
-        kinds.removeIf(p -> MoveGraph.inAny(p, boxes));
+        invalidate(new dev.lazuli.core.util.BoxIndex(boxes));
+    }
+
+    public void invalidate(dev.lazuli.core.util.BoxIndex boxes) {
+        kinds.removeIf(boxes::contains);
     }
 
     /** What standing at u takes (cached: the search asks about each cell dozens of times). */

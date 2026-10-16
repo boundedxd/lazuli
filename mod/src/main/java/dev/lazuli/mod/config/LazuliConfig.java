@@ -93,6 +93,7 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(bool(s.keepCollected, "Never bridge or pillar with blocks it's collecting (what #mine mines, what #getitem needs); only with spares beyond that."))
                     .build())
                 .group(OptionGroup.builder("Mining")
+                    .option(bool(s.breakNeedsTool, "Never dig through blocks that need a tool it doesn't have (stone without a pickaxe) on the way somewhere."))
                     .option(bool(s.allowBreak, "Mine through blocks in the way, with the best tool in the hotbar."))
                     .option(bool(s.minePickup, "#mine walks over to pick up what each broken block drops."))
                     .option(bool(s.mineSearch, "None found: strip-mine at the ore's best Y level, or explore for anything else (logs, sand...)."))

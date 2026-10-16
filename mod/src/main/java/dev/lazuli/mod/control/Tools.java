@@ -55,6 +55,12 @@ public final class Tools {
             if (creative) return phys.hardness < 0 ? INF : 1.0;
             BlockState s = BlockClassifier.state(phys.id);
             if (s == null) return Interaction.handTicks(phys, false);
+            // digging through stone by hand (a block that drops nothing without the right tool): never on the way
+            if (settings.breakNeedsTool.get() && s.requiresCorrectToolForDrops()) {
+                boolean tool = false;
+                for (ItemStack stack : hotbar) tool |= !wornOut(stack) && stack.isCorrectToolForDrops(s);
+                if (!tool) return INF;
+            }
             double best = INF;
             for (ItemStack stack : hotbar) best = Math.min(best, wornOut(stack) ? INF : ticks(stack, s, efficiency, haste));
             best = Math.min(best, ticks(ItemStack.EMPTY, s, efficiency, haste));

@@ -72,6 +72,8 @@ public final class BrewProcess implements Process {
     private Brewing.Route route;
     private boolean gathered, loaded;
     private BlockPos standPos, water;
+    /** Water it couldn't get to this time: tried no more. */
+    private final Set<BlockPos> badWater = new HashSet<>();
 
     public BrewProcess(PathingSession session, Settings settings, ClickDriver clicks, CraftProcess crafts, Consumer<String> chat) {
         this.settings = settings;
@@ -165,6 +167,7 @@ public final class BrewProcess implements Process {
                 enter(Phase.FILL, p);
                 water = null;
                 fillTrips = 0;
+                badWater.clear();
                 return;
             }
             if (crafts.canCraft(p, BOTTLE)) {
@@ -301,17 +304,21 @@ public final class BrewProcess implements Process {
             return;
         }
         if (water == null || !source(mc, water)) {
-            water = Station.nearest(mc, p, s -> s.getFluidState().is(Fluids.WATER) && s.getFluidState().isSource(), settings.stationRange.get());
+            water = surfaceWater(mc, p);
+            fillTrips = 0;
             if (water == null) {
-                fail("No water within " + settings.stationRange.get() + " blocks to fill bottles at");
+                fail("No open water within " + settings.stationRange.get() + " blocks to fill bottles at");
                 return;
             }
         }
         float[] aim = aimAtWater(mc, p, water);
         if (aim == null) {
             if (trip.running()) return;
-            if (++fillTrips > 3) {
-                fail("Can't get to the water at " + water.getX() + " " + water.getY() + " " + water.getZ());
+            if (++fillTrips > 2) {
+                // that one's out of reach: the next nearest, until none are left
+                badWater.add(water);
+                water = null;
+                if (badWater.size() >= 4) fail("Can't get to any water nearby to fill bottles");
                 return;
             }
             trip.go(new GoalNear(water.getX(), water.getY() + 1, water.getZ(), 2), p, true);
@@ -325,6 +332,30 @@ public final class BrewProcess implements Process {
             usedAt = p.tickCount;
             mc.gameMode.useItem(p, InteractionHand.MAIN_HAND);
         }
+    }
+
+    /**
+     * The nearest water source with open air right above it (a lake or river, not a cave pool under the ground),
+     * water at about the player's level first: climbing or digging to it is the slow part.
+     */
+    private BlockPos surfaceWater(Minecraft mc, LocalPlayer p) {
+        int r = settings.stationRange.get();
+        BlockPos feet = p.blockPosition(), best = null;
+        double bestScore = Double.MAX_VALUE;
+        BlockPos.MutableBlockPos at = new BlockPos.MutableBlockPos();
+        for (int y = Math.max(mc.level.getMinY(), feet.getY() - r / 2); y <= Math.min(mc.level.getMaxY(), feet.getY() + r / 2); y++)
+            for (int x = feet.getX() - r; x <= feet.getX() + r; x++)
+                for (int z = feet.getZ() - r; z <= feet.getZ() + r; z++) {
+                    at.set(x, y, z);
+                    if (!source(mc, at) || !mc.level.getBlockState(at.above()).isAir() || badWater.contains(at)) continue;
+                    int dy = y - feet.getY();
+                    double score = at.distSqr(feet) + 8.0 * dy * dy;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = at.immutable();
+                    }
+                }
+        return best;
     }
 
     private static boolean source(Minecraft mc, BlockPos at) {

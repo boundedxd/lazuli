@@ -150,6 +150,8 @@ public final class Settings {
     public final Setting<Boolean> smeltWait = bool("smeltWait", true);
     /** #smelt uses a blast furnace (ores) or smoker (food), twice as fast, when there's one near or in the inventory. */
     public final Setting<Boolean> smeltFastFurnaces = bool("smeltFastFurnaces", true);
+    /** Paths never break blocks that need a tool it doesn't have (stone without a pickaxe): too slow, drops nothing. */
+    public final Setting<Boolean> breakNeedsTool = bool("breakNeedsTool", true);
     /** #goto farther than {@link #elytraMinDistance} flies there with an elytra and rockets when it has them. */
     public final Setting<Boolean> elytraGoto = bool("elytraGoto", true);
     public final Setting<Integer> elytraMinDistance = integer("elytraMinDistance", 300, 50, 100000);

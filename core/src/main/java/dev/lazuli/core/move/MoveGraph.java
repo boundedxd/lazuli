@@ -353,11 +353,12 @@ public final class MoveGraph implements Graph {
 
     @Override
     public void invalidate(java.util.List<int[]> boxes) {
-        nearGap.removeIf(p -> inAny(p, boxes));
-        feetCache.removeIf(p -> inAny(p, boxes));
-        jumpTicks.removeIfFrom(u -> inAny(u, boxes));
-        costCache.removeIfFrom(u -> inAny(u, boxes));
-        dig.invalidate(boxes);
+        dev.lazuli.core.util.BoxIndex in = new dev.lazuli.core.util.BoxIndex(boxes);
+        nearGap.removeIf(in::contains);
+        feetCache.removeIf(in::contains);
+        jumpTicks.removeIfFrom(in::contains);
+        costCache.removeIfFrom(in::contains);
+        dig.invalidate(in);
     }
 
     static boolean inAny(long p, java.util.List<int[]> boxes) {

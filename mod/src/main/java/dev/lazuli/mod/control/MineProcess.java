@@ -274,8 +274,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
                         if (antiXray && hidden.contains(blk) && !exposed(bx, by, bz)) continue;
                         long p = Pos.pack(bx, by, bz);
                         if (blacklist.contains(p)) continue;
-                        double score = Math.sqrt(sq(bx + 0.5 - px) + sq(by + 0.5 - py) + sq(bz + 0.5 - pz))
-                            + (exposed(bx, by, bz) ? 0 : BURIED);
+                        double score = Math.sqrt(sq(bx + 0.5 - px) + sq(by + 0.5 - py) + sq(bz + 0.5 - pz)) + penalty(bx, by, bz);
                         if (best.size() < KEEP) best.add(new double[]{score, p});
                         else if (score < best.peek()[0]) {
                             best.poll();
@@ -283,6 +282,17 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
                         }
                     }
         }
+    }
+
+    /** Score penalty (blocks) for a target under water: slow to break, the drop floats off. */
+    private static final double UNDERWATER = 24;
+
+    /** How much worse than its distance a target is: buried, or only reachable under water. */
+    private double penalty(int x, int y, int z) {
+        if (!exposed(x, y, z)) return BURIED;
+        int[][] around = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int[] d : around) if (world.get(x + d[0], y + d[1], z + d[2]) == BlockKind.AIR) return 0;
+        return UNDERWATER;
     }
 
     /** Next to air or water: reachable without digging to it. */
@@ -648,7 +658,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         double px = player.getX(), py = player.getY(), pz = player.getZ();
         return known.stream().filter(p -> !blacklist.contains(p) && safe(p))
             .sorted(Comparator.comparingDouble(p -> Math.sqrt(sq(Pos.x(p) + 0.5 - px) + sq(Pos.y(p) + 0.5 - py) + sq(Pos.z(p) + 0.5 - pz))
-                + (exposed(Pos.x(p), Pos.y(p), Pos.z(p)) ? 0 : BURIED)))
+                + penalty(Pos.x(p), Pos.y(p), Pos.z(p))))
             .limit(n).toList();
     }
 

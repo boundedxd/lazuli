@@ -118,10 +118,21 @@ public final class Interactor implements Builder.Hands {
     public void mine(long pos) {
         BlockPos bp = new BlockPos(Pos.x(pos), Pos.y(pos), Pos.z(pos));
         BlockHitResult hit = crosshair();
-        if (hit == null || !hit.getBlockPos().equals(bp)) return;
-        Tools.equipBestTool(mc, player, player.level().getBlockState(bp), settings);
-        mining = bp;
+        if (hit == null) return;
+        // leaf litter, grass, a flower... on it: nothing to walk into (the planner sees air), but the crosshair stops
+        // there, so it goes first (it breaks at once)
+        if (!hit.getBlockPos().equals(bp) && !inTheWay(hit.getBlockPos())) return;
+        BlockPos at = hit.getBlockPos();
+        Tools.equipBestTool(mc, player, player.level().getBlockState(at), settings);
+        mining = at;
         miningFace = hit.getDirection();
+    }
+
+    /** A block the crosshair stops at that doesn't block movement and can be broken (plants, leaf litter...). */
+    private boolean inTheWay(BlockPos bp) {
+        var state = mc.level.getBlockState(bp);
+        return !state.isAir() && state.getFluidState().isEmpty() && state.getCollisionShape(mc.level, bp).isEmpty()
+            && state.getDestroySpeed(mc.level, bp) >= 0;
     }
 
     /** The block the player's (server-side) rotation points at within reach, or null. */

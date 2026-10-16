@@ -57,12 +57,14 @@ public final class ElytraPilot {
         if (boostLeft > 0) boostLeft--;
         float yaw = (float) (Math.toDegrees(Math.atan2(tz - s.z, tx - s.x)) - 90.0);
         boolean land = landing(s, tx, tz, landY);
+        // gliding in: a rocket only to stretch a glide that falls short, never on the last stretch
+        boolean late = Math.hypot(tx - s.x, tz - s.z) < 40;
         double alt = land ? landY : cruiseHeight(s, tx, tz, ground);
         double best = Double.POSITIVE_INFINITY;
         Command pick = new Command(yaw, 0, false);
         for (int f = 0; f < 2; f++) {
             boolean fire = f == 1;
-            if (fire && (!rockets || boostLeft > 0 || land)) continue;
+            if (fire && (!rockets || boostLeft > 0 || land && late)) continue;
             for (float pitch : PITCHES) {
                 double c = cost(s, yaw, pitch, fire, tx, tz, landY, alt, land, ground);
                 if (c < best) {
@@ -120,6 +122,7 @@ public final class ElytraPilot {
             double drop = s.y - (landY + 1);
             c += Math.hypot(dh, drop) * 6;
             if (dh < 12) c += s.speed() * 25;
+            if (fire) c += 40;
             return c;
         }
         c -= (d0 - dh) * 8; // getting there

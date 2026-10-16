@@ -191,12 +191,20 @@ public final class ElytraProcess implements Process {
     }
 
     private void fly(Minecraft mc, LocalPlayer p) {
+        int under = ground(mc, p.getBlockX(), p.getBlockZ());
+        double over = under == ElytraPilot.UNKNOWN ? 99 : p.getY() - under;
         if (!p.isFallFlying()) {
             if (p.onGround() || p.isInWater()) {
                 land(p);
                 return;
             }
-            // knocked out of it in the air: open the wings again
+            if (over < 5) {
+                // coming down onto something (a tree top...): let it land; jumping here would hop and flap on the ground
+                input.release();
+                lastJump = false;
+                return;
+            }
+            // knocked out of it high up: open the wings again
             boolean jump = !lastJump;
             lastJump = jump;
             drive(mc, p, new Controls(false, false, jump, false, RotationDriver.yaw(p), RotationDriver.pitch(p), 0, false),
@@ -218,8 +226,9 @@ public final class ElytraProcess implements Process {
         }
         var v = p.getDeltaMovement();
         ElytraSim.State s = new ElytraSim.State(p.getX(), p.getY(), p.getZ(), v.x, v.y, v.z);
-        int landY = ground(mc, (int) Math.floor(gx), (int) Math.floor(gz));
-        if (landY == ElytraPilot.UNKNOWN) landY = ty != null ? ty : mc.level.getSeaLevel();
+        // onto the ground at the spot itself, not the tree tops over it (asked for a y: that one)
+        int landY = ty != null && !cutShort ? ty : floor(mc, (int) Math.floor(gx), (int) Math.floor(gz));
+        if (landY == ElytraPilot.UNKNOWN) landY = mc.level.getSeaLevel();
         boolean rockets = Hands.hold(p, clicks, r -> r.is(Items.FIREWORK_ROCKET));
         ElytraPilot.Command c = pilot.tick(s, gx, gz, landY, (x, z) -> ground(mc, x, z), rockets);
         float maxTurn = Math.max(settings.rotationSpeed.get().floatValue(), 10f);
@@ -258,6 +267,12 @@ public final class ElytraProcess implements Process {
         else end(Outcome.FAILED, Chat.err("Landed, but couldn't walk the rest of the way"));
     }
 
+    /** Like {@link #ground} but under any leaves: where to land. */
+    private static int floor(Minecraft mc, int x, int z) {
+        if (!mc.level.hasChunk(x >> 4, z >> 4)) return ElytraPilot.UNKNOWN;
+        return mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+    }
+
     /** The standing y on top of the ground at x z, or UNKNOWN where the chunk isn't loaded. */
     private static int ground(Minecraft mc, int x, int z) {
         if (!mc.level.hasChunk(x >> 4, z >> 4)) return ElytraPilot.UNKNOWN;
@@ -269,8 +284,8 @@ public final class ElytraProcess implements Process {
     }
 
     private void drive(Minecraft mc, LocalPlayer p, Controls c, float yaw, float pitch) {
-        // the wings steer by the player's real rotation: never free look while flying
-        input.apply(mc, c, yaw, pitch, false);
+        // free look works: the wings steer by the rotation the player ticks with, rockets push along it (FireworkRocketMixin)
+        input.apply(mc, c, yaw, pitch, settings.freeLook.get());
     }
 
     private void enter(Phase next, LocalPlayer p) {
