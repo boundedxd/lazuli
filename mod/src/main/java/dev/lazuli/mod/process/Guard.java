@@ -127,6 +127,7 @@ public final class Guard implements Process {
             boolean pathing = snap.state() == PathingSession.State.PATHING || session.planning();
             boolean job = jobRunning.getAsBoolean();
             if (!pathing && !job) return;
+            if (p.isFallFlying()) return; // nothing to fight or flee up there; stopping would drop out of the sky
             Danger d = spot(mc, p);
             if (d == Danger.NONE) return;
             resume = !job && pathing ? snap.goal() : null;

@@ -125,6 +125,31 @@ public final class CommandHandler {
             reply(Chat.err("Getting items isn't available here"));
         }
 
+        /** Brews {@code count} bottles of a potion (fire_resistance, long_swiftness...) in a brewing stand. */
+        default void brew(String potion, dev.lazuli.core.craft.Brewing.Form form, int count) {
+            reply(Chat.err("Brewing isn't available here"));
+        }
+
+        /** Enchants {@code count} of an item at an enchanting table: {@code option} 1-3, or 0 for the best affordable. */
+        default void enchant(String item, int count, int option) {
+            reply(Chat.err("Enchanting isn't available here"));
+        }
+
+        /** Repairs an item at an anvil, or with {@code with} set, puts the two together (an enchanted book...). */
+        default void anvil(String item, String with) {
+            reply(Chat.err("Anvils aren't available here"));
+        }
+
+        /** Flies there with an elytra (y null: anywhere at x z). */
+        default void fly(int x, Integer y, int z) {
+            reply(Chat.err("Flying isn't available here"));
+        }
+
+        /** A goal far enough to fly to instead (elytraGoto): true if it took off for it. */
+        default boolean flyInstead(Goal goal) {
+            return false;
+        }
+
         /** Goes back to the furnaces it left cooking and takes what's done. */
         default void smeltCollect() {
             reply(Chat.err("Smelting isn't available here"));
@@ -279,6 +304,26 @@ public final class CommandHandler {
                 else if (items == null || items.size() != 1) ctx.reply(Chat.err("Usage: smelt <item> [count] | smelt collect"));
                 else ctx.smelt(items.get(0));
             }
+            case "brew" -> brew(args);
+            case "enchant" -> {
+                if (args.length < 1 || args.length > 3) {
+                    ctx.reply(Chat.err("Usage: enchant <item> [count] [1|2|3]"));
+                } else {
+                    int count = args.length > 1 ? Math.max(1, integer(args[1])) : 1;
+                    int option = args.length > 2 ? integer(args[2]) : 0;
+                    if (option < 0 || option > 3) ctx.reply(Chat.err("The option is 1, 2 or 3 (top to bottom)"));
+                    else ctx.enchant(args[0], count, option);
+                }
+            }
+            case "repair" -> {
+                if (args.length != 1) ctx.reply(Chat.err("Usage: repair <item>"));
+                else ctx.anvil(args[0], null);
+            }
+            case "combine" -> {
+                if (args.length != 2) ctx.reply(Chat.err("Usage: combine <item> <with> (an enchanted_book, another of it...)"));
+                else ctx.anvil(args[0], args[1]);
+            }
+            case "fly" -> fly(args);
             case "craft" -> {
                 List<ItemCount> items = items(args, 0, args.length);
                 if (items == null) ctx.reply(Chat.err("Usage: craft <item> [count] [item [count]...]"));
@@ -313,6 +358,11 @@ public final class CommandHandler {
             "get items from scratch: mines, crafts and smelts what it takes (until you have count); iron_tools, diamond_armor, iron_gear too"));
         ctx.reply(Chat.usage(p + "smelt <item> [count]", "cook items in a furnace (iron_ingot or raw_iron; blast furnace/smoker when there's one)"));
         ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
+        ctx.reply(Chat.usage(p + "brew <potion> [count] [splash|lingering]", "brew potions (fire_resistance, long_swiftness...); fills bottles, gets what's missing"));
+        ctx.reply(Chat.usage(p + "enchant <item> [count] [1|2|3]", "enchant at an enchanting table (the best it can pay for)"));
+        ctx.reply(Chat.usage(p + "repair <item>", "repair at an anvil with its material or another one"));
+        ctx.reply(Chat.usage(p + "combine <item> <with>", "put two things together at an anvil (an enchanted_book...)"));
+        ctx.reply(Chat.usage(p + "fly <x z | x y z | waypoint>", "fly there with an elytra and rockets (far #goto does too: elytraGoto)"));
         ctx.reply(Chat.usage(p + "find <item>", "which chests (opened before) hold an item"));
         ctx.reply(Chat.usage(p + "trade <enchant [level]|item [count]>...", "trade with villagers, e.g. " + p + "trade sharpness 5 (sells string, sticks... for emeralds first if need be)"));
         ctx.reply(Chat.usage(p + "trade list | scan | forget", "the trades seen so far | go look at the villagers around | forget them"));
@@ -435,6 +485,44 @@ public final class CommandHandler {
     private static int coord(String s, int here) {
         if (s.startsWith("~")) return here + (s.length() == 1 ? 0 : integer(s.substring(1)));
         return integer(s);
+    }
+
+    /** brew <potion> [count] [splash|lingering] */
+    private void brew(String[] args) {
+        if (args.length < 1 || args.length > 3) {
+            ctx.reply(Chat.err("Usage: brew <potion> [count] [splash|lingering]"));
+            return;
+        }
+        int count = 3;
+        var form = dev.lazuli.core.craft.Brewing.Form.DRINK;
+        for (int i = 1; i < args.length; i++) {
+            String a = args[i].toLowerCase(java.util.Locale.ROOT);
+            if (a.equals("splash")) form = dev.lazuli.core.craft.Brewing.Form.SPLASH;
+            else if (a.equals("lingering")) form = dev.lazuli.core.craft.Brewing.Form.LINGERING;
+            else count = Math.max(1, integer(a));
+        }
+        if (!dev.lazuli.core.craft.Brewing.known(args[0])) {
+            ctx.reply(Chat.err("Unknown potion: {} (like fire_resistance, long_swiftness, strong_healing)", args[0]));
+            return;
+        }
+        ctx.brew(args[0], form, count);
+    }
+
+    /** fly <x z | x y z | waypoint> */
+    private void fly(String[] args) {
+        int[] f = ctx.playerFeet();
+        if (args.length == 1) {
+            var wps = ctx.waypoints();
+            var w = wps == null ? null : wps.get(args[0], ctx.dimension());
+            if (w == null) ctx.reply(Chat.err("No waypoint {} in this dimension", args[0]));
+            else ctx.fly(w.x(), w.y(), w.z());
+        } else if (args.length == 2) {
+            ctx.fly(coord(args[0], f[0]), null, coord(args[1], f[2]));
+        } else if (args.length == 3) {
+            ctx.fly(coord(args[0], f[0]), coord(args[1], f[1]), coord(args[2], f[2]));
+        } else {
+            ctx.reply(Chat.err("Usage: fly <x z | x y z | waypoint>"));
+        }
     }
 
     private static int integer(String s) {
@@ -686,6 +774,7 @@ public final class CommandHandler {
             ctx.reply(Chat.err("No goal set"));
             return;
         }
+        if (ctx.flyInstead(goal)) return;
         int[] f = ctx.playerFeet();
         ctx.session().start(goal, fallback, Pos.pack(f[0], f[1], f[2]));
     }

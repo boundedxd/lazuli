@@ -114,11 +114,26 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
 6. Extras approved: stash/chest memory, nether travel, survival safety (flee/fight, low-HP retreat, sleep, `#back`),
    waypoints.
 Backlog: neo rework (double/triple neos, edge/run-up starts), parkour onto open trapdoors/fence 3-gap,
-TraceRecorder should record sneak/pitch. Known bug (skipped, user thinks other mods): changing config sometimes stops
-pathing from starting until restart.
+TraceRecorder should record sneak/pitch.
 
-## Handoff (2026-10-15)
-User says crafting, smelting, #getitem, boats are tested in game and work; **trading is not tested yet**.
+## Handoff (2026-10-16)
+Trading tested in game and works; the config-stops-pathing bug is fixed.
+Newest (built, deployed, pushed, suite green, NOT tested in game):
+- **Stuck fix** — `LazyDStarLite`: a NaN edge cost counts as impassable (it kept a node inconsistent and burned whole
+  search budgets), plan loops check cancel/deadline. Unstick (`unstickRestart`) no longer #kills + reruns the job (that
+  made #getitem re-get items): `LazuliClient.freshWorker` swaps the planner thread (logs its stack if it was busy) and
+  `PathingSession.restart` plans the same trip again under the same trip number, so processes carry on.
+- **#brew <potion> [count] [splash|lingering]** — `core/craft/Brewing` (vanilla mix table, shortest route from water or a
+  potion on hand), `mod/process/BrewProcess` (fills glass bottles at water, crafts bottles/stand, #getitem for missing
+  ingredients `brewGather`, `brewPlaceStand`).
+- **#enchant <item> [count] [1|2|3]**, **#repair <item>**, **#combine <item> <with>** — `core/craft/Enchanting`,
+  `mod/process/EnchantProcess` (table/anvil via `Station`, which now takes a block predicate; `enchantPlace`).
+- **#fly <x z | x y z | wp>**, far #goto flies (`elytraGoto`, `elytraMinDistance`, `elytraHeight`, `elytraSwapBack`) —
+  `core/physics/ElytraSim` (vanilla glide + rocket), `core/control/ElytraPilot` (MPC over pitches/fire, tested in
+  `ElytraPilotTest`), `mod/process/ElytraProcess` (equip, jump-jump takeoff, fly, land, walk the rest). Guard and
+  Upkeep stay out of the way while fall flying.
+
+Older (2026-10-15): crafting, smelting, #getitem, boats tested in game and work.
 Restart the game after every deploy: copying the jar over a running game crashes it on the next class load
 (`ZipFile invalid LOC header`).
 

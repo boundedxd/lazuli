@@ -150,6 +150,19 @@ public final class Settings {
     public final Setting<Boolean> smeltWait = bool("smeltWait", true);
     /** #smelt uses a blast furnace (ores) or smoker (food), twice as fast, when there's one near or in the inventory. */
     public final Setting<Boolean> smeltFastFurnaces = bool("smeltFastFurnaces", true);
+    /** #goto farther than {@link #elytraMinDistance} flies there with an elytra and rockets when it has them. */
+    public final Setting<Boolean> elytraGoto = bool("elytraGoto", true);
+    public final Setting<Integer> elytraMinDistance = integer("elytraMinDistance", 300, 50, 100000);
+    /** Blocks over the highest ground ahead to fly at. */
+    public final Setting<Integer> elytraHeight = integer("elytraHeight", 24, 6, 120);
+    /** Put the chestplate back on after landing. */
+    public final Setting<Boolean> elytraSwapBack = bool("elytraSwapBack", true);
+    /** #enchant / #repair / #combine place an enchanting table or anvil they carry when none is near. */
+    public final Setting<Boolean> enchantPlace = bool("enchantPlace", true);
+    /** #brew gets missing ingredients, glass bottles or a brewing stand with #getitem first. */
+    public final Setting<Boolean> brewGather = bool("brewGather", true);
+    /** #brew places a brewing stand (crafting one if need be) when none is near. */
+    public final Setting<Boolean> brewPlaceStand = bool("brewPlaceStand", true);
     /** #smelt places a furnace (crafting one if need be) when none is near. */
     public final Setting<Boolean> smeltPlaceFurnace = bool("smeltPlaceFurnace", true);
     /** Never use a tool's last few points of durability. */

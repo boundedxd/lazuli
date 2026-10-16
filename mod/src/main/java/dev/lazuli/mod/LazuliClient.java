@@ -111,6 +111,9 @@ public final class LazuliClient implements ClientModInitializer {
 	private ContainerProcess containers;
 	private CraftProcess crafts;
 	private SmeltProcess smelts;
+	private dev.lazuli.mod.process.BrewProcess brews;
+	private dev.lazuli.mod.process.EnchantProcess enchants;
+	private dev.lazuli.mod.process.ElytraProcess elytra;
 	private GetItemProcess getItem;
 	private dev.lazuli.mod.process.HuntProcess hunt;
 	private dev.lazuli.mod.process.TradeProcess trades;
@@ -160,10 +163,15 @@ public final class LazuliClient implements ClientModInitializer {
 		tradeWatcher = new dev.lazuli.mod.inventory.TradeWatcher(settings.tradeMemory::get, this::tradeMemory, LazuliClient::dimension);
 		trades.watch(tradeWatcher);
 		getItem.useTrades(trades);
+		brews = new dev.lazuli.mod.process.BrewProcess(session, settings, clicks, crafts, this::chat);
+		brews.useGetItem(getItem);
+		enchants = new dev.lazuli.mod.process.EnchantProcess(session, settings, clicks, this::chat);
+		elytra = new dev.lazuli.mod.process.ElytraProcess(session, settings, clicks, this::chat);
 		RecipeData.drops();
 		RecipeData.get(); // read the recipes in the background now, not on the first #craft
 		upkeep = new Upkeep(settings, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, hunt, getItem, trades, sleeps, guard);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, hunt, getItem, trades, brews,
+			enchants, elytra, sleeps, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -276,6 +284,45 @@ public final class LazuliClient implements ClientModInitializer {
 			public void getItem(dev.lazuli.core.craft.ItemRequest request) {
 				LazuliClient.this.stopProcesses(false);
 				getItem.start(Minecraft.getInstance(), request);
+			}
+
+			@Override
+			public void brew(String potion, dev.lazuli.core.craft.Brewing.Form form, int count) {
+				LazuliClient.this.stopProcesses(false);
+				brews.start(Minecraft.getInstance(), potion, form, count);
+			}
+
+			@Override
+			public void enchant(String item, int count, int option) {
+				LazuliClient.this.stopProcesses(false);
+				enchants.enchant(Minecraft.getInstance(), item, count, option);
+			}
+
+			@Override
+			public void anvil(String item, String with) {
+				LazuliClient.this.stopProcesses(false);
+				if (with == null) enchants.repair(Minecraft.getInstance(), item);
+				else enchants.combine(Minecraft.getInstance(), item, with);
+			}
+
+			@Override
+			public void fly(int x, Integer y, int z) {
+				LazuliClient.this.stopProcesses(false);
+				if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
+				elytra.start(Minecraft.getInstance(), x, y, z);
+			}
+
+			@Override
+			public boolean flyInstead(dev.lazuli.core.goal.Goal goal) {
+				Minecraft mc = Minecraft.getInstance();
+				if (!settings.elytraGoto.get() || mc.player == null || elytra.active()) return false;
+				int[] at = goal instanceof dev.lazuli.core.goal.GoalBlock b ? new int[]{b.x(), b.y(), b.z()}
+					: goal instanceof dev.lazuli.core.goal.GoalXZ g ? new int[]{g.x(), Integer.MIN_VALUE, g.z()}
+					: goal instanceof dev.lazuli.core.goal.GoalNear n ? new int[]{n.x(), n.y(), n.z()} : null;
+				if (at == null || Math.hypot(at[0] + 0.5 - mc.player.getX(), at[2] + 0.5 - mc.player.getZ()) < settings.elytraMinDistance.get()) return false;
+				if (dev.lazuli.mod.process.ElytraProcess.cannot(mc, mc.player) != null) return false;
+				fly(at[0], at[1] == Integer.MIN_VALUE ? null : at[1], at[2]);
+				return true;
 			}
 
 			@Override

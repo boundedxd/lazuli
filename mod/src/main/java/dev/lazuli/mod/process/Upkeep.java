@@ -64,6 +64,8 @@ public final class Upkeep {
     public void tick(Minecraft mc, boolean busy) {
         LocalPlayer p = mc.player;
         if (p == null) return;
+        // flying: the hand holds rockets, and the wings stay on
+        if (p.isFallFlying()) return;
         eat(mc, p, busy);
         if (busy && !eating && settings.autoArmor.get() && mc.screen == null && p.tickCount % ARMOR_EVERY == 0) armor(mc, p);
     }

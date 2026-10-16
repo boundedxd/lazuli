@@ -43,7 +43,8 @@ final class Station {
     private final Trip trip;
     private final InputDriver input = new InputDriver();
     private Phase phase;
-    private Block block;
+    /** What counts as the station (an anvil: any of its damage stages). */
+    private Predicate<net.minecraft.world.level.block.state.BlockState> block;
     private String item, name, error;
     private Predicate<AbstractContainerMenu> menu;
     private boolean mayPlace, acted;
@@ -64,6 +65,12 @@ final class Station {
      * @param mayPlace place one from the inventory when none is near
      */
     void start(LocalPlayer p, Block block, String item, String name, Predicate<AbstractContainerMenu> menu, BlockPos at, boolean mayPlace) {
+        start(p, s -> s.is(block), item, name, menu, at, mayPlace);
+    }
+
+    /** @param block what counts as the station (several kinds of block, like the anvil's damage stages) */
+    void start(LocalPlayer p, Predicate<net.minecraft.world.level.block.state.BlockState> block, String item, String name,
+               Predicate<AbstractContainerMenu> menu, BlockPos at, boolean mayPlace) {
         this.block = block;
         this.item = item;
         this.name = name;
@@ -72,7 +79,7 @@ final class Station {
         pos = at;
         skip = null;
         // one it placed earlier and hasn't picked up yet stays its own
-        if (placed != null && !Minecraft.getInstance().level.getBlockState(placed).is(block)) placed = null;
+        if (placed != null && !test(Minecraft.getInstance(), placed)) placed = null;
         spot = null;
         stands = null;
         error = null;
@@ -106,9 +113,9 @@ final class Station {
         }
         switch (phase) {
             case FIND -> {
-                if (pos != null && !mc.level.getBlockState(pos).is(block)) pos = null; // broken meanwhile
+                if (pos != null && !test(mc, pos)) pos = null; // broken meanwhile
                 if (pos == null) {
-                    pos = nearest(mc, p, s -> s.is(block), settings.stationRange.get(), skip);
+                    pos = nearest(mc, p, block, settings.stationRange.get(), skip);
                     // carrying one: placing it beats a long walk to another
                     if (pos != null && mayPlace && has(p) && pos.distSqr(p.blockPosition()) > NEAR * NEAR) pos = null;
                 }
@@ -120,7 +127,7 @@ final class Station {
                 enter(Phase.TRAVEL, p);
             }
             case TRAVEL -> {
-                if (!mc.level.getBlockState(pos).is(block)) {
+                if (!test(mc, pos)) {
                     enter(Phase.FIND, p);
                     return State.WORKING;
                 }
@@ -156,7 +163,7 @@ final class Station {
     }
 
     private State place(Minecraft mc, LocalPlayer p) {
-        if (spot != null && mc.level.getBlockState(at(spot)).is(block)) {
+        if (spot != null && test(mc, at(spot))) {
             pos = placed = at(spot);
             spot = null;
             tries = 0;
@@ -179,6 +186,10 @@ final class Station {
         if (p.tickCount - usedAt < 10) return State.WORKING; // give the last try time to show up
         if (Aim.useOn(mc, p, against(spot), face(spot), input, settings)) usedAt = p.tickCount;
         return State.WORKING;
+    }
+
+    private boolean test(Minecraft mc, BlockPos at) {
+        return block.test(mc.level.getBlockState(at));
     }
 
     private boolean has(LocalPlayer p) {
@@ -210,7 +221,7 @@ final class Station {
         if (p.containerMenu != p.inventoryMenu) p.closeContainer();
         pickTicks++;
         if (!broken) {
-            if (!mc.level.getBlockState(placed).is(block)) {
+            if (!test(mc, placed)) {
                 broken = true;
                 pickTicks = 0;
                 input.release();
