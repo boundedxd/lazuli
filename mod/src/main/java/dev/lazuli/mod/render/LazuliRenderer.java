@@ -44,6 +44,7 @@ public final class LazuliRenderer {
     public LazuliRenderer(PathingSession session, Settings settings, Supplier<double[]> prediction, Supplier<Goal> pendingGoal,
                           BlockView world) {
         this.world = world;
+        this.minimap = new Minimap(session, settings);
         this.session = session;
         this.settings = settings;
         this.prediction = prediction;
@@ -115,6 +116,7 @@ public final class LazuliRenderer {
     /** The waypoints to draw (this dimension's, or none when they're switched off). */
     public void waypoints(Supplier<List<dev.lazuli.core.waypoint.Waypoints.Waypoint>> waypoints) {
         this.waypoints = waypoints;
+        minimap.waypoints(waypoints);
     }
 
     private static void drawGoal(Minecraft mc, Goal goal, float width) {
@@ -152,6 +154,7 @@ public final class LazuliRenderer {
     /** Per client tick: speed, trip progress and the "arrived" / "failed" flash. */
     public void hudTick(Minecraft mc) {
         hudTicks++;
+        if (settings.minimap.get()) minimap.tick(mc, settings);
         if (flashTicks > 0) flashTicks--;
         if (mc.player == null) return;
         double x = mc.player.getX(), z = mc.player.getZ();
@@ -180,6 +183,126 @@ public final class LazuliRenderer {
     public void renderHud(GuiGraphics g, DeltaTracker delta) {
         Minecraft mc = Minecraft.getInstance();
         if (!LazuliConfig.showHud || mc.player == null || mc.options.hideGui) return;
+        if (settings.hudCard.get()) renderCard(g, mc);
+        else renderPlain(g, mc);
+    }
+
+    /** The minimap, its own HUD element. */
+    public void renderMinimap(GuiGraphics g, DeltaTracker delta) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null || mc.options.hideGui || !settings.minimap.get()) return;
+        minimap.render(g, mc);
+    }
+
+    /** The status as a Material card: title, status lines, progress bar and chips. Nothing when idle. */
+    private void renderCard(GuiGraphics g, Minecraft mc) {
+        PathingSession.Snapshot snap = session.snapshot();
+        boolean pathing = snap.state() == PathingSession.State.PATHING, planning = session.planning();
+        Material.Scheme c = Material.Scheme.of(LazuliConfig.pathColor.getRGB());
+        BlockPos b = mc.player.blockPosition();
+        String title = null;
+        List<String> lines = new java.util.ArrayList<>();
+        double bar = -1;
+        for (dev.lazuli.mod.process.Process p : processes) {
+            if (!p.active()) continue;
+            String st = p.status();
+            if (title == null) title = processName(p);
+            if (st != null && lines.size() < 3) lines.add(st);
+            if (bar < 0 && LazuliConfig.hudBars) bar = p.progress();
+        }
+        boolean job = title != null;
+        double dist = pathing && snap.goal() != null ? snap.goal().distance(b.getX(), b.getY(), b.getZ()) : 0;
+        if (pathing && !job && snap.goal() != null) lines.add("Heading to " + clip(snap.goal().describe(), 32));
+        if (dev.lazuli.mod.process.Upkeep.eating()) lines.add("Eating");
+        if (!job) {
+            if (planning) title = "Planning";
+            else if (pathing) title = "Pathing";
+            else if (flashTicks > 0) title = flash;
+            else if (!lines.isEmpty()) title = "Working";
+            else return;
+        }
+        if (bar < 0 && LazuliConfig.hudBars) {
+            if (pathing && job) bar = -2; // pathing under a job with no figure of its own: indeterminate
+            else if (pathing && snap.trip() == hudTrip) bar = Math.max(0, Math.min(1, 1 - dist / tripStartDist));
+            else if (planning || pathing) bar = -2;
+        }
+        List<String> chips = new java.util.ArrayList<>();
+        if (pathing && !snap.path().isEmpty()) {
+            chips.add(blocksLeft(snap.path(), mc) + " left");
+            if (LazuliConfig.hudStats && speed > 0.5) chips.add(String.format("%.1f m/s  ~%s", speed, time(dist / speed)));
+        }
+        if (pathing && snap.goal() != null) chips.add(goalChip(snap.goal()));
+
+        Font font = mc.font;
+        int r = settings.hudCorner.get();
+        int chipsW = 0;
+        for (String ch : chips) chipsW += font.width(ch) + 8 + 4;
+        int w = Math.max(font.width(title) + 4, 120);
+        for (String l : lines) w = Math.max(w, font.width(l));
+        w = Math.min(Math.max(w, chipsW - 4), 230);
+        int pad = 8, x0 = PAD, y0 = PAD;
+        int h = pad + 10 + (lines.isEmpty() ? 0 : 2 + lines.size() * LINE) + (bar != -1 ? 4 + 4 : 0) + (chips.isEmpty() ? 0 : 6 + 12) + pad;
+        Material.rrect(g, x0, y0, x0 + w + 2 * pad, y0 + h, r, c.surface());
+        int x = x0 + pad, y = y0 + pad;
+        g.drawString(font, title, x, y, c.primary(), false);
+        y += 10;
+        if (!lines.isEmpty()) y += 2;
+        for (String l : lines) {
+            g.drawString(font, font.plainSubstrByWidth(l, w), x, y, c.onSurfaceVariant(), false);
+            y += LINE;
+        }
+        if (bar != -1) {
+            y += 4;
+            Material.linear(g, c, x, y, w, 4, bar < 0 ? -1 : bar, System.currentTimeMillis() / 1000f);
+            y += 4;
+        }
+        if (!chips.isEmpty()) {
+            y += 6;
+            int cx = x;
+            for (String ch : chips) {
+                if (cx + font.width(ch) + 8 > x + w) break;
+                cx += Material.chip(g, font, c, cx, y, ch, r) + 4;
+            }
+        }
+    }
+
+    /** "Mine" for MineProcess, "Get Item" for GetItemProcess. */
+    private static String processName(dev.lazuli.mod.process.Process p) {
+        String n = p.getClass().getSimpleName().replaceAll("Process$", "");
+        n = n.replaceAll("([a-z])([A-Z])", "$1 $2");
+        return n.isEmpty() ? "Working" : n;
+    }
+
+    private static String clip(String s, int max) {
+        return s.length() > max ? s.substring(0, max - 2) + ".." : s;
+    }
+
+    private static String goalChip(Goal goal) {
+        if (goal instanceof GoalBlock b) return b.x() + " " + b.y() + " " + b.z();
+        if (goal instanceof GoalXZ z) return z.x() + " " + z.z();
+        return clip(goal.describe(), 24);
+    }
+
+    /** Path nodes from the one nearest the player to the end. */
+    private static int blocksLeft(List<Long> path, Minecraft mc) {
+        double px = mc.player.getX(), py = mc.player.getY(), pz = mc.player.getZ();
+        int best = 0;
+        double bd = Double.MAX_VALUE;
+        for (int i = 0; i < path.size(); i++) {
+            long n = path.get(i);
+            double dx = Pos.x(n) + 0.5 - px, dy = Pos.y(n) - py, dz = Pos.z(n) + 0.5 - pz;
+            double d = dx * dx + dy * dy + dz * dz;
+            if (d < bd) {
+                bd = d;
+                best = i;
+            }
+        }
+        return path.size() - 1 - best;
+    }
+
+    private final Minimap minimap;
+
+    private void renderPlain(GuiGraphics g, Minecraft mc) {
         PathingSession.Snapshot snap = session.snapshot();
         boolean pathing = snap.state() == PathingSession.State.PATHING, planning = session.planning();
         int accent = 0xFF000000 | LazuliConfig.pathColor.getRGB();
