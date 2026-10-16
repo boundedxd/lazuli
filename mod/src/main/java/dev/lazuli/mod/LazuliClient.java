@@ -95,6 +95,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private CraftProcess crafts;
 	private SmeltProcess smelts;
 	private GetItemProcess getItem;
+	private dev.lazuli.mod.process.HuntProcess hunt;
 	private dev.lazuli.mod.process.TradeProcess trades;
 	private dev.lazuli.mod.inventory.TradeWatcher tradeWatcher;
 	private final java.util.Map<String, dev.lazuli.core.trade.TradeMemory> tradesByWorld = new java.util.HashMap<>();
@@ -134,6 +135,8 @@ public final class LazuliClient implements ClientModInitializer {
 		getItem = new GetItemProcess(session, settings, mine, crafts, smelts, this::chat);
 		containers.useMemory(this::chests, LazuliClient::dimension);
 		getItem.useChests(containers, this::chests, LazuliClient::dimension);
+		hunt = new dev.lazuli.mod.process.HuntProcess(session, settings, this::chat);
+		getItem.useHunt(hunt);
 		chestWatcher = new dev.lazuli.mod.inventory.ChestWatcher(settings.chestMemory::get, this::chests, LazuliClient::dimension);
 		trades = new dev.lazuli.mod.process.TradeProcess(session, settings, clicks, mine, crafts, smelts, containers, this::tradeMemory,
 			this::chests, LazuliClient::dimension, this::chat);
@@ -143,7 +146,7 @@ public final class LazuliClient implements ClientModInitializer {
 		RecipeData.drops();
 		RecipeData.get(); // read the recipes in the background now, not on the first #craft
 		upkeep = new Upkeep(settings, this::chat);
-		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, getItem, trades, sleeps, guard);
+		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, hunt, getItem, trades, sleeps, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {

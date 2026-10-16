@@ -1,6 +1,7 @@
 package dev.lazuli.mod.craft;
 
 import dev.lazuli.core.craft.Drops;
+import dev.lazuli.core.craft.MobDrops;
 import dev.lazuli.core.craft.Recipes;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.VanillaPackResources;
@@ -44,6 +45,22 @@ public final class RecipeData {
             }
         }
         return drops;
+    }
+
+    private static volatile CompletableFuture<MobDrops> mobDrops;
+
+    /** What mobs drop (vanilla entity loot tables), loaded in the background (once). */
+    public static CompletableFuture<MobDrops> mobDrops() {
+        if (mobDrops == null) {
+            synchronized (RecipeData.class) {
+                if (mobDrops == null) mobDrops = CompletableFuture.supplyAsync(() -> {
+                    try (VanillaPackResources pack = ServerPacksSource.createVanillaPackSource()) {
+                        return MobDrops.load(read(pack, "loot_table/entities"));
+                    }
+                });
+            }
+        }
+        return mobDrops;
     }
 
     private static Recipes load() {

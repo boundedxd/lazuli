@@ -131,6 +131,10 @@ public final class Settings {
     public final Setting<Boolean> tradeLootChests = bool("tradeLootChests", false);
     /** #getitem trades for an item when that's the only way, or cheaper than making it. */
     public final Setting<Boolean> getItemTrade = bool("getItemTrade", true);
+    /** #getitem kills mobs for what only they drop (leather, bones, string...), or when that's cheaper. */
+    public final Setting<Boolean> getItemHunt = bool("getItemHunt", true);
+    /** A hunt gives up when it hasn't got enough after this many minutes. */
+    public final Setting<Integer> huntMinutes = integer("huntMinutes", 5, 1, 60);
     /** How far #trade looks for villagers (and walks to them), in blocks. */
     public final Setting<Integer> tradeRange = integer("tradeRange", 96, 16, 512);
     /** #trade with what it wants sold out: buys what's left, then waits up to this many minutes for a restock (0: no wait). */

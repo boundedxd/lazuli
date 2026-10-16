@@ -35,7 +35,7 @@ public final class Guard implements Process {
     private static final int HEAL_TICKS = 20 * 120;
     private static final int FLEE_TRIES = 3;
     /** A monster this close starts a fight; it's chased this far; a fight gives up after FIGHT_TICKS. */
-    private static final double FIGHT_NEAR = 3.0, FIGHT_CHASE = 6, MELEE = 2.9;
+    private static final double FIGHT_NEAR = 3.0, FIGHT_CHASE = 6;
     private static final int FIGHT_TICKS = 20 * 30;
 
     private static volatile boolean active, healing;
@@ -165,54 +165,8 @@ public final class Guard implements Process {
         }
     }
 
-    /** Turns to the target, walks up if it's out of reach, and swings once the cooldown is full and it's in the crosshair. */
     private void fight(Minecraft mc, LocalPlayer p, LivingEntity t) {
-        weapon(p);
-        Vec3 at = t.position().add(0, t.getBbHeight() * 0.6, 0);
-        double dx = at.x - p.getX(), dy = at.y - p.getEyeY(), dz = at.z - p.getZ();
-        float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
-        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)));
-        float maxTurn = settings.rotationSpeed.get().floatValue();
-        float yaw0 = dev.lazuli.mod.control.RotationDriver.yaw(p), pitch0 = dev.lazuli.mod.control.RotationDriver.pitch(p);
-        float nyaw = dev.lazuli.core.control.InputPlanner.approach(yaw0, yaw, maxTurn);
-        float npitch = pitch0 + Math.max(-maxTurn, Math.min(maxTurn, pitch - pitch0));
-        double dist = p.distanceTo(t);
-        boolean close = dist <= MELEE;
-        input.apply(mc, new dev.lazuli.core.control.Controls(!close && dist > 1.5, false, false, false, yaw, pitch, 0, false),
-            nyaw, npitch, settings.freeLook.get());
-        // the crosshair on it: the view ray passes through its box
-        Vec3 eye = p.getEyePosition(), dir = Vec3.directionFromRotation(npitch, nyaw);
-        boolean onIt = t.getBoundingBox().inflate(0.1).clip(eye, eye.add(dir.scale(MELEE + 0.5))).isPresent();
-        if (close && onIt && p.hasLineOfSight(t) && p.getAttackStrengthScale(0.5f) >= 0.95f) {
-            mc.gameMode.attack(p, t);
-            p.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
-        }
-    }
-
-    /** The best sword (else axe) in the hotbar into the hand. */
-    private static void weapon(LocalPlayer p) {
-        int best = -1;
-        double bestDmg = 0;
-        for (int i = 0; i < 9; i++) {
-            var s = p.getInventory().getItem(i);
-            String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(s.getItem()).getPath();
-            if (!id.endsWith("_sword") && !id.endsWith("_axe")) continue;
-            double dmg = tier(id) * 2 + (id.endsWith("_sword") ? 1 : 0);
-            if (dmg > bestDmg) {
-                bestDmg = dmg;
-                best = i;
-            }
-        }
-        if (best >= 0) p.getInventory().setSelectedSlot(best);
-    }
-
-    private static int tier(String id) {
-        if (id.startsWith("netherite")) return 6;
-        if (id.startsWith("diamond")) return 5;
-        if (id.startsWith("iron")) return 4;
-        if (id.startsWith("stone") || id.startsWith("copper")) return 3;
-        if (id.startsWith("golden")) return 2;
-        return 1;
+        dev.lazuli.mod.control.Melee.tick(mc, p, t, input, settings);
     }
 
     private Danger spot(Minecraft mc, LocalPlayer p) {

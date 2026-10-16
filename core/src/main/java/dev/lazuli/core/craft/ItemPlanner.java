@@ -17,9 +17,12 @@ import java.util.function.ToIntFunction;
  * first step and plans again from the real inventory, so the plan only has to be right, not exact.
  */
 public final class ItemPlanner {
-    public enum Kind { MINE, CRAFT, SMELT }
+    public enum Kind { MINE, CRAFT, SMELT, KILL }
 
-    /** Mine {@code count} of {@code blocks} for {@code item}; craft or smelt {@code count} more of {@code item}. */
+    /**
+     * Mine {@code count} of {@code blocks} for {@code item}; craft or smelt {@code count} more of {@code item}; kill the
+     * mobs in {@code blocks} (best first) until {@code count} more of {@code item} dropped.
+     */
     public record Action(Kind kind, String item, int count, List<String> blocks) {
         @Override
         public String toString() {
@@ -60,6 +63,7 @@ public final class ItemPlanner {
     private final Rules rules;
     private boolean batching;
     private ToIntFunction<String> near;
+    private MobDrops mobs;
 
     /**
      * @param toolTier for a block id, the pickaxe tier it needs to drop anything (0: none)
@@ -91,6 +95,12 @@ public final class ItemPlanner {
      */
     public ItemPlanner nearby(ToIntFunction<String> near) {
         this.near = near;
+        return this;
+    }
+
+    /** Hunting: what mobs drop (null: never kills for items). */
+    public ItemPlanner mobs(MobDrops mobs) {
+        this.mobs = mobs;
         return this;
     }
 
@@ -152,7 +162,7 @@ public final class ItemPlanner {
         Map<String, Integer> inv = new HashMap<>(have);
         for (Action a : actions) {
             switch (a.kind()) {
-                case MINE -> inv.merge(a.item(), a.count(), Integer::sum);
+                case MINE, KILL -> inv.merge(a.item(), a.count(), Integer::sum);
                 case CRAFT -> {
                     CraftTree.Result res = CraftTree.resolve(recipes, a.item(), a.count(), inv, true);
                     if (!res.ok()) return false;
@@ -226,12 +236,12 @@ public final class ItemPlanner {
             try {
                 // cheapest way first; one that comes back round to this item (raw iron from a raw iron block made of
                 // raw iron) or can't be done: the next way
-                double[] cost = {mineCost(item, 0), smeltCost(item, 0), craftCost(item, 0)};
-                Integer[] order = {0, 1, 2};
+                double[] cost = {mineCost(item, 0), smeltCost(item, 0), craftCost(item, 0), killCost(item)};
+                Integer[] order = {0, 1, 2, 3};
                 java.util.Arrays.sort(order, java.util.Comparator.comparingDouble(i -> cost[i]));
                 if (cost[order[0]] >= INF) throw new Stuck("No way to get " + name(item) + why(item));
                 Stuck first = null;
-                for (int k = 0; k < 3; k++) {
+                for (int k = 0; k < 4; k++) {
                     int way = order[k];
                     if (cost[way] >= INF) break;
                     Snap before = save();
@@ -239,9 +249,10 @@ public final class ItemPlanner {
                         switch (way) {
                             case 0 -> mine(item, need, depth);
                             case 1 -> smelt(item, need, depth);
+                            case 3 -> kill(item, need);
                             // only recipes cheaper than the next way (a few nuggets don't make digging for an iron block
                             // worth it over smelting)
-                            default -> craft(item, need, depth, k < 2 ? cost[order[k + 1]] : INF);
+                            default -> craft(item, need, depth, k < 3 ? cost[order[k + 1]] : INF);
                         }
                         return;
                     } catch (Stuck e) {
@@ -289,6 +300,33 @@ public final class ItemPlanner {
                 }
             }
             actions.add(new Action(Kind.MINE, item, n, usable));
+        }
+
+        void kill(String item, int n) {
+            List<String> who = huntable(item).stream().map(MobDrops.Source::mob).toList();
+            have.merge(item, n, Integer::sum);
+            for (int i = 0; i < actions.size(); i++) {
+                Action a = actions.get(i);
+                if (a.kind() == Kind.KILL && a.item().equals(item)) {
+                    actions.set(i, new Action(Kind.KILL, item, a.count() + n, a.blocks()));
+                    return;
+                }
+            }
+            actions.add(new Action(Kind.KILL, item, n, who));
+        }
+
+        /** Mobs worth hunting for {@code item}, cheapest per item first. */
+        List<MobDrops.Source> huntable(String item) {
+            if (mobs == null) return List.of();
+            List<MobDrops.Source> out = new ArrayList<>();
+            for (MobDrops.Source s : mobs.sources(item)) if (MobDrops.rarity(s.mob()) < Drops.UNKNOWN) out.add(s);
+            out.sort(java.util.Comparator.comparingDouble(s -> MobDrops.rarity(s.mob()) / s.perKill()));
+            return out;
+        }
+
+        double killCost(String item) {
+            List<MobDrops.Source> h = huntable(item);
+            return h.isEmpty() ? INF : MobDrops.rarity(h.get(0).mob()) / h.get(0).perKill();
         }
 
         void smelt(String item, int n, int depth) {
@@ -483,7 +521,7 @@ public final class ItemPlanner {
             Double known = costs.get(item);
             if (known != null) return known;
             if (depth > DEPTH || !costing.add(item)) return INF;
-            double c = Math.min(mineCost(item, depth), Math.min(smeltCost(item, depth), craftCost(item, depth)));
+            double c = Math.min(Math.min(mineCost(item, depth), killCost(item)), Math.min(smeltCost(item, depth), craftCost(item, depth)));
             costing.remove(item);
             // some in the inventory: cheaper (use what it has), but not free, or a few nuggets look like a way to make
             // ingots and it ends up digging for an iron block to make the rest

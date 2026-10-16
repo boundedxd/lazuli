@@ -83,6 +83,14 @@ public final class GetItemProcess implements Process {
     }
 
     /** Lets it take what it needs from chests opened before (getItemChests). */
+    private HuntProcess hunt;
+
+    /** Hunting for mob drops (getItemHunt). */
+    public void useHunt(HuntProcess hunt) {
+        this.hunt = hunt;
+        RecipeData.mobDrops();
+    }
+
     public void useChests(ContainerProcess containers, java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests,
                           java.util.function.Function<Minecraft, String> dimension) {
         this.containers = containers;
@@ -173,6 +181,7 @@ public final class GetItemProcess implements Process {
                 case MINE -> mine.stop(false);
                 case CRAFT -> crafts.stop(false);
                 case SMELT -> smelts.stop(false);
+                case KILL -> hunt.stop(false);
             }
         }
         if (withdrawAt != null || bring == Bring.DEPOSIT) containers.stop(false);
@@ -253,6 +262,7 @@ public final class GetItemProcess implements Process {
                 settings.craftPlaceTable.get() && settings.allowPlace.get(), settings.smeltPlaceFurnace.get() && settings.allowPlace.get()))
             .batching(settings.getItemBatch.get());
         if (settings.getItemNearby.get()) planner.nearby(Nearby.scan(mc, settings.antiXray.get()));
+        if (hunt != null && settings.getItemHunt.get()) planner.mobs(RecipeData.mobDrops().getNow(null));
         int range = settings.stationRange.get();
         // what it wants and already has counts worn or used too (armor it put on, a damaged pickaxe): never made again
         Map<String, Integer> have = new HashMap<>(Inventories.plainCounts(p));
@@ -287,6 +297,7 @@ public final class GetItemProcess implements Process {
             case MINE -> mine.start(mc, a.count(), a.blocks());
             case CRAFT -> crafts.start(mc, List.of(new ItemCount(a.item(), a.count())));
             case SMELT -> smelts.start(mc, new ItemCount(a.item(), a.count()), true);
+            case KILL -> hunt.start(mc, a.item(), count(p, a.item()) + a.count(), a.blocks());
         }
     }
 
@@ -393,6 +404,12 @@ public final class GetItemProcess implements Process {
                 case FAILED -> Status.FAILED;
                 case CANCELLED -> Status.CANCELLED;
             };
+            case KILL -> switch (hunt.outcome()) {
+                case NONE -> Status.RUNNING;
+                case DONE -> Status.OK;
+                case FAILED -> Status.FAILED;
+                case CANCELLED -> Status.CANCELLED;
+            };
         };
     }
 
@@ -463,6 +480,7 @@ public final class GetItemProcess implements Process {
             case MINE -> "mine";
             case CRAFT -> "craft";
             case SMELT -> "smelt";
+            case KILL -> "hunt for";
         };
     }
 
