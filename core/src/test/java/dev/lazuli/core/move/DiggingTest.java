@@ -129,4 +129,30 @@ class DiggingTest {
         for (long n : path) sb.append(Pos.toString(n)).append(' ');
         return sb.toString();
     }
+
+    /** A flower, leaf litter, wildflowers: no collision, breaks at once, but nothing can be placed into it as it is. */
+    static final BlockPhysics PLANT = BlockPhysics.intern(new double[0], 0.6f, 1, 1, BlockPhysics.SOFT, 0f, 424242);
+
+    @Test
+    void pillarsOutOfAFlowerBreakingItFirst() {
+        GridWorld w = GridWorld.flatFloor(-5, -5, 5, 5).setPhysics(0, 1, 0, PLANT);
+        List<Long> path = plan(w, BOTH, Pos.pack(0, 1, 0), 0, 4, 0);
+        assertNotNull(path, "should pillar up out of the flower");
+        assertEquals(Pos.pack(0, 2, 0), path.get(1), str(path));
+        assertEquals(List.of(new Digging.Action(false, Pos.pack(0, 1, 0), 0), new Digging.Action(true, Pos.pack(0, 1, 0), Pos.pack(0, 0, 0))),
+            graph(w, BOTH).actions(path.get(0), path.get(1)));
+        // can't break it: steps out of the flower to pillar beside it
+        List<Long> aside = plan(w, PLACE, Pos.pack(0, 1, 0), 0, 4, 0);
+        assertNotNull(aside);
+        assertNotEquals(Pos.pack(0, 2, 0), aside.get(1), str(aside));
+    }
+
+    @Test
+    void bridgesIntoLeafLitterBreakingItFirst() {
+        // a ditch one deep with leaf litter in it, then a gap: the bridge block goes where the litter is
+        GridWorld w = new GridWorld(BlockKind.AIR).fill(-5, 0, -2, 0, 0, 2, BlockKind.SOLID)
+            .fill(1, -1, -2, 1, -1, 2, BlockKind.SOLID).setPhysics(1, 0, 0, PLANT);
+        List<Digging.Action> acts = graph(w, BOTH).actions(Pos.pack(0, 1, 0), Pos.pack(1, 1, 0));
+        assertEquals(List.of(new Digging.Action(false, Pos.pack(1, 0, 0), 0), new Digging.Action(true, Pos.pack(1, 0, 0), Pos.pack(0, 0, 0))), acts);
+    }
 }

@@ -422,9 +422,15 @@ public final class PortalProcess implements Process {
 
     /** A solid neighbour to place {@code b} against (below first), or null. */
     private static BlockPos against(Minecraft mc, BlockPos b) {
-        if (!mc.level.getBlockState(b.below()).canBeReplaced()) return b.below();
-        for (Direction d : Direction.values()) if (!mc.level.getBlockState(b.relative(d)).canBeReplaced()) return b.relative(d);
+        if (support(mc, b.below())) return b.below();
+        for (Direction d : Direction.values()) if (support(mc, b.relative(d))) return b.relative(d);
         return null;
+    }
+
+    /** Something a block can be placed against: solid (not a flower, not leaf litter). */
+    private static boolean support(Minecraft mc, BlockPos b) {
+        var s = mc.level.getBlockState(b);
+        return !s.canBeReplaced() && !s.getCollisionShape(mc.level, b).isEmpty();
     }
 
     // ---- materials

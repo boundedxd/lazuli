@@ -23,6 +23,11 @@ public final class BlockPhysics {
     public static final int FALLING = 64;
     /** A block can be placed into this space (air, grass, snow layers...). */
     public static final int REPLACEABLE = 128;
+    /**
+     * No collision and breaks at once, but nothing can be placed into it as it is: flowers, leaf litter, wildflowers,
+     * pink petals, saplings. Placing there means breaking it first.
+     */
+    public static final int SOFT = 256;
 
     /** Hardness for terrain without detailed data: stone. */
     public static final float DEFAULT_HARDNESS = 1.5f;

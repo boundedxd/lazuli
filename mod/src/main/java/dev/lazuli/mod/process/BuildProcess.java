@@ -182,7 +182,7 @@ public final class BuildProcess implements Process {
 
     /** Something has to be broken at {@code b} (clearing, or a wrong block where the schematic wants another). */
     private boolean breaking(Minecraft mc, BlockPos b) {
-        if (plan == null) return block == null;
+        if (plan == null) return block == null || plant(mc, b);
         var s = mc.level.getBlockState(b);
         var want = plan.get(b);
         return want != null && !s.canBeReplaced() && s.getBlock() != want.getBlock();
@@ -207,7 +207,7 @@ public final class BuildProcess implements Process {
             if (s.isAir() || !s.getFluidState().isEmpty() && s.getCollisionShape(mc.level, b).isEmpty()) return false;
             return s.getDestroySpeed(mc.level, b) >= 0;
         }
-        return s.canBeReplaced();
+        return s.canBeReplaced() || plant(mc, b);
     }
 
     @Override
@@ -409,9 +409,17 @@ public final class BuildProcess implements Process {
         return null;
     }
 
+    /** A flower, leaf litter or the like: nothing can go there until it's broken (at once). */
+    static boolean plant(Minecraft mc, BlockPos b) {
+        var s = mc.level.getBlockState(b);
+        return !s.isAir() && !s.canBeReplaced() && s.getFluidState().isEmpty() && s.getCollisionShape(mc.level, b).isEmpty()
+            && s.getDestroySpeed(mc.level, b) >= 0 && s.getDestroySpeed(mc.level, b) <= 0.2f;
+    }
+
     private static boolean solid(Minecraft mc, BlockPos n) {
         var s = mc.level.getBlockState(n);
-        return !s.canBeReplaced() && !(s.getBlock() instanceof net.minecraft.world.level.block.EntityBlock)
+        return !s.canBeReplaced() && !s.getCollisionShape(mc.level, n).isEmpty()
+            && !(s.getBlock() instanceof net.minecraft.world.level.block.EntityBlock)
             && s.getMenuProvider(mc.level, n) == null;
     }
 

@@ -191,6 +191,16 @@ public final class Builder {
     private Controls mine(PlayerState p, long pos) {
         int x = Pos.x(pos), y = Pos.y(pos), z = Pos.z(pos);
         double eye = p.y() + hands.eyeHeight();
+        if (world.physics(x, y, z).has(dev.lazuli.core.world.BlockPhysics.SOFT)) {
+            // a flower or leaf litter: no box for the sim's rays to hit, so look at its lower middle and let the game's
+            // own crosshair (which sees its outline) decide when it's on it
+            float[] ang = Raycast.angles(p.x(), eye, p.z(), x + 0.5, y + 0.15, z + 0.5);
+            if (Math.abs(wrapDeg(ang[0] - p.yaw())) < 4 && Math.abs(ang[1] - p.pitch()) < 4) {
+                hands.mine(pos);
+                blind = 0;
+            }
+            return new Controls(false, false, false, false, ang[0], ang[1], 0, true);
+        }
         Raycast.Hit now = Raycast.cast(world, p.x(), eye, p.z(), p.yaw(), p.pitch(), Raycast.REACH);
         if (now != null && now.x() == x && now.y() == y && now.z() == z) {
             hands.mine(pos);
@@ -336,5 +346,12 @@ public final class Builder {
             pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)));
         }
         return new Controls(false, false, false, false, yaw, pitch, 0, true);
+    }
+
+    private static float wrapDeg(float a) {
+        a %= 360;
+        if (a >= 180) a -= 360;
+        if (a < -180) a += 360;
+        return a;
     }
 }

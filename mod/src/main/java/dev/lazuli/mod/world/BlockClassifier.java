@@ -83,8 +83,11 @@ public final class BlockClassifier {
         if (b instanceof BedBlock) flags |= BlockPhysics.BED;
         if (STICKY.contains(b)) flags |= BlockPhysics.STICKY;
         if (b instanceof FallingBlock) flags |= BlockPhysics.FALLING;
-        if (s.canBeReplaced() && aabbs.isEmpty() && s.getFluidState().isEmpty()) flags |= BlockPhysics.REPLACEABLE;
         float hardness = s.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+        if (s.canBeReplaced() && aabbs.isEmpty() && s.getFluidState().isEmpty()) flags |= BlockPhysics.REPLACEABLE;
+        // flowers, leaf litter, wildflowers, petals, saplings: walk-through, gone in a hit, but in the way of a block
+        else if (!s.isAir() && aabbs.isEmpty() && s.getFluidState().isEmpty() && hardness >= 0 && hardness <= 0.2f
+            && (flags & BlockPhysics.STICKY) == 0) flags |= BlockPhysics.SOFT;
         BlockPhysics p = BlockPhysics.intern(boxes, b.getFriction(), b.getSpeedFactor(), b.getJumpFactor(), flags,
             hardness, BuiltInRegistries.BLOCK.getId(b));
         STATES.putIfAbsent(p.id, s);

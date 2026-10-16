@@ -107,9 +107,15 @@ public final class Digging {
         return Math.abs(w.physics(x, y, z).top - 1) < EPS;
     }
 
-    /** Air a throwaway block can be placed into. */
+    /** Air a throwaway block can be placed into (a flower or leaf litter in it: once broken, which takes no time). */
     public boolean placeable(int x, int y, int z) {
-        return in.canPlace() && w.get(x, y, z) == BlockKind.AIR && w.physics(x, y, z).has(BlockPhysics.REPLACEABLE);
+        return in.canPlace() && w.get(x, y, z) == BlockKind.AIR && room(x, y, z);
+    }
+
+    /** A block can go in here as it is, or after breaking the plant in it. */
+    private boolean room(int x, int y, int z) {
+        BlockPhysics p = w.physics(x, y, z);
+        return p.has(BlockPhysics.REPLACEABLE) || p.has(BlockPhysics.SOFT) && in.allowBreak();
     }
 
     /** Nothing to break here: no collision, no liquid, no danger. Unknown blocks count as open. */
@@ -193,7 +199,7 @@ public final class Digging {
         if (!in.canPlace()) return INF;
         // the block goes into u's feet cell: open air now, or a block u's entry dug out
         BlockKind k = w.get(x, y, z);
-        if (k == BlockKind.UNKNOWN || k == BlockKind.AIR && !w.physics(x, y, z).has(BlockPhysics.REPLACEABLE)) return INF;
+        if (k == BlockKind.UNKNOWN || k == BlockKind.AIR && !room(x, y, z)) return INF;
         if (k != BlockKind.AIR && ku != Kind.DIG) return INF;
         return PILLAR + clearCost(x, y + 2, z, false);
     }
@@ -221,6 +227,7 @@ public final class Digging {
                 breakIfSolid(w, out, ux, uy + 2, uz);
                 breakIfSolid(w, out, ux, uy + 1, uz);
                 if (open(w, ux, uy, uz) && w.get(ux, uy, uz) != BlockKind.UNKNOWN) {
+                    clearPlant(w, out, ux, uy, uz);
                     out.add(new Action(true, Pos.pack(ux, uy, uz), Pos.pack(ux, uy - 1, uz)));
                 }
             } else if (dy == -1) {
@@ -233,9 +240,15 @@ public final class Digging {
         if (dy == 1) breakIfSolid(w, out, ux, uy + 2, uz);
         for (int y = top; y >= vy; y--) breakIfSolid(w, out, vx, y, vz);
         if (dy == 0 && w.get(vx, vy - 1, vz) == BlockKind.AIR && !Standing.hasSupport(w, vx, vy, vz)) {
+            clearPlant(w, out, vx, vy - 1, vz);
             out.add(new Action(true, Pos.pack(vx, vy - 1, vz), Pos.pack(ux, uy - 1, uz)));
         }
         return out;
+    }
+
+    /** A flower or leaf litter where a block is to go: broken first (nothing can be placed into it). */
+    private static void clearPlant(BlockView w, List<Action> out, int x, int y, int z) {
+        if (w.physics(x, y, z).has(BlockPhysics.SOFT)) out.add(new Action(false, Pos.pack(x, y, z), 0));
     }
 
     private static void breakIfSolid(BlockView w, List<Action> out, int x, int y, int z) {
