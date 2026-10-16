@@ -58,6 +58,9 @@ class CommandTest {
             public void fish(int minutes) {
                 mined.add("fish " + minutes);
             }
+            public void iceboat(String mode, int[] target, int laps, String name) {
+                mined.add("iceboat " + mode + (target == null ? "" : " " + java.util.Arrays.toString(target)) + " " + laps + " " + name);
+            }
             public void container(boolean deposit, List<ItemCount> items, int[] at) {
                 mined.add((deposit ? "deposit " : "withdraw ") + items + (at == null ? "" : " at " + at[0] + " " + at[1] + " " + at[2]));
             }
@@ -404,5 +407,14 @@ class CommandTest {
         CommandHandler h = handler();
         for (String c : new String[]{"#breed", "#breed cow sheep 3", "#breed 2", "#fish", "#fish 10"}) h.handle(c);
         assertEquals(List.of("breed [] 0", "breed [minecraft:cow, minecraft:sheep] 3", "breed [] 2", "fish 0", "fish 10"), mined);
+    }
+
+    @Test
+    void iceboat() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#iceboat", "#iceboat lap 3", "#iceboat record track1", "#iceboat line off", "#iceboat 100 -50",
+            "#iceboat ~10 64 ~"}) h.handle(c);
+        assertEquals(List.of("iceboat line 1 null", "iceboat lap 3 null", "iceboat record 0 track1", "iceboat use 0 off",
+            "iceboat goal [100, " + Integer.MIN_VALUE + ", -50] 0 null", "iceboat goal [10, 64, 0] 0 null"), mined);
     }
 }

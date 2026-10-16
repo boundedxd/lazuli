@@ -2,6 +2,6 @@
 	"required": true,
 	"package": "dev.lazuli.mod.mixin",
 	"compatibilityLevel": "JAVA_21",
-	"client": ["CameraMixin", "ClientLevelMixin", "EntityMixin", "LivingEntityRendererMixin", "GameRendererMixin", "LocalPlayerMixin", "KeyboardInputMixin", "LivingEntityAccessor", "FishingHookAccessor", "MinecraftMixin", "FireworkRocketMixin"],
+	"client": ["CameraMixin", "ClientLevelMixin", "EntityMixin", "LivingEntityRendererMixin", "GameRendererMixin", "LocalPlayerMixin", "KeyboardInputMixin", "LivingEntityAccessor", "FishingHookAccessor", "AbstractBoatAccessor", "MinecraftMixin", "FireworkRocketMixin"],
 	"injectors": { "defaultRequire": 1 }
 }

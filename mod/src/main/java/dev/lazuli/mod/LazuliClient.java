@@ -126,6 +126,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private dev.lazuli.mod.process.BreedProcess breeds;
 	private dev.lazuli.mod.process.FishProcess fishing;
 	private dev.lazuli.mod.process.PortalProcess portals;
+	private dev.lazuli.mod.process.IceBoatProcess iceboat;
 	private final java.util.Map<String, dev.lazuli.core.portal.PortalMemory> portalsByWorld = new java.util.HashMap<>();
 	/** Every process; at most one runs at a time. */
 	private java.util.List<Process> processes;
@@ -190,7 +191,9 @@ public final class LazuliClient implements ClientModInitializer {
 		fishing = new dev.lazuli.mod.process.FishProcess(session, settings, this::chat);
 		portals = new dev.lazuli.mod.process.PortalProcess(session, settings, cache, this::portalMemory, LazuliClient::dimension, this::chat);
 		portals.useGetItem(getItem);
-		processes = java.util.List.of(portals, mine, follow, explore, tunnel, farm, breeds, fishing, containers, crafts, smelts, hunt, getItem,
+		iceboat = new dev.lazuli.mod.process.IceBoatProcess(settings, cache,
+			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("iceboat"), this::chat);
+		processes = java.util.List.of(iceboat, portals, mine, follow, explore, tunnel, farm, breeds, fishing, containers, crafts, smelts, hunt, getItem,
 			trades, brews, enchants, elytra, sorts, builds, sleeps, restock, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
@@ -275,6 +278,25 @@ public final class LazuliClient implements ClientModInitializer {
 			public void farm(int range) {
 				LazuliClient.this.stopProcesses(false);
 				farm.start(Minecraft.getInstance(), range);
+			}
+
+			@Override
+			public void iceboat(String mode, int[] target, int laps, String name) {
+				Minecraft mc = Minecraft.getInstance();
+				switch (mode) {
+					case "use" -> iceboat.useLine(name);
+					case "record" -> {
+						if (!iceboat.active()) LazuliClient.this.stopProcesses(false);
+						iceboat.record(mc, name);
+					}
+					default -> {
+						LazuliClient.this.stopProcesses(false);
+						if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
+						if (mode.equals("lap")) iceboat.lap(mc, laps);
+						else if (mode.equals("line")) iceboat.followLine(mc);
+						else iceboat.toGoal(mc, target[0], target[1] == Integer.MIN_VALUE ? null : target[1], target[2]);
+					}
+				}
 			}
 
 			@Override

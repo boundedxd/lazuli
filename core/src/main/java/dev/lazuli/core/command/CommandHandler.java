@@ -99,6 +99,14 @@ public final class CommandHandler {
             reply(Chat.err("Breeding isn't available here"));
         }
 
+        /**
+         * #iceboat: {@code mode} "goal" (target x, y or MIN_VALUE, z), "lap" (n laps), "line" (race the recorded line),
+         * "record" (name or null), "use" (a saved line by name, or "off").
+         */
+        default void iceboat(String mode, int[] target, int laps, String name) {
+            reply(Chat.err("Ice boat racing isn't available here"));
+        }
+
         /** Fishes at the nearest open water; minutes 0: until stopped. */
         default void fish(int minutes) {
             reply(Chat.err("Fishing isn't available here"));
@@ -343,6 +351,7 @@ public final class CommandHandler {
                 ctx.breed(kinds, n);
             }
             case "portal", "portals" -> ctx.portal(cmd.equals("portals") || args.length > 0 && args[0].equalsIgnoreCase("list"));
+            case "iceboat", "race" -> iceboat(args);
             case "fish" -> {
                 if (args.length == 0) ctx.fish(0);
                 else if (args.length == 1 && args[0].matches("[0-9]+")) ctx.fish(Integer.parseInt(args[0]));
@@ -414,6 +423,8 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "tunnel [height width depth]", "dig straight ahead (default 2x1, no end)"));
         ctx.reply(Chat.usage(p + "farm [range]", "harvest and replant crops around here"));
         ctx.reply(Chat.usage(p + "breed [animal...] [pairs]", "feed animals two at a time so they breed (any kind it has food for)"));
+        ctx.reply(Chat.usage(p + "iceboat <x z | x y z> | lap [n] | record [name] | line [name|off]",
+            "race the boat you're in: to a point or laps round the track (worked out from the blocks), or along a line you drove"));
         ctx.reply(Chat.usage(p + "fish [minutes]", "fish at the nearest open water (until stopped without minutes)"));
         ctx.reply(Chat.usage(p + "drop <item|all> [count] [item [count]...]", "throw items out of the inventory (all of them without a count)"));
         ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
@@ -442,6 +453,27 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "settings", "list every setting"));
         ctx.reply(Chat.usage(p + "config", "open the settings screen"));
         ctx.reply(Chat.usage(p + "record start <name> | stop", "record a movement trace"));
+    }
+
+    /** iceboat <x z | x y z> | lap [n] | record [name] | line [name|off]; bare: race the recorded line. */
+    private void iceboat(String[] args) {
+        int[] f = ctx.playerFeet();
+        if (args.length == 0) {
+            ctx.iceboat("line", null, 1, null);
+        } else if (args[0].equalsIgnoreCase("lap") || args[0].equalsIgnoreCase("laps")) {
+            ctx.iceboat("lap", null, args.length > 1 && number(args[1]) ? Math.max(1, integer(args[1])) : 1, null);
+        } else if (args[0].equalsIgnoreCase("record")) {
+            ctx.iceboat("record", null, 0, args.length > 1 ? args[1] : null);
+        } else if (args[0].equalsIgnoreCase("line")) {
+            if (args.length > 1) ctx.iceboat("use", null, 0, args[1]);
+            else ctx.iceboat("line", null, 1, null);
+        } else if (args.length == 2 && coordinate(args[0]) && coordinate(args[1])) {
+            ctx.iceboat("goal", new int[]{coord(args[0], f[0]), Integer.MIN_VALUE, coord(args[1], f[2])}, 0, null);
+        } else if (args.length == 3 && coordinate(args[0]) && coordinate(args[1]) && coordinate(args[2])) {
+            ctx.iceboat("goal", new int[]{coord(args[0], f[0]), coord(args[1], f[1]), coord(args[2], f[2])}, 0, null);
+        } else {
+            ctx.reply(Chat.err("Usage: iceboat <x z | x y z> | lap [n] | record [name] | line [name|off]"));
+        }
     }
 
     /** follow players | entities | player <name...> | entity <type...> [distance]; a bare name means that player. */
