@@ -26,4 +26,12 @@ class ItemKeysTest {
         assertEquals("minecraft:potion", ItemKeys.base("minecraft:potion@minecraft:swiftness"));
         assertEquals("minecraft:dirt", ItemKeys.base("minecraft:dirt"));
     }
+
+    @Test
+    void namesWhatsInsideAShulkerBox() {
+        String n = ItemKeys.inShulker("diamond");
+        assertTrue(ItemKeys.isInShulker(n));
+        assertEquals("minecraft:diamond", ItemKeys.shulkerContent(n));
+        assertFalse(ItemKeys.isInShulker("minecraft:diamond"));
+    }
 }

@@ -64,7 +64,14 @@ public final class ChestWatcher {
         Map<String, Integer> items = new HashMap<>();
         for (int i = 0; i < size; i++) {
             ItemStack s = menu.getSlot(i).getItem();
-            if (!s.isEmpty()) for (String id : Inventories.memoryIds(s)) items.merge(id, s.getCount(), Integer::sum);
+            if (s.isEmpty()) continue;
+            for (String id : Inventories.memoryIds(s)) items.merge(id, s.getCount(), Integer::sum);
+            // and what's in a shulker box in it, to be taken out box and all
+            for (ItemStack in : Inventories.shulkerContents(s)) {
+                for (String id : Inventories.memoryIds(in)) {
+                    items.merge(dev.lazuli.core.inventory.ItemKeys.inShulker(id), in.getCount(), Integer::sum);
+                }
+            }
         }
         ChestMemory m = memory.apply(mc);
         String dim = dimension.apply(mc);

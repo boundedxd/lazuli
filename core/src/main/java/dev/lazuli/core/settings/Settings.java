@@ -112,6 +112,17 @@ public final class Settings {
     public final Setting<Boolean> chestFinal = bool("chestFinal", true);
     /** #getitem / #brew take what they make it from (ingredients, materials) from remembered chests instead of getting them. */
     public final Setting<Boolean> chestIngredients = bool("chestIngredients", true);
+    /** Taking items also looks in shulker boxes: one carried (placed, opened, picked up) or one in a remembered chest. */
+    public final Setting<Boolean> shulkers = bool("shulkers", true);
+    /** #sort may move items between the chests and barrels around. */
+    public final Setting<Boolean> sortEnabled = bool("sortEnabled", true);
+    /** #sel fill / clear may build and break. */
+    public final Setting<Boolean> selEnabled = bool("selEnabled", true);
+    /** While a job runs, tops up {@link #restockItems} from known chests (or shulker boxes) when under half. */
+    public final Setting<Boolean> restock = bool("restock", true);
+    /** item:amount, or a group (food, pickaxe, axe, shovel, sword, blocks = the throwaway blocks). */
+    public final Setting<String> restockItems = register(new Setting<>("restockItems", "food:16,pickaxe:1,torch:16,blocks:64",
+        s -> s.replace(" ", "").toLowerCase(java.util.Locale.ROOT)));
     public final Setting<Integer> chestRange = integer("chestRange", 128, 8, 2048);
     /** #getitem crafts what it needs several times over (planks, sticks...) all at once: fewer steps. */
     public final Setting<Boolean> getItemBatch = bool("getItemBatch", true);

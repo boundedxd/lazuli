@@ -36,6 +36,22 @@ public final class Inventories {
         return kind == null ? List.of(id) : List.of(id, id + "@" + kind);
     }
 
+    /** What's inside a shulker box stack (empty for anything else). */
+    public static List<ItemStack> shulkerContents(ItemStack s) {
+        if (!(s.getItem() instanceof net.minecraft.world.item.BlockItem b
+            && b.getBlock() instanceof net.minecraft.world.level.block.ShulkerBoxBlock)) return List.of();
+        var c = s.get(net.minecraft.core.component.DataComponents.CONTAINER);
+        return c == null ? List.of() : c.nonEmptyStream().toList();
+    }
+
+    /** How many of {@code item} (an id, or "id@potion") a shulker box stack holds. */
+    public static int inShulker(ItemStack box, String item) {
+        Predicate<String> m = matcher(item);
+        int n = 0;
+        for (ItemStack in : shulkerContents(box)) if (m.test(key(in))) n += in.getCount();
+        return n;
+    }
+
     /** A bottle's (or tipped arrow's) potion id, or null. */
     public static String potionKind(ItemStack s) {
         var pc = s.get(net.minecraft.core.component.DataComponents.POTION_CONTENTS);

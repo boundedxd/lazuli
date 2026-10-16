@@ -39,4 +39,20 @@ public final class ItemKeys {
         }
         return k -> k.equals(full) || k.startsWith(full + "#");
     }
+
+    private static final String SHULKER = "shulker>";
+
+    /** The name chests remember {@code id} by when it's inside a shulker box in them. */
+    public static String inShulker(String id) {
+        return SHULKER + id(id);
+    }
+
+    public static boolean isInShulker(String name) {
+        return name.startsWith(SHULKER);
+    }
+
+    /** The item a {@link #inShulker} name is about. */
+    public static String shulkerContent(String name) {
+        return name.substring(SHULKER.length());
+    }
 }

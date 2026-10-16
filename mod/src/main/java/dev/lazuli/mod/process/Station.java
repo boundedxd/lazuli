@@ -47,7 +47,7 @@ final class Station {
     private Predicate<net.minecraft.world.level.block.state.BlockState> block;
     private String item, name, error;
     private Predicate<AbstractContainerMenu> menu;
-    private boolean mayPlace, acted;
+    private boolean mayPlace, acted, placeOnly;
     private BlockPos pos, placed, skip;
     private PlaceSpots.Spot spot;
     private List<int[]> stands;
@@ -76,6 +76,7 @@ final class Station {
         this.name = name;
         this.menu = menu;
         this.mayPlace = mayPlace;
+        placeOnly = false;
         pos = at;
         skip = null;
         // one it placed earlier and hasn't picked up yet stays its own
@@ -86,6 +87,15 @@ final class Station {
         tries = moves = 0;
         trip.clear();
         enter(Phase.FIND, p);
+    }
+
+    /** Places {@code item} (a shulker box) next to the player and opens it, never using one already standing around. */
+    void startPlaced(LocalPlayer p, Predicate<net.minecraft.world.level.block.state.BlockState> block, String item, String name,
+                     Predicate<AbstractContainerMenu> menu) {
+        start(p, block, item, name, menu, null, true);
+        placed = null;
+        placeOnly = true;
+        enter(Phase.PLACE, p);
     }
 
     BlockPos pos() {
@@ -114,7 +124,7 @@ final class Station {
         switch (phase) {
             case FIND -> {
                 if (pos != null && !test(mc, pos)) pos = null; // broken meanwhile
-                if (pos == null) {
+                if (pos == null && !placeOnly) {
                     pos = nearest(mc, p, block, settings.stationRange.get(), skip);
                     // carrying one: placing it beats a long walk to another
                     if (pos != null && mayPlace && has(p) && pos.distSqr(p.blockPosition()) > NEAR * NEAR) pos = null;
@@ -202,8 +212,13 @@ final class Station {
 
     /** Starts picking up the block this placed (see {@link #pickUp}); false if it placed none. */
     boolean startPickUp(LocalPlayer p) {
+        return startPickUp(p, false);
+    }
+
+    /** @param always even with pickupStations off (a shulker box with things in it) */
+    boolean startPickUp(LocalPlayer p, boolean always) {
         cancel();
-        if (placed == null || !placed.equals(pos) || !settings.pickupStations.get()) return false;
+        if (placed == null || !placed.equals(pos) || !(always || settings.pickupStations.get())) return false;
         // a furnace broken without a pickaxe is gone: leave it then
         var state = Minecraft.getInstance().level.getBlockState(placed);
         if (state.requiresCorrectToolForDrops()) {
@@ -235,13 +250,19 @@ final class Station {
         }
         // its drop: walk over it until it's picked up
         var drops = mc.level.getEntitiesOfClass(ItemEntity.class, new AABB(placed).inflate(4),
-            e -> e.isAlive() && Inventories.key(e.getItem()).equals(item));
+            e -> e.isAlive() && base(Inventories.key(e.getItem())).equals(base(item)));
         if (drops.isEmpty() || pickTicks > COLLECT_TICKS) return endPickUp();
         if (!trip.running()) {
             BlockPos at = drops.get(0).blockPosition();
             trip.go(new GoalBlock(at.getX(), at.getY(), at.getZ()), p);
         }
         return false;
+    }
+
+    /** A key without its components part (a shulker box comes back with other contents). */
+    private static String base(String key) {
+        int h = key.indexOf('#');
+        return h < 0 ? key : key.substring(0, h);
     }
 
     private boolean endPickUp() {

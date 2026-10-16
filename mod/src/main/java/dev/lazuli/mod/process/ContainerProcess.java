@@ -44,6 +44,7 @@ public final class ContainerProcess implements Process {
     private final Consumer<String> chat;
     private final ClickDriver clicks;
     private final Trip trip;
+    private final PathingSession session;
     private final InputDriver input = new InputDriver();
     private Phase phase = Phase.IDLE;
     private Outcome outcome = Outcome.NONE;
@@ -68,6 +69,11 @@ public final class ContainerProcess implements Process {
         this.chat = chat;
         this.clicks = clicks;
         this.trip = new Trip(session);
+        this.session = session;
+    }
+
+    PathingSession session() {
+        return session;
     }
 
     @Override
@@ -78,6 +84,13 @@ public final class ContainerProcess implements Process {
     @Override
     public boolean active() {
         return phase != Phase.IDLE;
+    }
+
+    /** Called with the container and its menu once it's open, before anything moves (#sort reads it). */
+    private java.util.function.BiConsumer<BlockPos, net.minecraft.world.inventory.AbstractContainerMenu> onOpen;
+
+    void onOpen(java.util.function.BiConsumer<BlockPos, net.minecraft.world.inventory.AbstractContainerMenu> f) {
+        onOpen = f;
     }
 
     /** Remembered chests, for sorted deposits. */
@@ -245,13 +258,18 @@ public final class ContainerProcess implements Process {
                 var menu = p.containerMenu;
                 int[] mine = Inventories.slots(menu, p, true), theirs = Inventories.slots(menu, p, false);
                 if (!acted) {
+                    if (onOpen != null) onOpen.accept(pos, menu);
+                    // "shulker>diamond": the shulker boxes in there holding diamonds (one box)
+                    matches = items.stream().map(i -> dev.lazuli.core.inventory.ItemKeys.isInShulker(i.item())
+                        ? boxesWith(menu, dev.lazuli.core.inventory.ItemKeys.shulkerContent(i.item()))
+                        : Inventories.matcher(i.item())).toList();
                     // one plan for every item, each checked on the menu as the ones before it leave it
                     Menu sim = Inventories.read(menu, p);
                     before = new int[items.size()];
                     List<Click> plan = new ArrayList<>();
                     for (int i = 0; i < items.size(); i++) {
                         before[i] = sim.count(mine, matches.get(i));
-                        int count = items.get(i).count();
+                        int count = dev.lazuli.core.inventory.ItemKeys.isInShulker(items.get(i).item()) ? 1 : items.get(i).count();
                         List<Click> part = deposit ? Moves.transfer(sim, mine, theirs, matches.get(i), count)
                             : Moves.transfer(sim, theirs, mine, matches.get(i), count);
                         sim.applyAll(part);
@@ -266,7 +284,8 @@ public final class ContainerProcess implements Process {
                 List<ItemCount> moved = new ArrayList<>();
                 boolean ok = true;
                 for (int i = 0; i < items.size(); i++) {
-                    int n = Math.abs(now.count(mine, matches.get(i)) - before[i]), count = items.get(i).count();
+                    int n = Math.abs(now.count(mine, matches.get(i)) - before[i]);
+                    int count = dev.lazuli.core.inventory.ItemKeys.isInShulker(items.get(i).item()) ? 1 : items.get(i).count();
                     moved.add(new ItemCount(items.get(i).item(), n));
                     ok &= n > 0 && (count < 0 || n >= count);
                 }
@@ -276,6 +295,13 @@ public final class ContainerProcess implements Process {
             }
             default -> {}
         }
+    }
+
+    /** Matches the keys of the shulker boxes in {@code menu} holding some {@code item}. */
+    private static Predicate<String> boxesWith(net.minecraft.world.inventory.AbstractContainerMenu menu, String item) {
+        java.util.Set<String> keys = new java.util.HashSet<>();
+        for (var slot : menu.slots) if (Inventories.inShulker(slot.getItem(), item) > 0) keys.add(Inventories.key(slot.getItem()));
+        return keys::contains;
     }
 
     private void enter(Phase next, LocalPlayer p) {

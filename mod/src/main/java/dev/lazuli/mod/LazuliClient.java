@@ -120,6 +120,9 @@ public final class LazuliClient implements ClientModInitializer {
 	private dev.lazuli.mod.inventory.TradeWatcher tradeWatcher;
 	private final java.util.Map<String, dev.lazuli.core.trade.TradeMemory> tradesByWorld = new java.util.HashMap<>();
 	private Upkeep upkeep;
+	private dev.lazuli.mod.process.RestockProcess restock;
+	private dev.lazuli.mod.process.SortProcess sorts;
+	private dev.lazuli.mod.process.BuildProcess builds;
 	/** Every process; at most one runs at a time. */
 	private java.util.List<Process> processes;
 	/** "[Lazuli] " in blue. */
@@ -167,12 +170,20 @@ public final class LazuliClient implements ClientModInitializer {
 		brews.useGetItem(getItem);
 		brews.useChests(containers, this::chests, LazuliClient::dimension);
 		enchants = new dev.lazuli.mod.process.EnchantProcess(session, settings, clicks, this::chat);
+		enchants.useChests(containers, this::chests, LazuliClient::dimension);
 		elytra = new dev.lazuli.mod.process.ElytraProcess(session, settings, clicks, this::chat);
 		RecipeData.drops();
 		RecipeData.get(); // read the recipes in the background now, not on the first #craft
 		upkeep = new Upkeep(settings, this::chat);
+		sorts = new dev.lazuli.mod.process.SortProcess(session, settings, clicks, this::chat);
+		builds = new dev.lazuli.mod.process.BuildProcess(session, settings, clicks, this::chat);
+		builds.useChests(containers, this::chests, LazuliClient::dimension);
+		restock = new dev.lazuli.mod.process.RestockProcess(session, settings, clicks, this::chests, LazuliClient::dimension, () -> {
+			for (Process p : processes) if (p != guard && p != restock && p.active()) return true;
+			return false;
+		}, this::chat);
 		processes = java.util.List.of(mine, follow, explore, tunnel, farm, containers, crafts, smelts, hunt, getItem, trades, brews,
-			enchants, elytra, sleeps, guard);
+			enchants, elytra, sorts, builds, sleeps, restock, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -307,6 +318,36 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public void sort(int range) {
+				if (!settings.sortEnabled.get()) {
+					reply(Chat.err("#sort is off (sortEnabled)"));
+					return;
+				}
+				LazuliClient.this.stopProcesses(false);
+				sorts.start(Minecraft.getInstance(), range);
+			}
+
+			@Override
+			public void selClear(dev.lazuli.core.build.Selection.Box box) {
+				if (!settings.selEnabled.get()) {
+					reply(Chat.err("#sel is off (selEnabled)"));
+					return;
+				}
+				LazuliClient.this.stopProcesses(false);
+				builds.start(Minecraft.getInstance(), box, null);
+			}
+
+			@Override
+			public void selFill(dev.lazuli.core.build.Selection.Box box, String block) {
+				if (!settings.selEnabled.get()) {
+					reply(Chat.err("#sel is off (selEnabled)"));
+					return;
+				}
+				LazuliClient.this.stopProcesses(false);
+				builds.start(Minecraft.getInstance(), box, block);
+			}
+
+			@Override
 			public void fly(int x, Integer y, int z) {
 				LazuliClient.this.stopProcesses(false);
 				if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
@@ -408,6 +449,7 @@ public final class LazuliClient implements ClientModInitializer {
 		Lazuli.Holder.set(new Api());
 		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal, cache);
 		renderer.processes(processes);
+		renderer.selection(commands::selection);
 		renderer.waypoints(() -> {
 			Minecraft mc = Minecraft.getInstance();
 			Waypoints w = mc.level == null ? null : waypoints(mc);
@@ -452,7 +494,11 @@ public final class LazuliClient implements ClientModInitializer {
 			upkeep.tick(mc, busy());
 			if (Upkeep.eating()) return;
 			// the guard dodging or healing: the job waits
-			for (Process p : processes) if (p == guard || !dev.lazuli.mod.process.Guard.paused()) p.tick(mc);
+			// restocking: the job waits too
+			for (Process p : processes) {
+				if (p == guard || p == restock && !dev.lazuli.mod.process.Guard.paused()
+					|| !dev.lazuli.mod.process.Guard.paused() && !dev.lazuli.mod.process.RestockProcess.paused()) p.tick(mc);
+			}
 		});
 		ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("lazuli", "status"), renderer::renderHud);

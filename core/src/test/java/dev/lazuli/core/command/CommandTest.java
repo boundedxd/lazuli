@@ -77,6 +77,9 @@ class CommandTest {
             public dev.lazuli.core.waypoint.Waypoints waypoints() { return waypoints; }
             public String dimension() { return "overworld"; }
             public dev.lazuli.core.storage.ChestMemory chests() { return chests; }
+            public void sort(int range) { mined.add("sort " + range); }
+            public void selClear(dev.lazuli.core.build.Selection.Box b) { mined.add("clear " + b); }
+            public void selFill(dev.lazuli.core.build.Selection.Box b, String block) { mined.add("fill " + b + " " + block); }
         });
     }
 
@@ -372,5 +375,21 @@ class CommandTest {
         assertEquals(new GoalBlock(3, 1, 4), h.goal());
         assertTrue(h.handle("#path"));
         assertEquals(PathingSession.State.PATHING, session.snapshot().state());
+    }
+
+    @Test
+    void selPicksCornersThenFillsOrClears() {
+        CommandHandler h = handler();
+        h.handle("#sel fill stone");
+        assertTrue(replies.get(replies.size() - 1).contains("pos1"), replies.toString());
+        h.handle("#sel pos1");
+        h.handle("#sel pos2 ~3 ~2 ~-1");
+        h.handle("#sel fill stone");
+        h.handle("#sel clear");
+        h.handle("#sort");
+        h.handle("#sort 10");
+        assertEquals(List.of("fill 0 1 -1 to 3 3 0 minecraft:stone", "clear 0 1 -1 to 3 3 0", "sort 16", "sort 10"), mined);
+        h.handle("#sel reset");
+        assertNull(h.selection().box());
     }
 }

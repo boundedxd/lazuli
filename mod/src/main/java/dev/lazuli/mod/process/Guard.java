@@ -72,6 +72,11 @@ public final class Guard implements Process {
         return healing;
     }
 
+    /** Something else (restocking) took over from trip {@code trip}: counts as the guard's doing for the job. */
+    public static void tookOver(long trip) {
+        tookOverAt = Math.max(tookOverAt, trip);
+    }
+
     /** Whether a trip started as {@code trip} was cut short by the guard (so it didn't fail). */
     public static boolean interrupted(long trip) {
         return trip >= 0 && tookOverAt >= trip;

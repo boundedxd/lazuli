@@ -36,7 +36,7 @@ public final class EnchantProcess implements Process {
 
     private enum Mode { ENCHANT, REPAIR, COMBINE }
 
-    private enum Phase { IDLE, STATION, PUT, CHOOSE, TAKE, PICKUP }
+    private enum Phase { IDLE, FETCH, STATION, PUT, CHOOSE, TAKE, PICKUP }
 
     public enum Outcome { NONE, DONE, FAILED, CANCELLED }
 
@@ -52,6 +52,17 @@ public final class EnchantProcess implements Process {
     private String doneMsg;
     /** Said once the last clicks have gone through (taking the enchanted item out). */
     private String finishing;
+
+    /** Taking what's missing (lapis, a book, repair material) from remembered chests (chestIngredients). */
+    private ChestTake take;
+    private Runnable retry;
+    private int fetches;
+    private static final int MAX_FETCHES = 4;
+
+    public void useChests(ContainerProcess containers, java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests,
+                          java.util.function.Function<Minecraft, String> dimension) {
+        this.take = new ChestTake(settings, containers, chests, dimension);
+    }
 
     public EnchantProcess(PathingSession session, Settings settings, ClickDriver clicks, Consumer<String> chat) {
         this.settings = settings;
@@ -84,11 +95,14 @@ public final class EnchantProcess implements Process {
     public void enchant(Minecraft mc, String item, int count, int option) {
         begin(Mode.ENCHANT, item, null, Math.max(1, count), option - 1);
         LocalPlayer p = mc.player;
+        Runnable again = () -> enchant(mc, item, count, option);
         if (find(p, enchantable()) < 0) {
-            fail("No " + name(this.item) + " that can be enchanted");
+            if (!fetch(mc, this.item, this.count, again)) fail("No " + name(this.item) + " that can be enchanted");
             return;
         }
-        if (Inventories.plainCounts(p).getOrDefault("minecraft:lapis_lazuli", 0) == 0) {
+        int lapis = Inventories.plainCounts(p).getOrDefault("minecraft:lapis_lazuli", 0);
+        if (lapis < 3 * this.count && fetch(mc, "minecraft:lapis_lazuli", 3 * this.count - lapis, again)) return;
+        if (lapis == 0) {
             fail("Needs lapis lazuli");
             return;
         }
@@ -109,7 +123,13 @@ public final class EnchantProcess implements Process {
             return;
         }
         if (right(p, left) < 0) {
-            fail("Nothing to repair the " + name(this.item) + " with (its material, or another one)");
+            ItemStack l = p.getInventory().getItem(left);
+            String mat = material(l);
+            int n = mat == null ? 0 : dev.lazuli.core.craft.Enchanting.repairMaterials(l.getDamageValue(), l.getMaxDamage());
+            Runnable again = () -> repair(mc, item);
+            if (!(mat != null && fetch(mc, mat, n, again)) && !fetch(mc, this.item, 1, again)) {
+                fail("Nothing to repair the " + name(this.item) + " with (its material, or another one)");
+            }
             return;
         }
         go(p);
@@ -121,18 +141,48 @@ public final class EnchantProcess implements Process {
         LocalPlayer p = mc.player;
         int left = find(p, s -> true);
         if (left < 0) {
-            fail("No " + name(this.item));
+            if (!fetch(mc, this.item, 1, () -> combine(mc, item, with))) fail("No " + name(this.item));
             return;
         }
         if (right(p, left) < 0) {
-            fail("No " + name(this.with));
+            if (!fetch(mc, this.with, 1, () -> combine(mc, item, with))) fail("No " + name(this.with));
             return;
         }
         go(p);
     }
 
+    /**
+     * Starts taking {@code n} of {@code id} from a remembered chest (chestIngredients), then runs {@code again};
+     * false if that's off, none is known, or it has tried enough.
+     */
+    private boolean fetch(Minecraft mc, String id, int n, Runnable again) {
+        if (take == null || !settings.chestIngredients.get() || fetches >= MAX_FETCHES) return false;
+        LocalPlayer p = mc.player;
+        java.util.function.Predicate<String> m = Inventories.matcher(id);
+        if (!take.start(mc, p, id, n, pl -> {
+            int c = 0;
+            for (int i = 0; i < 36; i++) if (m.test(Inventories.key(pl.getInventory().getItem(i)))) c += pl.getInventory().getItem(i).getCount();
+            return c;
+        })) return false;
+        fetches++;
+        retry = again;
+        phase = Phase.FETCH;
+        chat.accept(Chat.info("Taking {} {} from a chest first", n, name(id)));
+        return true;
+    }
+
+    /** What repairs {@code s} at an anvil (iron ingot for iron tools...), or null. */
+    private static String material(ItemStack s) {
+        var r = s.get(net.minecraft.core.component.DataComponents.REPAIRABLE);
+        if (r == null) return null;
+        return r.items().stream().findFirst()
+            .map(h -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(h.value()).toString()).orElse(null);
+    }
+
     private void begin(Mode mode, String item, String with, int count, int option) {
+        int f = phase == Phase.FETCH ? fetches : 0; // a retry after taking from a chest keeps counting
         stop(false);
+        fetches = f;
         outcome = Outcome.NONE;
         this.mode = mode;
         this.item = Inventories.id(item);
@@ -164,6 +214,7 @@ public final class EnchantProcess implements Process {
     @Override
     public void stop(boolean announce) {
         if (phase == Phase.IDLE) return;
+        if (phase == Phase.FETCH) take.stop();
         end(Outcome.CANCELLED, announce ? Chat.warn("Stopped") : null);
     }
 
@@ -176,6 +227,16 @@ public final class EnchantProcess implements Process {
             return;
         }
         switch (phase) {
+            case FETCH -> {
+                switch (take.tick(mc, p)) {
+                    case RUNNING -> {}
+                    case CANCELLED -> end(Outcome.CANCELLED, null);
+                    case DONE -> {
+                        Runnable r = retry;
+                        r.run();
+                    }
+                }
+            }
             case STATION -> {
                 switch (station.tick(mc, p)) {
                     case OPEN -> phase = Phase.PUT;

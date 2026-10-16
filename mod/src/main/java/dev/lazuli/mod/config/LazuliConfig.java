@@ -34,6 +34,7 @@ public final class LazuliConfig implements WalksyLibApi {
 
     public static boolean renderPrediction = true;
     public static boolean renderGoal = true;
+    public static boolean renderSelection = true;
     public static boolean showHud = true;
     public static boolean hudBars = true;
     public static boolean hudStats = true;
@@ -145,6 +146,16 @@ public final class LazuliConfig implements WalksyLibApi {
                         .range(1, 19, 1)
                         .description(OptionDescription.ofText(() -> "Hunger (out of 20) at or below which it eats.")).build())
                     .build())
+                .group(OptionGroup.builder("Restock")
+                    .option(bool(s.restock, "While busy, refill what's running low from chests you've opened (or shulker boxes); the job waits."))
+                    .option(Options.ofString("Restock items", s.restockItems::get, s.restockItems.defaultValue(), v -> {
+                        try {
+                            s.restockItems.parse(v);
+                        } catch (IllegalArgumentException ignored) {
+                            // keep the previous list
+                        }
+                    }).description(OptionDescription.ofText(() -> "item:amount, comma separated. Groups: food, pickaxe, axe, shovel, sword, blocks. Refills when under half.")).build())
+                    .build())
                 .group(OptionGroup.builder("Danger")
                     .option(bool(s.dodgeCreepers, "Run from a creeper that starts hissing nearby; the job waits."))
                     .option(bool(s.defend, "Fight monsters that come close with the best sword or axe; the job waits."))
@@ -171,7 +182,10 @@ public final class LazuliConfig implements WalksyLibApi {
                 .group(OptionGroup.builder("Get item")
                     .option(bool(s.getItemMine, "#getitem may mine for what it needs (logs, stone, ores...)."))
                     .option(bool(s.getItemSmelt, "#getitem may smelt for what it needs (iron ingots, glass...)."))
+                    .option(bool(s.sortEnabled, "#sort may move items between the chests and barrels around."))
+                    .option(bool(s.selEnabled, "#sel fill and #sel clear may place and break the blocks in the selected box."))
                     .option(bool(s.chestFinal, "#getitem and #brew take the finished item from a chest you've opened if one has it."))
+                    .option(bool(s.shulkers, "Taking items also looks in shulker boxes: one you carry (placed, opened, picked back up) or one in a known chest."))
                     .option(bool(s.chestIngredients, "#getitem and #brew take ingredients and materials from chests you've opened instead of getting them."))
                     .option(bool(s.getItemBatch, "#getitem crafts planks, sticks... all at once instead of over several steps."))
                     .option(bool(s.getItemNearby, "#getitem prefers blocks that are loaded around you (the trees here, the stone here)."))
@@ -248,6 +262,7 @@ public final class LazuliConfig implements WalksyLibApi {
                         .description(OptionDescription.ofText(() -> "Draw where the input planner expects to go next.")).build())
                     .option(Options.ofColor("Prediction color", () -> predictionColor, DEFAULT_PREDICTION, v -> predictionColor = v).build())
                     .option(Options.ofBoolean("Show goal", () -> renderGoal, true, v -> renderGoal = v).build())
+                    .option(Options.ofBoolean("Show selection", () -> renderSelection, true, v -> renderSelection = v).build())
                     .option(Options.ofColor("Goal color", () -> goalColor, DEFAULT_GOAL, v -> goalColor = v).build())
                     .option(bool(s.renderWaypoints, "Draw waypoints (#wp) in the world."))
                     .option(Options.ofNumber("Line width", () -> lineWidth, 2.5f, v -> lineWidth = v).range(1.0f, 6.0f, 0.5f).build())

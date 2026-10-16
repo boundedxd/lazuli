@@ -180,6 +180,12 @@ public final class Tools {
         else KEEP.put(who, Map.copyOf(items));
     }
 
+    /** Whether a running process is collecting {@code id} (restocking leaves those alone). */
+    public static boolean collecting(String id) {
+        for (Map<String, Integer> m : KEEP.values()) if (m.containsKey(id)) return true;
+        return false;
+    }
+
     /** For each kept item: how many beyond what's kept the inventory holds (may be 0 or less); others unlimited. */
     private static Map<String, Integer> spares(Player p, Settings settings) {
         Map<String, Integer> spare = new java.util.HashMap<>();

@@ -140,6 +140,21 @@ public final class CommandHandler {
             reply(Chat.err("Anvils aren't available here"));
         }
 
+        /** #sort: sorts the chests and barrels within {@code range} blocks. */
+        default void sort(int range) {
+            reply(Chat.err("Sorting isn't available here"));
+        }
+
+        /** #sel clear: breaks every block in the box. */
+        default void selClear(dev.lazuli.core.build.Selection.Box box) {
+            reply(Chat.err("Building isn't available here"));
+        }
+
+        /** #sel fill: places {@code block} (an item id) in every empty spot of the box. */
+        default void selFill(dev.lazuli.core.build.Selection.Box box, String block) {
+            reply(Chat.err("Building isn't available here"));
+        }
+
         /** Flies there with an elytra (y null: anywhere at x z). */
         default void fly(int x, Integer y, int z) {
             reply(Chat.err("Flying isn't available here"));
@@ -215,8 +230,15 @@ public final class CommandHandler {
     private Goal goal;
     private boolean fallback;
 
+    private final dev.lazuli.core.build.Selection selection = new dev.lazuli.core.build.Selection();
+
     public CommandHandler(Context ctx) {
         this.ctx = ctx;
+    }
+
+    /** #sel's corners (drawn by the mod). */
+    public dev.lazuli.core.build.Selection selection() {
+        return selection;
     }
 
     public Goal goal() {
@@ -324,6 +346,12 @@ public final class CommandHandler {
                 else ctx.anvil(args[0], args[1]);
             }
             case "fly" -> fly(args);
+            case "sel" -> sel(args);
+            case "sort" -> {
+                if (args.length == 0) ctx.sort(16);
+                else if (args.length == 1) ctx.sort(Math.max(2, Math.min(64, integer(args[0]))));
+                else ctx.reply(Chat.err("Usage: sort [range]"));
+            }
             case "craft" -> {
                 List<ItemCount> items = items(args, 0, args.length);
                 if (items == null) ctx.reply(Chat.err("Usage: craft <item> [count] [item [count]...]"));
@@ -360,6 +388,8 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
         ctx.reply(Chat.usage(p + "brew <potion> [count] [splash|lingering]", "brew potions (fire_resistance, long_swiftness...); fills bottles, gets what's missing"));
         ctx.reply(Chat.usage(p + "enchant <item> [count] [1|2|3]", "enchant at an enchanting table (the best it can pay for)"));
+        ctx.reply(Chat.usage(p + "sel pos1|pos2 [x y z] | fill <block> | clear | reset", "select a box, then fill it with a block or clear it out"));
+        ctx.reply(Chat.usage(p + "sort [range]", "sort the chests and barrels around (default 16 blocks): each item into as few as it fits"));
         ctx.reply(Chat.usage(p + "repair <item>", "repair at an anvil with its material or another one"));
         ctx.reply(Chat.usage(p + "combine <item> <with>", "put two things together at an anvil (an enchanted_book...)"));
         ctx.reply(Chat.usage(p + "fly <x z | x y z | waypoint>", "fly there with an elytra and rockets (far #goto does too: elytraGoto)"));
@@ -509,6 +539,56 @@ public final class CommandHandler {
     }
 
     /** fly <x z | x y z | waypoint> */
+    private static final long SEL_MAX = 200_000;
+
+    /** sel pos1|pos2 [x y z] | fill <block> | clear | reset | (nothing: what's selected) */
+    private void sel(String[] args) {
+        String usage = "Usage: sel pos1|pos2 [x y z] | fill <block> | clear | reset";
+        if (args.length == 0) {
+            var b = selection.box();
+            ctx.reply(b == null ? Chat.info("Nothing selected ({}sel pos1, {}sel pos2)", ctx.settings().prefix.get(), ctx.settings().prefix.get())
+                : Chat.info("Selected {} ({} blocks)", b, b.volume()));
+            return;
+        }
+        String a = args[0].toLowerCase(java.util.Locale.ROOT);
+        switch (a) {
+            case "pos1", "1", "pos2", "2" -> {
+                int which = a.endsWith("1") ? 1 : 2;
+                int[] f = ctx.playerFeet();
+                if (args.length == 1) selection.set(which, f[0], f[1], f[2]);
+                else if (args.length == 4) selection.set(which, coord(args[1], f[0]), coord(args[2], f[1]), coord(args[3], f[2]));
+                else {
+                    ctx.reply(Chat.err(usage));
+                    return;
+                }
+                int[] p = which == 1 ? selection.pos1() : selection.pos2();
+                var b = selection.box();
+                ctx.reply(Chat.ok("pos{} at {} {} {}{}", which, p[0], p[1], p[2], b == null ? "" : " (" + b.volume() + " blocks)"));
+            }
+            case "reset", "none", "deselect" -> {
+                selection.reset();
+                ctx.reply(Chat.ok("Selection cleared"));
+            }
+            case "fill", "clear" -> {
+                var b = selection.box();
+                if (b == null) {
+                    ctx.reply(Chat.err("Pick both corners first: {}sel pos1, {}sel pos2", ctx.settings().prefix.get(), ctx.settings().prefix.get()));
+                } else if (b.volume() > SEL_MAX) {
+                    ctx.reply(Chat.err("That's {} blocks; at most {}", b.volume(), SEL_MAX));
+                } else if (a.equals("clear")) {
+                    if (args.length != 1) ctx.reply(Chat.err(usage));
+                    else ctx.selClear(b);
+                } else if (args.length != 2) {
+                    ctx.reply(Chat.err("Usage: sel fill <block>"));
+                } else {
+                    String id = args[1].toLowerCase(java.util.Locale.ROOT);
+                    ctx.selFill(b, id.contains(":") ? id : "minecraft:" + id);
+                }
+            }
+            default -> ctx.reply(Chat.err(usage));
+        }
+    }
+
     private void fly(String[] args) {
         int[] f = ctx.playerFeet();
         if (args.length == 1) {

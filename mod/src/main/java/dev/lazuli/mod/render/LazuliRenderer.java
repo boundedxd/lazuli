@@ -82,6 +82,17 @@ public final class LazuliRenderer {
         // a finished or failed trip keeps its goal in the snapshot; a newer #goal must still show
         Goal goal = pathing && snap.goal() != null ? snap.goal() : pendingGoal.get();
         if (goal != null && LazuliConfig.renderGoal) drawGoal(mc, goal, width);
+        var sel = selection.get();
+        if (sel != null && LazuliConfig.renderSelection) {
+            int[] c1 = sel.pos1(), c2 = sel.pos2();
+            if (c1 != null) Gizmos.cuboid(new BlockPos(c1[0], c1[1], c1[2]), GizmoStyle.stroke(0xFF55FFFF, width));
+            if (c2 != null) Gizmos.cuboid(new BlockPos(c2[0], c2[1], c2[2]), GizmoStyle.stroke(0xFFFF55FF, width));
+            var b = sel.box();
+            if (b != null) {
+                Gizmos.cuboid(new AABB(b.minX(), b.minY(), b.minZ(), b.maxX() + 1, b.maxY() + 1, b.maxZ() + 1),
+                    GizmoStyle.stroke(0xFF55FFFF, width));
+            }
+        }
         for (var w : waypoints.get()) {
             BlockPos b = new BlockPos(w.x(), w.y(), w.z());
             boolean death = w.name().equals(dev.lazuli.core.waypoint.Waypoints.DEATH);
@@ -94,6 +105,12 @@ public final class LazuliRenderer {
     }
 
     private Supplier<List<dev.lazuli.core.waypoint.Waypoints.Waypoint>> waypoints = List::of;
+    private Supplier<dev.lazuli.core.build.Selection> selection = () -> null;
+
+    /** #sel's corners and box, to draw. */
+    public void selection(Supplier<dev.lazuli.core.build.Selection> selection) {
+        this.selection = selection;
+    }
 
     /** The waypoints to draw (this dimension's, or none when they're switched off). */
     public void waypoints(Supplier<List<dev.lazuli.core.waypoint.Waypoints.Waypoint>> waypoints) {

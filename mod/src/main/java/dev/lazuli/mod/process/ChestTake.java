@@ -1,7 +1,9 @@
 package dev.lazuli.mod.process;
 
 import dev.lazuli.core.inventory.ItemCount;
+import dev.lazuli.core.inventory.ItemKeys;
 import dev.lazuli.core.storage.ChestMemory;
+import dev.lazuli.mod.inventory.ClickDriver;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -12,16 +14,24 @@ import java.util.function.ToIntFunction;
 
 /**
  * Takes an item out of the nearest remembered chest (chestMemory, within chestRange) through {@link ContainerProcess};
- * a chest it couldn't get to or open is forgotten. Shared by #getitem and #brew.
+ * a chest it couldn't get to or open is forgotten. With {@code shulkers} on, also out of a shulker box in the inventory
+ * (placed, opened, picked up again), or a remembered chest's shulker box holding it (taken, then unpacked).
+ * Shared by #getitem, #brew, #enchant and restocking.
  */
 final class ChestTake {
     enum Result { RUNNING, DONE, CANCELLED }
+
+    private enum Mode { NONE, CHEST, BOX_FROM_CHEST, UNPACK }
 
     private final dev.lazuli.core.settings.Settings settings;
     private final ContainerProcess containers;
     private final Function<Minecraft, ChestMemory> chests;
     private final Function<Minecraft, String> dimension;
+    private final ShulkerUnpack unpack;
+    private Mode mode = Mode.NONE;
     private BlockPos at;
+    private String item;
+    private int n;
     private ToIntFunction<LocalPlayer> count;
     private int before;
 
@@ -31,26 +41,48 @@ final class ChestTake {
         this.containers = containers;
         this.chests = chests;
         this.dimension = dimension;
+        this.unpack = new ShulkerUnpack(containers.session(), settings, ClickDriver.get());
     }
 
     boolean active() {
-        return at != null;
+        return mode != Mode.NONE;
     }
 
     /**
-     * Starts taking {@code n} of {@code item} (an id, or "id@potion"); false if no remembered chest holds some.
+     * Starts taking {@code n} of {@code item} (an id, or "id@potion"); false if nothing known holds some.
      * @param count how many the player holds now (to tell whether it got any)
      */
     boolean start(Minecraft mc, LocalPlayer p, String item, int n, ToIntFunction<LocalPlayer> count) {
-        if (n <= 0 || !settings.chestMemory.get()) return false;
-        var mem = chests.apply(mc);
-        var bp = p.blockPosition();
-        var spot = mem.nearest(item, dimension.apply(mc), bp.getX(), bp.getY(), bp.getZ(), settings.chestRange.get());
-        if (spot == null) return false;
-        at = new BlockPos(spot.x(), spot.y(), spot.z());
+        if (n <= 0) return false;
+        this.item = item;
+        this.n = n;
         this.count = count;
         before = count.applyAsInt(p);
-        containers.start(mc, false, List.of(new ItemCount(item, Math.min(n, spot.count()))), at);
+        if (settings.chestMemory.get() && fromChest(mc, p, item, n)) {
+            mode = Mode.CHEST;
+            return true;
+        }
+        if (!settings.shulkers.get()) return false;
+        int slot = ShulkerUnpack.boxWith(p, item);
+        if (slot >= 0) {
+            unpack.start(p, slot, item, n);
+            mode = Mode.UNPACK;
+            return true;
+        }
+        if (settings.chestMemory.get() && fromChest(mc, p, ItemKeys.inShulker(item), 1)) {
+            mode = Mode.BOX_FROM_CHEST;
+            return true;
+        }
+        return false;
+    }
+
+    private boolean fromChest(Minecraft mc, LocalPlayer p, String what, int n) {
+        var mem = chests.apply(mc);
+        var bp = p.blockPosition();
+        var spot = mem.nearest(what, dimension.apply(mc), bp.getX(), bp.getY(), bp.getZ(), settings.chestRange.get());
+        if (spot == null) return false;
+        at = new BlockPos(spot.x(), spot.y(), spot.z());
+        containers.start(mc, false, List.of(new ItemCount(what, ItemKeys.isInShulker(what) ? 1 : Math.min(n, spot.count()))), at);
         if (!containers.active()) {
             mem.forget(spot.dim(), spot.x(), spot.y(), spot.z());
             at = null;
@@ -61,14 +93,36 @@ final class ChestTake {
 
     /** RUNNING while walking/taking; once it's over, how it went ({@link #got} says how many). */
     Result tick(Minecraft mc, LocalPlayer p) {
-        if (at == null) return Result.DONE;
-        if (containers.active()) return Result.RUNNING;
-        BlockPos was = at;
-        at = null;
-        if (containers.outcome() == ContainerProcess.Outcome.CANCELLED) return Result.CANCELLED;
-        // couldn't get to it or open it: don't count on that chest again
-        if (count.applyAsInt(p) <= before && containers.outcome() == ContainerProcess.Outcome.FAILED) {
-            chests.apply(mc).forget(dimension.apply(mc), was.getX(), was.getY(), was.getZ());
+        switch (mode) {
+            case NONE -> {
+                return Result.DONE;
+            }
+            case CHEST, BOX_FROM_CHEST -> {
+                if (containers.active()) return Result.RUNNING;
+                BlockPos was = at;
+                at = null;
+                if (containers.outcome() == ContainerProcess.Outcome.CANCELLED) {
+                    mode = Mode.NONE;
+                    return Result.CANCELLED;
+                }
+                boolean gotBox = mode == Mode.BOX_FROM_CHEST && ShulkerUnpack.boxWith(p, item) >= 0;
+                // couldn't get to it or open it: don't count on that chest again
+                if (containers.outcome() == ContainerProcess.Outcome.FAILED && (mode == Mode.CHEST ? count.applyAsInt(p) <= before : !gotBox)) {
+                    chests.apply(mc).forget(dimension.apply(mc), was.getX(), was.getY(), was.getZ());
+                }
+                if (gotBox) {
+                    unpack.start(p, ShulkerUnpack.boxWith(p, item), item, n);
+                    mode = Mode.UNPACK;
+                    return Result.RUNNING;
+                }
+                mode = Mode.NONE;
+                return Result.DONE;
+            }
+            case UNPACK -> {
+                if (unpack.tick(mc, p) == ShulkerUnpack.Result.RUNNING) return Result.RUNNING;
+                mode = Mode.NONE;
+                return Result.DONE;
+            }
         }
         return Result.DONE;
     }
@@ -79,7 +133,9 @@ final class ChestTake {
     }
 
     void stop() {
-        if (at != null) containers.stop(false);
+        if (mode == Mode.CHEST || mode == Mode.BOX_FROM_CHEST) containers.stop(false);
+        if (mode == Mode.UNPACK) unpack.stop();
+        mode = Mode.NONE;
         at = null;
     }
 }
