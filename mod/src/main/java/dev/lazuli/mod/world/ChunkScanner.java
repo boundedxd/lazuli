@@ -18,10 +18,16 @@ public final class ChunkScanner {
      * sections whose blocks are all plain (full cubes, air, water).
      */
     public static Scan scan(LevelChunk chunk, int sectionCount) {
+        return scan(chunk, sectionCount, false);
+    }
+
+    /** @param ores note the ores too (oreMemory; costs a bit on every chunk load) */
+    public static Scan scan(LevelChunk chunk, int sectionCount, boolean ores) {
+        boolean noteOres = ores;
         LevelChunkSection[] sections = chunk.getSections();
         byte[][] out = new byte[sectionCount][];
         short[][] physics = new short[sectionCount][];
-        it.unimi.dsi.fastutil.longs.LongArrayList ores = new it.unimi.dsi.fastutil.longs.LongArrayList();
+        it.unimi.dsi.fastutil.longs.LongArrayList found = new it.unimi.dsi.fastutil.longs.LongArrayList();
         java.util.List<net.minecraft.world.level.block.Block> oreBlocks = new java.util.ArrayList<>();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         for (int i = 0; i < Math.min(sectionCount, sections.length); i++) {
@@ -29,7 +35,7 @@ public final class ChunkScanner {
             if (sec == null || sec.hasOnlyAir()) continue;
             byte[] kinds = new byte[4096];
             // ores noted on the way (Baritone-style memory): only in sections whose palette has any
-            boolean mayHaveOre = sec.getStates().maybeHas(st -> OreIndex.ORES.contains(st.getBlock()));
+            boolean mayHaveOre = noteOres && sec.getStates().maybeHas(st -> OreIndex.ORES.contains(st.getBlock()));
             int y0 = chunk.getSectionYFromSectionIndex(i) << 4;
             for (int y = 0; y < 16; y++)
                 for (int z = 0; z < 16; z++)
@@ -37,7 +43,7 @@ public final class ChunkScanner {
                         BlockState state = sec.getBlockState(x, y, z);
                         int idx = WorldCache.index(x, y, z);
                         if (mayHaveOre && OreIndex.ORES.contains(state.getBlock())) {
-                            ores.add(dev.lazuli.core.world.Pos.pack(x0 + x, y0 + y, z0 + z));
+                            found.add(dev.lazuli.core.world.Pos.pack(x0 + x, y0 + y, z0 + z));
                             oreBlocks.add(state.getBlock());
                         }
                         kinds[idx] = (byte) BlockClassifier.classify(state).ordinal();
@@ -49,6 +55,6 @@ public final class ChunkScanner {
                     }
             out[i] = kinds;
         }
-        return new Scan(out, physics, ores.toLongArray(), oreBlocks.toArray(new net.minecraft.world.level.block.Block[0]));
+        return new Scan(out, physics, found.toLongArray(), oreBlocks.toArray(new net.minecraft.world.level.block.Block[0]));
     }
 }

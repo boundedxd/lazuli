@@ -257,9 +257,11 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
                     }
                 });
             }
-            known.clear();
-            for (double[] e : best) known.add((long) e[1]);
-            return;
+            if (!best.isEmpty()) { // none remembered (turned on after these chunks loaded): scan as usual
+                known.clear();
+                for (double[] e : best) known.add((long) e[1]);
+                return;
+            }
         }
         int r = mc.options.getEffectiveRenderDistance() + 1;
         int pcx = mc.player.blockPosition().getX() >> 4, pcz = mc.player.blockPosition().getZ() >> 4;

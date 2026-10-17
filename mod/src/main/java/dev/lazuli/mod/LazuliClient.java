@@ -996,9 +996,9 @@ public final class LazuliClient implements ClientModInitializer {
 			if (session.snapshot().state() == PathingSession.State.PATHING) session.stop();
 		}
 		int cx = chunk.getPos().x, cz = chunk.getPos().z;
-		ChunkScanner.Scan scan = ChunkScanner.scan(chunk, cache.sectionCount());
+		ChunkScanner.Scan scan = ChunkScanner.scan(chunk, cache.sectionCount(), settings.oreMemory.get());
 		cache.putChunk(cx, cz, scan.kinds(), scan.physics());
-		ores.putChunk(cx, cz, scan.ores(), scan.oreBlocks());
+		if (settings.oreMemory.get()) ores.putChunk(cx, cz, scan.ores(), scan.oreBlocks());
 		session.regionChanged(cx * 16, cache.minY(), cz * 16, cx * 16 + 15, cache.maxY(), cz * 16 + 15);
 		mine.onChunkLoad(chunk);
 		explore.onChunkLoad(chunk);
@@ -1016,7 +1016,7 @@ public final class LazuliClient implements ClientModInitializer {
 	public static void onBlockChanged(ClientLevel level, BlockPos pos, BlockState state) {
 		LazuliClient self = instance;
 		if (self == null || level != self.lastLevel) return;
-		self.ores.set(dev.lazuli.core.world.Pos.pack(pos.getX(), pos.getY(), pos.getZ()), pos.getX(), pos.getZ(), state);
+		if (self.settings.oreMemory.get()) self.ores.set(dev.lazuli.core.world.Pos.pack(pos.getX(), pos.getY(), pos.getZ()), pos.getX(), pos.getZ(), state);
 		self.mine.onBlockChanged(pos, state);
 		if (self.settings.portalMemory.get() && state.is(net.minecraft.world.level.block.Blocks.NETHER_PORTAL)) {
 			Minecraft mc = Minecraft.getInstance();

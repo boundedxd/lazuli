@@ -186,8 +186,8 @@ public final class Settings {
     public final Setting<Boolean> getItemNearby = bool("getItemNearby", true);
     /** The server hides ores (anti-xray): only ores next to air or water are real, the rest are looked for by digging. */
     public final Setting<Boolean> antiXray = bool("antiXray", false);
-    /** Remember every ore seen as chunks load (also after they unload): #mine finds ores at once, Baritone-style. */
-    public final Setting<Boolean> oreMemory = bool("oreMemory", true);
+    /** Remember every ore seen as chunks load (also after they unload): #mine finds ores at once. Costs a little on every chunk load. */
+    public final Setting<Boolean> oreMemory = bool("oreMemory", false);
     /** #mine / #getitem with none found: strip-mine at the ore's best level, or explore for anything else. */
     public final Setting<Boolean> mineSearch = bool("mineSearch", true);
     /** Long tunnels of the strip mine, in blocks. */
