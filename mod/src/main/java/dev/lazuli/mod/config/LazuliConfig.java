@@ -190,6 +190,7 @@ public final class LazuliConfig implements WalksyLibApi {
                 .group(OptionGroup.builder("Restock")
                     .option(bool(s.restock, "While busy, refill what's running low from chests you've opened (or shulker boxes); the job waits. Refills when under half."))
                     .option(bool(s.restockFollow, "Also restock while following someone (#follow)."))
+                    .option(bool(s.blockBudget, "With building blocks not restocked: a path needing more blocks than you carry goes the way round without placing instead (when there is one)."))
                     .build())
                 .group(OptionGroup.builder("What")
                     .option(bool(s.restockFood, "Keep food (best first: golden carrots, steak...)."))

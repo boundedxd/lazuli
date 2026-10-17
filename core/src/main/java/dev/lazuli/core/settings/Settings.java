@@ -151,6 +151,8 @@ public final class Settings {
     public final Setting<Integer> restockTorchCount = integer("restockTorchCount", 16, 1, 64);
     public final Setting<Boolean> restockBlocks = bool("restockBlocks", true);
     public final Setting<Integer> restockBlocksCount = integer("restockBlocksCount", 64, 1, 256);
+    /** Paths that need more blocks than you carry (and won't restock blocks) look for a way round without placing. */
+    public final Setting<Boolean> blockBudget = bool("blockBudget", true);
     /** Restocks while following someone (#follow) too. */
     public final Setting<Boolean> restockFollow = bool("restockFollow", false);
     /** Other items to keep, item:amount (the things with their own toggle are left out of this). */

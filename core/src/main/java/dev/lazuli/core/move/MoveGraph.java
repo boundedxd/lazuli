@@ -70,6 +70,19 @@ public final class MoveGraph implements Graph {
         this.parkour = parkour;
     }
 
+    private Interaction interaction;
+
+    /** Remembers what it was built with (for {@link #interaction()}). */
+    public MoveGraph withInteraction(Interaction in) {
+        this.interaction = in;
+        return this;
+    }
+
+    /** What it was built with, or null when not said. */
+    public Interaction interaction() {
+        return interaction;
+    }
+
     /** Allows drops up to {@code blocks} (more than maxFall) onto solid footing, clutched with a water bucket. */
     public MoveGraph withClutch(int blocks) {
         this.clutchFall = blocks > maxFall ? blocks : 0;

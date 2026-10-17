@@ -155,6 +155,40 @@ class PathingSessionTest {
         assertTrue(Pos.y(end) < 50, "heads down: " + Pos.toString(end));
     }
 
+    /** Floor 0..30 x 0..60 with a 7 wide gap (too far to jump) across x 10..16 except a way round at z 57..60; bridging is shorter. */
+    private PathingSession gapSession(int blocks, boolean restockBlocks) {
+        GridWorld w = GridWorld.flatFloor(0, 0, 30, 60);
+        w.fill(10, -3, 0, 16, 0, 56, BlockKind.AIR);
+        Settings st = new Settings();
+        st.restockBlocks.set(restockBlocks);
+        dev.lazuli.core.move.Interaction in = new dev.lazuli.core.move.Interaction(false, true, blocks, p -> 8);
+        PathingSession s = new PathingSession(w, () -> -64, () -> 319, st, Runnable::run, msgs::add, () -> in);
+        s.start(new GoalBlock(20, 1, 2), false, Pos.pack(0, 1, 2));
+        assertEquals(PathingSession.State.PATHING, s.snapshot().state(), msgs.toString());
+        return s;
+    }
+
+    private static int placements(PathingSession s, BlockView w) {
+        List<Long> p = s.snapshot().path();
+        int n = 0;
+        for (int i = 0; i + 1 < p.size(); i++) {
+            for (var a : dev.lazuli.core.move.Digging.actions(w, p.get(i), p.get(i + 1))) if (a.place()) n++;
+        }
+        return n;
+    }
+
+    @Test
+    void bridgesOnlyWithTheBlocksItHasWhenItWontRestock() {
+        GridWorld w = GridWorld.flatFloor(0, 0, 30, 60);
+        w.fill(10, -3, 0, 16, 0, 56, BlockKind.AIR);
+        PathingSession plenty = gapSession(64, false);
+        assertTrue(placements(plenty, w) >= 7, "bridges straight over: " + plenty.snapshot().path().size());
+        PathingSession one = gapSession(1, false);
+        assertTrue(placements(one, w) <= 1, "1 block: walks round, " + placements(one, w) + " placed");
+        PathingSession restocks = gapSession(1, true);
+        assertTrue(placements(restocks, w) >= 7, "restocking blocks: bridges anyway");
+    }
+
     @Test
     void restartRecoversFromADeadWorkerKeepingTheTrip() {
         // stuck on a hung worker: a fresh thread plans the same trip again, and processes waiting on it never notice

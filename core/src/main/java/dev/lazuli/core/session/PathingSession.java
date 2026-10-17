@@ -7,6 +7,7 @@ import dev.lazuli.core.goal.GoalNear;
 import dev.lazuli.core.goal.GoalXZ;
 import dev.lazuli.core.move.Hazards;
 import dev.lazuli.core.move.Interaction;
+import dev.lazuli.core.move.Digging;
 import dev.lazuli.core.move.MoveGraph;
 import dev.lazuli.core.move.SafeSpotFinder;
 import dev.lazuli.core.planner.LazyDStarLite;
@@ -217,8 +218,12 @@ public final class PathingSession {
         Interaction in = interaction.get();
         in = new Interaction(in.allowBreak() && settings.allowBreak.get(), in.allowPlace() && settings.allowPlace.get(),
             in.throwaways(), in.breakTime());
+        return graphFor(in);
+    }
+
+    private MoveGraph graphFor(Interaction in) {
         return new MoveGraph(world, settings.maxFallHeight.get(), settings.allowSprint.get(),
-            settings.heuristicWeight.get(), settings.allowParkour.get(), in).withClutch(clutchFall)
+            settings.heuristicWeight.get(), settings.allowParkour.get(), in).withClutch(clutchFall).withInteraction(in)
             .withHazards(settings.avoidMobs.get() ? hazards : Hazards.NONE, settings.avoidLava.get() ? LAVA_EDGE : 0);
     }
 
@@ -530,7 +535,41 @@ public final class PathingSession {
         if (!quiet) messages.accept(Chat.err(r.status() == PlanResult.Status.NO_PATH ? "Goal unreachable" : "Gave up: search budget exceeded"));
     }
 
+    /**
+     * A search, then, when the path places more blocks than the player has and they won't be restocked (restock or
+     * its blocks off), the same again without placing: the way round a gap beats bridging halfway and planning again
+     * with none left. No way round: the first path stands.
+     */
     private PlanResult search(long nanos) {
+        PlanResult r = searchOnce(nanos);
+        Interaction in = graph.interaction();
+        if (r.status() != PlanResult.Status.FOUND || in == null || !in.canPlace() || !settings.blockBudget.get()
+            || graph == noWayRound || settings.restock.get() && settings.restockBlocks.get()
+            || placements(r.path()) <= in.throwaways()) return r;
+        MoveGraph had = graph;
+        LazyDStarLite hadPlanner = planner;
+        graph = graphFor(new Interaction(in.allowBreak(), false, in.throwaways(), in.breakTime()));
+        createPlanner();
+        PlanResult round = searchOnce(nanos);
+        if (round.status() == PlanResult.Status.FOUND || stale()) return round;
+        graph = had;
+        planner = hadPlanner;
+        noWayRound = had; // don't look again on every replan of this trip
+        return r;
+    }
+
+    /** The graph whose trip was found to have no way without placing (worker thread only). */
+    private MoveGraph noWayRound;
+
+    private int placements(List<Long> path) {
+        int n = 0;
+        for (int i = 0; i + 1 < path.size(); i++) {
+            for (Digging.Action a : Digging.actions(world, path.get(i), path.get(i + 1))) if (a.place()) n++;
+        }
+        return n;
+    }
+
+    private PlanResult searchOnce(long nanos) {
         searching = planner;
         if (stale()) planner.cancel(); // a stop that came before this search started
         try {
