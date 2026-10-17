@@ -384,9 +384,10 @@ public final class LazuliConfig implements WalksyLibApi {
         }, java.util.List.of(), v -> {
             if (routines == null) return;
             java.util.List<String> out = new java.util.ArrayList<>();
+            // a blank one is a step still being typed (the add button makes one): kept, skipped when run
             for (String c : v) {
                 String t = c.trim();
-                if (!t.isEmpty()) out.add(t.startsWith(prefix) ? t : prefix + t);
+                out.add(t.isEmpty() || t.startsWith(prefix) ? t : prefix + t);
             }
             routines.set(name, out);
         }).reorderable().allowDuplicates()

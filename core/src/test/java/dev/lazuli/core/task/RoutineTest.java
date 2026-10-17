@@ -130,4 +130,12 @@ class RoutineTest {
         assertEquals(List.of("a", "iron", "c"), List.copyOf(r.list().keySet()));
         assertEquals(List.of("#mine 8 iron_ore", "#deposit"), r.get("iron"));
     }
+
+    @Test
+    void blankStepsBeingTypedAreSkipped() {
+        RoutineRunner r = new RoutineRunner();
+        r.start("x", List.of("#farm", "", "  ", "#deposit"), 1);
+        List<String> ran = drive(r, 5, 100, new ArrayList<>());
+        assertEquals(List.of("#farm", "#deposit"), ran);
+    }
 }

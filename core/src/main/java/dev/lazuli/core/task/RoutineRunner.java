@@ -23,7 +23,7 @@ public final class RoutineRunner {
     /** Starts {@code steps}, {@code times} times over (0 or less: forever). */
     public void start(String name, List<String> steps, int times) {
         this.name = name;
-        this.steps = List.copyOf(steps);
+        this.steps = steps.stream().filter(st -> !st.isBlank()).toList();
         this.rounds = times <= 0 ? -1 : times;
         this.step = -1;
         this.round = 1;
