@@ -45,6 +45,11 @@ public final class LazuliConfig implements WalksyLibApi {
 
     /** Set by the client: stops the current path. */
     public static Runnable stopAction = () -> {};
+    /** Set by the client: the saved routines, and runs one (name, times; 0 forever). */
+    public static volatile dev.lazuli.core.task.Routines routines;
+    public static java.util.function.BiConsumer<String, Integer> runRoutine = (n, t) -> {};
+    /** How many times each routine's Run button runs it (this session). */
+    private static final java.util.Map<String, Integer> routineTimes = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Override
     public Config define() {
@@ -303,6 +308,21 @@ public final class LazuliConfig implements WalksyLibApi {
                     }).build())
                     .build())
                 .build())
+            .category(Category.builder("Routines")
+                .group(OptionGroup.builder("Routines")
+                    .option(Options.ofPageList("Routines", LazuliConfig::routineNames, java.util.List.of(), LazuliConfig::setRoutineNames)
+                        .newEntryName("routine")
+                        .noSpaces()
+                        .onRemoved(n -> {
+                            if (routines != null) routines.remove(n);
+                        })
+                        .onRenamed((from, to) -> {
+                            if (routines != null) routines.rename(from, to);
+                        })
+                        .options(LazuliConfig::routinePage)
+                        .description(OptionDescription.ofText(() -> "Saved lists of commands run one after another (also #routine). A job with no end (farm, tunnel, mine with no count) moves on when the inventory is full.")).build())
+                    .build())
+                .build())
             .category(Category.builder("Visuals")
                 .group(OptionGroup.builder("World")
                     .option(bool(s.renderPath, "Draw the planned path."))
@@ -338,6 +358,46 @@ public final class LazuliConfig implements WalksyLibApi {
                     .build())
                 .build())
             .build();
+    }
+
+    private static java.util.List<String> routineNames() {
+        return routines == null ? java.util.List.of() : java.util.List.copyOf(routines.list().keySet());
+    }
+
+    /** The list edited: new names become empty routines, missing ones are deleted. */
+    private static void setRoutineNames(java.util.List<String> names) {
+        if (routines == null) return;
+        java.util.Set<String> want = new java.util.HashSet<>();
+        for (String n : names) want.add(n.toLowerCase(java.util.Locale.ROOT));
+        for (String n : routines.list().keySet()) if (!want.contains(n)) routines.remove(n);
+        for (String n : names) if (routines.get(n) == null) routines.set(n, java.util.List.of());
+    }
+
+    /** One routine's page: its steps (in order), how many runs, Run and Stop. */
+    private static java.util.List<Option<?>> routinePage(String name) {
+        String prefix = SETTINGS.prefix.get();
+        Option<java.util.List<String>> steps = Options.ofStringList("Steps", () -> {
+            java.util.List<String> st = routines == null ? null : routines.get(name);
+            java.util.List<String> out = new java.util.ArrayList<>();
+            if (st != null) for (String c : st) out.add(c.startsWith(prefix) ? c.substring(prefix.length()) : c);
+            return out;
+        }, java.util.List.of(), v -> {
+            if (routines == null) return;
+            java.util.List<String> out = new java.util.ArrayList<>();
+            for (String c : v) {
+                String t = c.trim();
+                if (!t.isEmpty()) out.add(t.startsWith(prefix) ? t : prefix + t);
+            }
+            routines.set(name, out);
+        }).reorderable().allowDuplicates()
+            .description(OptionDescription.ofText(() -> "Commands without the " + prefix + ", in order (drag to reorder): mine 8 iron_ore, smelt raw_iron 8, deposit...")).build();
+        Option<Integer> times = Options.ofNumber("Times", () -> routineTimes.getOrDefault(name, 1), 1, v -> routineTimes.put(name, v))
+            .range(0, 64, 1).description(OptionDescription.ofText(() -> "How many times Run goes through it (0: forever).")).build();
+        Option<Runnable> run = Options.ofButton("Run", () -> runRoutine.accept(name, routineTimes.getOrDefault(name, 1)))
+            .description(OptionDescription.ofText(() -> "Start it now.")).build();
+        Option<Runnable> stop = Options.ofButton("Stop", () -> stopAction.run())
+            .description(OptionDescription.ofText(() -> "Stop whatever's running.")).build();
+        return java.util.List.of(steps, times, run, stop);
     }
 
     /** A comma-separated id setting as a picker list (ids get their namespace so the picker knows them). */

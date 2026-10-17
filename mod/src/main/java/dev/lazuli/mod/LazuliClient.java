@@ -144,6 +144,15 @@ public final class LazuliClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		instance = this;
 		LazuliConfig.stopAction = () -> stopAll(true);
+		LazuliConfig.routines = routines;
+		LazuliConfig.runRoutine = (name, times) -> {
+			java.util.List<String> steps = routines.get(name);
+			if (steps == null || steps.isEmpty()) chat(Chat.err("Routine {} has no steps", name));
+			else {
+				routine.start(name, steps, times);
+				chat(Chat.ok("Routine {}: {} steps{}", name, steps.size(), times <= 0 ? ", forever" : times > 1 ? ", " + times + " times" : ""));
+			}
+		};
 		recorder = new TraceRecorder(FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("traces"), this::chat);
 
 		session = new PathingSession(cache, cache::minY, cache::maxY, settings, worker, this::chat,

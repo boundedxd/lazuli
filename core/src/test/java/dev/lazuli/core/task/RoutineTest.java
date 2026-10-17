@@ -117,4 +117,17 @@ class RoutineTest {
         assertEquals(List.of("#farm", "#deposit", "#farm", "#deposit", "#farm"), ran);
         assertEquals(2, stops[0]);
     }
+
+    @Test
+    void renamingKeepsTheStepsAndTheOrder() {
+        Routines r = new Routines(null);
+        r.set("a", List.of("#farm"));
+        r.set("b", List.of("#mine 8 iron_ore", "#deposit"));
+        r.set("c", List.of());
+        assertTrue(r.rename("b", "iron"));
+        assertFalse(r.rename("a", "c"), "taken");
+        assertFalse(r.rename("nope", "x"));
+        assertEquals(List.of("a", "iron", "c"), List.copyOf(r.list().keySet()));
+        assertEquals(List.of("#mine 8 iron_ore", "#deposit"), r.get("iron"));
+    }
 }

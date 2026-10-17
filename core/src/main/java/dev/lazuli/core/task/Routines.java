@@ -40,6 +40,18 @@ public final class Routines {
         return had;
     }
 
+    /** Renames a routine, keeping its place in the list; false when there's none by that name or the new one's taken. */
+    public synchronized boolean rename(String from, String to) {
+        String f = from.toLowerCase(Locale.ROOT), t = to.toLowerCase(Locale.ROOT);
+        if (!all.containsKey(f) || !f.equals(t) && all.containsKey(t)) return false;
+        Map<String, List<String>> next = new LinkedHashMap<>();
+        all.forEach((k, v) -> next.put(k.equals(f) ? t : k, v));
+        all.clear();
+        all.putAll(next);
+        save();
+        return true;
+    }
+
     public synchronized List<String> get(String name) {
         return all.get(name.toLowerCase(Locale.ROOT));
     }
