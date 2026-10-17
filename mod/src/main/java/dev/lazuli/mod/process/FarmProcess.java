@@ -129,6 +129,11 @@ public final class FarmProcess implements Process {
     private void work(Minecraft mc, LocalPlayer player) {
         switch (job.kind()) {
             case PICKUP -> {
+                // got there and it's still lying there (inventory full, in water...): leave it, don't re-path every tick
+                if (trip.ended() == PathingSession.State.ARRIVED) {
+                    giveUp(player);
+                    return;
+                }
                 if (!trip.running()) trip.go(new GoalNear(job.pos().getX(), job.pos().getY(), job.pos().getZ(), 1), player);
                 if (trip.ended() == PathingSession.State.FAILED) giveUp(player);
             }
@@ -148,7 +153,18 @@ public final class FarmProcess implements Process {
             }
             case PLANT -> {
                 if (trip.running()) return;
-                int slot = seedSlot(player, mc.level.getBlockState(job.pos()).is(Blocks.SOUL_SAND));
+                boolean wart = mc.level.getBlockState(job.pos()).is(Blocks.SOUL_SAND);
+                int slot = seedSlot(player, wart, 9);
+                if (slot < 0 && settings.allowInventory.get()) {
+                    // seeds only in the main inventory: swap some into the selected hotbar slot, plant next tick
+                    int inv = seedSlot(player, wart, 36);
+                    var clicks = dev.lazuli.mod.inventory.ClickDriver.get();
+                    if (inv >= 9) {
+                        if (!clicks.busy()) clicks.add(player.inventoryMenu.containerId,
+                            java.util.List.of(dev.lazuli.core.inventory.Click.swap(inv, player.getInventory().getSelectedSlot())));
+                        return;
+                    }
+                }
                 if (slot < 0) {
                     job = null; // nothing to plant here
                     release();
@@ -193,7 +209,8 @@ public final class FarmProcess implements Process {
     private void scan(Minecraft mc, LocalPlayer player) {
         lastScan = player.tickCount;
         jobs.clear();
-        boolean seeds = seedSlot(player, false) >= 0, wart = seedSlot(player, true) >= 0;
+        boolean seeds = seedSlot(player, false, settings.allowInventory.get() ? 36 : 9) >= 0,
+            wart = seedSlot(player, true, settings.allowInventory.get() ? 36 : 9) >= 0;
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
         for (int x = center.getX() - range; x <= center.getX() + range; x++)
             for (int z = center.getZ() - range; z <= center.getZ() + range; z++)
@@ -235,7 +252,12 @@ public final class FarmProcess implements Process {
 
     /** Hotbar slot with something to plant: nether wart for soul sand, otherwise crop seeds; -1 if none. */
     private static int seedSlot(LocalPlayer player, boolean soulSand) {
-        for (int i = 0; i < 9; i++) {
+        return seedSlot(player, soulSand, 9);
+    }
+
+    /** @param slots 9: the hotbar; 36: the main inventory too (slots 9-35) */
+    private static int seedSlot(LocalPlayer player, boolean soulSand, int slots) {
+        for (int i = 0; i < slots; i++) {
             ItemStack s = player.getInventory().getItem(i);
             if (!(s.getItem() instanceof BlockItem bi)) continue;
             Block b = bi.getBlock();

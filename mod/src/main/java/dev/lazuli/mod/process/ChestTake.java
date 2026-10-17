@@ -107,7 +107,9 @@ final class ChestTake {
                 }
                 boolean gotBox = mode == Mode.BOX_FROM_CHEST && ShulkerUnpack.boxWith(p, item) >= 0;
                 // couldn't get to it or open it: don't count on that chest again
-                if (containers.outcome() == ContainerProcess.Outcome.FAILED && (mode == Mode.CHEST ? count.applyAsInt(p) <= before : !gotBox)) {
+                // (opened but got nothing, say with a full inventory: the chest is fine)
+                if (containers.outcome() == ContainerProcess.Outcome.FAILED && !containers.opened()
+                    && (mode == Mode.CHEST ? count.applyAsInt(p) <= before : !gotBox)) {
                     chests.apply(mc).forget(dimension.apply(mc), was.getX(), was.getY(), was.getZ());
                 }
                 if (gotBox) {

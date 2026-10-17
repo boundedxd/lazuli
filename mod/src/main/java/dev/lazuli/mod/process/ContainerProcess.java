@@ -194,6 +194,16 @@ public final class ContainerProcess implements Process {
         LocalPlayer p = mc.player;
         pos = at != null ? at : nearest(mc, p);
         outcome = Outcome.NONE;
+        opened = false;
+        if (pos != null && lidBlocked(mc, pos)) {
+            outcome = Outcome.FAILED;
+            chat.accept(Chat.err("The chest at {} {} {} can't open: there's a block on its lid", pos.getX(), pos.getY(), pos.getZ()));
+            if (!queue.isEmpty()) {
+                anyFailed = true;
+                next(mc);
+            }
+            return;
+        }
         if (pos == null) {
             outcome = Outcome.FAILED;
             chat.accept(Chat.err("No chest, barrel, shulker box or ender chest nearby"));
@@ -239,6 +249,7 @@ public final class ContainerProcess implements Process {
             }
             case OPEN -> {
                 if (p.containerMenu != p.inventoryMenu) {
+                    opened = true;
                     input.release();
                     enter(Phase.MOVE, p);
                     return;
@@ -247,8 +258,10 @@ public final class ContainerProcess implements Process {
                     end(Outcome.FAILED, Chat.err("The container wouldn't open"));
                     return;
                 }
-                // once clicked, keep still and wait for the menu to arrive
-                if (!acted) acted = Aim.useOn(mc, p, pos, null, input, settings);
+                // once clicked, keep still and wait for the menu to arrive; no menu after a second (the click missed
+                // or the server said no under lag): click again
+                if (acted && p.tickCount - clickedAt > REOPEN_TICKS) acted = false;
+                if (!acted && (acted = Aim.useOn(mc, p, pos, null, input, settings))) clickedAt = p.tickCount;
             }
             case MOVE -> {
                 if (p.containerMenu == p.inventoryMenu) {
@@ -311,10 +324,17 @@ public final class ContainerProcess implements Process {
     }
 
     private void end(Outcome how, String msg) {
+        boolean was = phase != Phase.IDLE;
         phase = Phase.IDLE;
         outcome = how;
         trip.cancel();
         input.release();
+        if (how == Outcome.CANCELLED && was) {
+            // stopped with the chest open: close it, and no clicks left to land in it
+            clicks.cancel();
+            LocalPlayer p = Minecraft.getInstance().player;
+            if (p != null && p.containerMenu != p.inventoryMenu) p.closeContainer();
+        }
         if (msg != null) chat.accept(msg);
         if (how == Outcome.CANCELLED) {
             queue.clear();
@@ -324,6 +344,22 @@ public final class ContainerProcess implements Process {
             outcome = Outcome.NONE;
             next(Minecraft.getInstance());
         }
+    }
+
+    private static final int REOPEN_TICKS = 20;
+    private int clickedAt;
+    /** The last run got the container open (a failure after that is about the items, not the chest). */
+    private boolean opened;
+
+    public boolean opened() {
+        return opened;
+    }
+
+    /** A chest (or ender chest) with a solid block on top: the game won't open it. */
+    private static boolean lidBlocked(Minecraft mc, BlockPos bp) {
+        BlockEntity be = mc.level.getBlockEntity(bp);
+        return (be instanceof ChestBlockEntity || be instanceof EnderChestBlockEntity)
+            && mc.level.getBlockState(bp.above()).isRedstoneConductor(mc.level, bp.above());
     }
 
     /** The nearest storage block in loaded chunks that can be opened (a chest's lid must be free), or null. */

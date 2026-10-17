@@ -232,6 +232,11 @@ public final class Guard implements Process {
         since = flees = 0;
         tookOverAt = session.snapshot().trip();
         trip.clear();
+        if (p.containerMenu != p.inventoryMenu) {
+            // a chest or table open when it came: shut it, or it can't run or fight
+            dev.lazuli.mod.inventory.ClickDriver.get().cancel();
+            p.closeContainer();
+        }
         if (d == Danger.OUTMATCHED) {
             chat.accept(Chat.warn("Too many monsters: running"));
         } else if (d == Danger.FIGHT) {

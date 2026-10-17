@@ -64,7 +64,10 @@ public final class RestockProcess implements Process {
         this.chests = chests;
         this.dimension = dimension;
         this.jobRunning = jobRunning;
-        this.containers = new ContainerProcess(session, settings, clicks, s -> {});
+        // its own failures said (walked there and nothing happened, silently, before)
+        this.containers = new ContainerProcess(session, settings, clicks, s -> {
+            if (s.contains(Chat.RED)) chat.accept(s);
+        });
         this.take = new ChestTake(settings, containers, chests, dimension);
         this.trip = new Trip(session);
     }
@@ -92,10 +95,18 @@ public final class RestockProcess implements Process {
         active = false;
     }
 
+    private LocalPlayer lastPlayer;
+
     @Override
     public void tick(Minecraft mc) {
         containers.tick(mc);
         LocalPlayer p = mc.player;
+        if (p != lastPlayer) {
+            // a new player (respawned, rejoined): its tick count starts again at 0, so the waits do too
+            lastPlayer = p;
+            nextCheck = 0;
+            skipUntil.clear();
+        }
         if (p == null || mc.level == null) {
             if (active) stop(false);
             return;

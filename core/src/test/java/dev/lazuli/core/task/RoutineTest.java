@@ -138,4 +138,15 @@ class RoutineTest {
         List<String> ran = drive(r, 5, 100, new ArrayList<>());
         assertEquals(List.of("#farm", "#deposit"), ran);
     }
+
+    @Test
+    void aForeverRoutineWhoseStepsAllFailStops() {
+        RoutineRunner r = new RoutineRunner();
+        r.start("broken", List.of("#mine nothing", "#deposit"), 0);
+        List<String> msgs = new ArrayList<>();
+        List<String> ran = drive(r, 0, 200, msgs);
+        assertEquals(List.of("#mine nothing", "#deposit"), ran);
+        assertEquals(List.of("broken stopped: none of its steps did anything"), msgs);
+        assertFalse(r.running());
+    }
 }

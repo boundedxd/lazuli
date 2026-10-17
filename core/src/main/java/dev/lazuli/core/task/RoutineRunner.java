@@ -19,6 +19,8 @@ public final class RoutineRunner {
     private int rounds;
     private int step = -1, waited, round;
     private boolean started;
+    /** Some step of this round kept Lazuli busy. */
+    private boolean anyBusy;
 
     /** Starts {@code steps}, {@code times} times over (0 or less: forever). */
     public void start(String name, List<String> steps, int times) {
@@ -28,6 +30,7 @@ public final class RoutineRunner {
         this.step = -1;
         this.round = 1;
         this.started = false;
+        this.anyBusy = false;
     }
 
     public void stop() {
@@ -70,6 +73,7 @@ public final class RoutineRunner {
             }
             if (busy) {
                 started = true;
+                anyBusy = true;
                 return null;
             }
             if (!started && ++waited < START_TICKS) return null;
@@ -77,6 +81,13 @@ public final class RoutineRunner {
         // on to the next step (or the next round)
         step++;
         if (step >= steps.size()) {
+            if (!anyBusy && (rounds < 0 || rounds > 1)) {
+                // a whole round where no step got going (each failed straight away): don't spin through it again
+                String why = (name == null ? "Queue" : name) + " stopped: none of its steps did anything";
+                stop();
+                return why;
+            }
+            anyBusy = false;
             if (rounds > 0 && --rounds == 0) {
                 String done = (name == null ? "Queue" : name) + " done";
                 stop();
