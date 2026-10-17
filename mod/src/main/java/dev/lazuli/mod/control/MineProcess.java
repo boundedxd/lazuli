@@ -350,7 +350,6 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         if (player.onGround()) {
             BlockPos direct = reachable(mc, player);
             if (direct != null) {
-                if (session.snapshot().state() == PathingSession.State.PATHING) session.stop(true);
                 beginBreak(direct);
                 breakTick(mc, player);
                 return;
@@ -494,10 +493,19 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     }
 
     private void beginBreak(BlockPos pos) {
+        stopTrip();
         phase = Phase.BREAK;
         breaking = pos;
         breakTicks = 0;
         tripStart = -1;
+    }
+
+    /**
+     * No trip of its own while it aims and breaks: one still being planned would be followed a tick later, and the
+     * path follower wipes the block to break every tick and fights over the keys (it just stood there).
+     */
+    private void stopTrip() {
+        if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
     }
 
     private void breakTick(Minecraft mc, LocalPlayer player) {
@@ -518,6 +526,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             release();
             return;
         }
+        stopTrip();
         Vec3 eye = player.getEyePosition();
         float[] aim = aimAt(mc, player, eye, breaking);
         if (aim == null) {

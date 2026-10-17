@@ -82,7 +82,13 @@ public final class CraftProcess implements Process {
 
     /** @param items ids and how many of each to make (a negative count: one craft) */
     public void start(Minecraft mc, List<ItemCount> items) {
+        start(mc, items, false);
+    }
+
+    /** @param keepTable leave a table it places standing (more crafting follows: {@link #pickUpTable} after) */
+    public void start(Minecraft mc, List<ItemCount> items, boolean keepTable) {
         stop(false);
+        this.keepTable = keepTable;
         outcome = Outcome.NONE;
         LocalPlayer p = mc.player;
         if (p.containerMenu != p.inventoryMenu) {
@@ -297,13 +303,32 @@ public final class CraftProcess implements Process {
         return 64;
     }
 
+    /** Leave a placed table standing after this craft (#getitem crafting several things in a row). */
+    private boolean keepTable;
+
+    /** Picks up the table a kept craft left standing; false when there's none (or it's busy). */
+    public boolean pickUpTable() {
+        keepTable = false;
+        LocalPlayer p = Minecraft.getInstance().player;
+        if (phase != Phase.IDLE || p == null || !station.startPickUp(p)) return false;
+        phase = Phase.PICKUP;
+        pendingHow = Outcome.DONE;
+        pendingMsg = null;
+        return true;
+    }
+
+    public boolean pickingUp() {
+        return phase == Phase.PICKUP;
+    }
+
     private void fail(String msg) {
         end(Outcome.FAILED, Chat.err(msg));
     }
 
     private void end(Outcome how, String msg) {
         // done (or stuck) with a table it placed itself: take it along first
-        if (how != Outcome.CANCELLED && phase != Phase.IDLE && phase != Phase.PICKUP && station.startPickUp(Minecraft.getInstance().player)) {
+        if (how != Outcome.CANCELLED && !keepTable && phase != Phase.IDLE && phase != Phase.PICKUP
+            && station.startPickUp(Minecraft.getInstance().player)) {
             phase = Phase.PICKUP;
             pendingHow = how;
             pendingMsg = msg;

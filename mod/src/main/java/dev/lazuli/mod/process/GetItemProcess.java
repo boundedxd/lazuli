@@ -251,8 +251,10 @@ public final class GetItemProcess implements Process {
                 }
             }
         }
+        if (crafts.pickingUp()) return; // taking the table along before moving on
         ItemCount need = missing(p);
         if (need == null) {
+            if (crafts.pickUpTable()) return;
             got(mc, p);
             return;
         }
@@ -278,6 +280,8 @@ public final class GetItemProcess implements Process {
         }
         dev.lazuli.mod.control.Tools.keep("getitem", plan.keep());
         ItemPlanner.Action a = plan.actions().get(0);
+        // crafts in a row share one table; anything else first takes it along
+        if (a.kind() != ItemPlanner.Kind.CRAFT && crafts.pickUpTable()) return;
         // what the first step makes is lying in a chest: take it instead
         if (withdraw(mc, p, a.item(), a.count(), !forIngredients && wants.stream().anyMatch(w -> w.item().equals(a.item())))) return;
         String key = a.toString();
@@ -293,7 +297,7 @@ public final class GetItemProcess implements Process {
         planned = plan.actions().size();
         switch (a.kind()) {
             case MINE -> mine.start(mc, a.count(), a.blocks());
-            case CRAFT -> crafts.start(mc, List.of(new ItemCount(a.item(), a.count())));
+            case CRAFT -> crafts.start(mc, List.of(new ItemCount(a.item(), a.count())), true);
             case SMELT -> smelts.start(mc, new ItemCount(a.item(), a.count()), true);
             case KILL -> hunt.start(mc, a.item(), count(p, a.item()) + a.count(), a.blocks());
         }
@@ -455,6 +459,7 @@ public final class GetItemProcess implements Process {
 
     private void end(Outcome how, String msg) {
         dev.lazuli.mod.control.Tools.keep("getitem", null);
+        if (how == Outcome.FAILED) crafts.pickUpTable(); // the table it left standing (runs on as the craft process)
         running = false;
         outcome = how;
         current = null;
