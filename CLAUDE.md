@@ -117,7 +117,7 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
   `RecordedLine` (driven once, `config/lazuli/iceboat/`). Courses drawn as ASCII maps in `RaceCourseTest`.
 - `#build <file>` -> `mod/process/BuildProcess.startSchematic` (per-spot block states), `core/schematic/Schematic`
   (.litematic/.schem/.nbt via its own `Nbt` reader). `#getitem ... dry` -> `GetItemProcess.dryRun` + `core/craft/PlanEstimate`.
-- `#queue` / `#routine` -> `core/task/RoutineRunner` (step done = busy then idle), `Routines` (`config/lazuli/routines.txt`).
+- `#queue` / `#routine` / `a then b` -> `core/task/RoutineRunner` (step done = busy then idle; endless jobs like #farm hand over when the inventory is full, `RoutineRunner.endless`), `Routines` (`config/lazuli/routines.txt`).
 - HUD -> `mod/render/LazuliRenderer` (Material 3 card via `Material`), `Minimap`.
 - Others: Follow, Explore, Tunnel, Farm, Hunt processes in `mod/process/`; chat commands from other players `mod/ChatControl`.
 - Item keys (`minecraft:dirt#hash`, potions `@minecraft:swiftness`) -> `core/inventory/ItemKeys`, `mod/inventory/Inventories`.

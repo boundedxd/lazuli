@@ -77,4 +77,44 @@ class RoutineTest {
         assertTrue(again.remove("IRON"));
         assertNull(new Routines(f).get("iron"));
     }
+
+    @Test
+    void thenSplitsLikeASemicolon() {
+        assertEquals(List.of("farm", "deposit wheat"), Routines.split("farm then deposit wheat"));
+        assertEquals(List.of("mine 8 iron_ore", "smelt raw_iron 8", "deposit"), Routines.split("mine 8 iron_ore THEN smelt raw_iron 8; deposit"));
+        assertEquals(List.of("goto athens"), Routines.split("goto athens"));
+    }
+
+    @Test
+    void jobsWithNoEndAreTold() {
+        assertTrue(RoutineRunner.endless("#farm"));
+        assertTrue(RoutineRunner.endless("#mine iron_ore"));
+        assertFalse(RoutineRunner.endless("#mine 8 iron_ore"));
+        assertTrue(RoutineRunner.endless("#fish"));
+        assertFalse(RoutineRunner.endless("#fish 10"));
+        assertFalse(RoutineRunner.endless("#deposit"));
+    }
+
+    @Test
+    void anEndlessJobHandsOverWhenTheInventoryFillsThenComesBack() {
+        RoutineRunner r = new RoutineRunner();
+        r.start(null, List.of("#farm", "#deposit"), 0);
+        List<String> ran = new ArrayList<>();
+        int[] stops = {0};
+        boolean busy = false, full = false;
+        int busyLeft = 0;
+        for (int t = 0; t < 400; t++) {
+            // farming fills up at t=50 and t=250; a deposit takes 20 ticks and empties it
+            if (t == 50 || t == 250) full = true;
+            String last = ran.isEmpty() ? "" : ran.get(ran.size() - 1);
+            busy = last.equals("#farm") || busyLeft > 0;
+            if (busyLeft > 0 && --busyLeft == 0) full = false;
+            r.tick(busy, full, cmd -> {
+                ran.add(cmd);
+            }, () -> stops[0]++);
+            if (!ran.isEmpty() && ran.get(ran.size() - 1).equals("#deposit") && busyLeft == 0 && full) busyLeft = 20;
+        }
+        assertEquals(List.of("#farm", "#deposit", "#farm", "#deposit", "#farm"), ran);
+        assertEquals(2, stops[0]);
+    }
 }

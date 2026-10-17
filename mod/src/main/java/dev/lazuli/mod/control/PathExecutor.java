@@ -29,7 +29,7 @@ import java.util.List;
  */
 public final class PathExecutor {
     private static final long NONE = Long.MIN_VALUE + 1;
-    /** No jumping except up onto higher blocks, and no sprinting: set while farming, so farmland isn't trampled. */
+    /** No jumping except up onto higher blocks (and no sprinting with farmSprint off): set while farming, so farmland isn't trampled. */
     public static volatile boolean gentle;
     private static final int OFF_PATH_TICKS = 10;
     /** How far ahead to look for the next block to break or place. */
@@ -149,7 +149,8 @@ public final class PathExecutor {
             curPitch, player.onGround(), player.horizontalCollision, v.x, v.y, v.z, player.isSprinting(),
             ((LivingEntityAccessor) player).lazuli$noJumpDelay(), player.minorHorizontalCollision, player.fallDistance);
         boolean eating = dev.lazuli.mod.process.Upkeep.eating();
-        if (gentle) sprint = false;
+        // farmland only gets trampled by landing on it, not by running: sprint unless farmSprint is off
+        if (gentle && !settings.farmSprint.get()) sprint = false;
         // long water ahead and a boat: crossing by boat takes over until it's out the other side
         Controls c = eating ? null : boat.tick(mc, player, path, idx, curYaw, curPitch);
         if (c == null && !eating) c = interactor.tick(mc, state, path, idx, block);
@@ -187,7 +188,7 @@ public final class PathExecutor {
                 long u = path.get(idx), w = path.get(idx + 1);
                 boolean step = Math.max(Math.abs(Pos.x(w) - Pos.x(u)), Math.abs(Pos.z(w) - Pos.z(u))) <= 1;
                 if (step && Pos.y(w) <= Pos.y(u)) {
-                    c = new Controls(c.forward(), c.back(), false, false, c.targetYaw(), c.targetPitch(), c.strafe(), c.sneak());
+                    c = new Controls(c.forward(), c.back(), false, c.sprint(), c.targetYaw(), c.targetPitch(), c.strafe(), c.sneak());
                 }
             }
         }

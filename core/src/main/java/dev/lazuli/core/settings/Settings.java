@@ -52,6 +52,8 @@ public final class Settings {
     public final Setting<Integer> followRadius = integer("followRadius", 3, 1, 32);
     /** #farm works this far (blocks, horizontally) around where it started. */
     public final Setting<Integer> farmRange = integer("farmRange", 32, 4, 128);
+    /** #farm sprints between crops (it still never hops onto farmland). */
+    public final Setting<Boolean> farmSprint = bool("farmSprint", true);
     /** Eat from the hotbar while Lazuli is busy and hunger drops to {@link #autoEatHunger}. */
     public final Setting<Boolean> autoEat = bool("autoEat", true);
     public final Setting<Integer> autoEatHunger = integer("autoEatHunger", 14, 1, 19);

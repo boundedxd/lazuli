@@ -439,6 +439,14 @@ class CommandTest {
     }
 
     @Test
+    void thenChainsCommands() {
+        CommandHandler h = handler();
+        h.handle("#mine 8 iron_ore then smelt raw_iron 8");
+        h.handle("#farm then deposit");
+        assertEquals(List.of("run null [#mine 8 iron_ore, #smelt raw_iron 8] x1", "run null [#farm, #deposit] x0"), mined);
+    }
+
+    @Test
     void queueAndRoutines() {
         CommandHandler h = handler();
         h.handle("#queue mine 8 iron_ore ; #smelt raw_iron 8");

@@ -864,7 +864,8 @@ public final class LazuliClient implements ClientModInitializer {
 	private void onTick(Minecraft mc) {
 		ticks++;
 		tasks.tick();
-		String routineDone = routine.tick(busy(), line -> {
+		boolean full = mc.player != null && mc.player.getInventory().getFreeSlot() < 0;
+		String routineDone = routine.tick(busy(), full, line -> {
 			// a step's own command (#come, #stop inside a routine) mustn't end the routine running it
 			runningRoutineStep = true;
 			try {
@@ -874,6 +875,13 @@ public final class LazuliClient implements ClientModInitializer {
 			} finally {
 				runningRoutineStep = false;
 			}
+		}, () -> {
+			// an endless step handing over (inventory full): stop it, the routine goes on
+			chat(Chat.info("Inventory full: next step"));
+			tasks.cancel();
+			clicks.cancel();
+			stopProcesses(false);
+			if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
 		});
 		if (routineDone != null) chat(Chat.ok(routineDone));
 		chestWatcher.tick(mc);

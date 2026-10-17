@@ -6,7 +6,8 @@ import java.util.function.Consumer;
 /**
  * Runs a list of commands one after another (a #queue, or a saved #routine), the whole list a number of times or
  * forever. A step is done once Lazuli has been busy with it and is idle again; one that never makes it busy (#set,
- * #drop...) counts as done after a moment.
+ * #drop...) counts as done after a moment. A job with no end (#farm, #mine with no count...) is done when the
+ * inventory is full: it's stopped and the next step (a #deposit, say) runs.
  */
 public final class RoutineRunner {
     /** Ticks a step may take to make Lazuli busy before it's taken as one that's over at once. */
@@ -53,8 +54,20 @@ public final class RoutineRunner {
      * @return a message when the whole thing is finished, else null
      */
     public String tick(boolean busy, Consumer<String> run) {
+        return tick(busy, false, run, () -> {});
+    }
+
+    /**
+     * @param full     the inventory has no room left
+     * @param stopStep stops the step running now (an endless one, handing over)
+     */
+    public String tick(boolean busy, boolean full, Consumer<String> run, Runnable stopStep) {
         if (!running()) return null;
         if (step >= 0) {
+            if (busy && full && steps.size() > 1 && endless(steps.get(step))) {
+                stopStep.run();
+                busy = false;
+            }
             if (busy) {
                 started = true;
                 return null;
@@ -76,5 +89,18 @@ public final class RoutineRunner {
         waited = 0;
         run.accept(steps.get(step));
         return null;
+    }
+
+    /** A job that doesn't end on its own: #farm, #tunnel, #explore, and #mine / #fish with no count. */
+    public static boolean endless(String line) {
+        String[] w = line.trim().replaceFirst("^[^a-zA-Z]+", "").split("\\s+");
+        String cmd = w[0].toLowerCase(java.util.Locale.ROOT);
+        boolean counted = false;
+        for (int i = 1; i < w.length; i++) counted |= w[i].matches("[0-9]+");
+        return switch (cmd) {
+            case "farm", "tunnel", "explore" -> true;
+            case "mine", "fish" -> !counted;
+            default -> false;
+        };
     }
 }

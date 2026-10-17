@@ -261,6 +261,7 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(Options.ofNumber("Farm range", s.farmRange::get, s.farmRange.defaultValue(), s.farmRange::set)
                         .range(4, 128, 4)
                         .description(OptionDescription.ofText(() -> "How far around its start #farm works.")).build())
+                    .option(bool(s.farmSprint, "#farm sprints between crops (it still never hops onto farmland, so nothing gets trampled)."))
                     .option(Options.ofNumber("Ice boat search width", s.iceboatBeam::get, s.iceboatBeam.defaultValue(), s.iceboatBeam::set)
                         .range(8, 512, 8)
                         .description(OptionDescription.ofText(() -> "#iceboat: how many runs it keeps looking at (more: better lines, slower).")).build())

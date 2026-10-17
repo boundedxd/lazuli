@@ -304,6 +304,14 @@ public final class CommandHandler {
         String[] parts = body.isEmpty() ? new String[0] : body.split("\\s+");
         String cmd = parts.length == 0 ? "help" : parts[0].toLowerCase(Locale.ROOT);
         String[] args = Arrays.copyOfRange(parts, Math.min(1, parts.length), parts.length);
+        if (!cmd.matches("queue|routines?|r") && body.matches("(?is).*\\s+then\\s+.*") && !getItemThen(cmd, args)) {
+            // "#farm then deposit": a queue; with a job that never ends it hands over whenever the inventory fills
+            // and starts again after, forever
+            List<String> steps = steps(body, prefix);
+            boolean endless = steps.stream().anyMatch(dev.lazuli.core.task.RoutineRunner::endless);
+            ctx.runRoutine(null, steps, endless ? 0 : 1);
+            return true;
+        }
         try {
             run(cmd, args, prefix);
         } catch (IllegalArgumentException e) {
@@ -467,6 +475,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "build <file> [x y z] | list | materials <file>",
             "build a schematic (.litematic, .schem, .nbt from config/lazuli/schematics or schematics/), its lowest corner at x y z (here)"));
         ctx.reply(Chat.usage(p + "queue <command> ; <command> ; ...", "run commands one after another (each once the last is done)"));
+        ctx.reply(Chat.usage("<command> then <command> ...", "the same; a job with no end (" + p + "farm then deposit) hands over when the inventory is full, then starts again"));
         ctx.reply(Chat.usage(p + "routine add <name> <command> ; <command> ... | <name> [times|forever] | list | del <name> | stop",
             "save a chain of commands and run it again and again"));
         ctx.reply(Chat.usage(p + "fish [minutes]", "fish at the nearest open water (until stopped without minutes)"));
@@ -624,6 +633,25 @@ public final class CommandHandler {
         if (items == null) ctx.reply(Chat.err("Usage: {} <item|all> [count] [item [count]...] [x y z]", deposit ? "deposit" : "withdraw"));
         else ctx.container(deposit, items, at);
     }
+
+    /** #getitem's own "then back|<waypoint> [deposit]" / "then deposit" (where to bring it), not a chain of commands. */
+    private boolean getItemThen(String cmd, String[] args) {
+        if (!cmd.equals("getitem") && !cmd.equals("get")) return false;
+        int then = -1;
+        for (int i = 0; i < args.length && then < 0; i++) if (args[i].equalsIgnoreCase("then")) then = i;
+        if (then < 0 || args.length - then - 1 < 1 || args.length - then - 1 > 2) return false;
+        String where = args[then + 1].toLowerCase(Locale.ROOT);
+        if (where.equals("back") || where.equals("here") || store(where)) return true;
+        var wps = ctx.waypoints();
+        if (wps != null && wps.get(where, ctx.dimension()) != null) return true;
+        String prefix = ctx.settings().prefix.get();
+        return !CHAINED.contains(where.startsWith(prefix) ? where.substring(prefix.length()) : where);
+    }
+
+    /** Commands a "then" after #getitem runs (anything else there is a waypoint to bring it to). */
+    private static final java.util.Set<String> CHAINED = java.util.Set.of("goto", "mine", "smelt", "craft", "farm", "fish",
+        "tunnel", "explore", "follow", "build", "breed", "trade", "brew", "enchant", "repair", "sort", "sleep", "come",
+        "drop", "withdraw", "getitem", "get", "portal", "wp", "home", "set", "stop");
 
     /** getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit] */
     private void getItem(String[] args) {

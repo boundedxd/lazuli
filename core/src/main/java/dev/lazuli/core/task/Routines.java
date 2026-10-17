@@ -24,7 +24,8 @@ public final class Routines {
     /** Splits "a ; b ; c" into its commands. */
     public static List<String> split(String line) {
         List<String> out = new ArrayList<>();
-        for (String s : line.split(";")) if (!s.isBlank()) out.add(s.trim());
+        // "a ; b" or "a then b"
+        for (String s : line.split(";|(?i)\\s+then\\s+")) if (!s.isBlank()) out.add(s.trim());
         return out;
     }
 
