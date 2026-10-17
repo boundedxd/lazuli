@@ -27,9 +27,13 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Nether portals: {@code #portal} goes through the nearest known one (or builds one here), and a far {@code #goto}
@@ -68,6 +72,9 @@ public final class PortalProcess implements Process {
     private PortalFrame.Site site;
     private int since, tries, settleUntil, usedAt;
     private boolean gathered;
+    /** The cell being worked on, the spot being walked to for it, and spots it couldn't be done from. */
+    private BlockPos working, goingTo;
+    private final Set<BlockPos> badSpots = new HashSet<>();
 
     public PortalProcess(PathingSession session, Settings settings, BlockView world, Function<Minecraft, PortalMemory> memory,
                          Function<Minecraft, String> dimension, Consumer<String> chat) {
@@ -310,42 +317,56 @@ public final class PortalProcess implements Process {
             }
             since = p.tickCount;
             usedAt = 0;
+            tries = 0;
+            working = goingTo = null;
+            badSpots.clear();
+        }
+        if (trip.ended() == PathingSession.State.FAILED && goingTo != null) {
+            badSpots.add(goingTo); // couldn't get there: somewhere else
+            goingTo = null;
+            trip.clear();
         }
         if (trip.running()) return;
         if (p.tickCount - since > STEP_TICKS * 4) {
             end(Chat.err("Building the portal took too long"));
             return;
         }
-        BlockPos stand = new BlockPos(site.standX(), site.standY(), site.standZ());
         PortalFrame.Cell c = nextCell(mc);
         if (c == null) {
-            ignite(mc, p, stand);
+            ignite(mc, p);
             return;
         }
         BlockPos b = new BlockPos(c.x(), c.y(), c.z());
+        working(b);
         if (needsBreak(mc, b, c.part())) {
-            if (Aim.breakTick(mc, p, b, input, settings) == Aim.Result.BLOCKED) walkTo(p, stand);
+            if (Aim.breakTick(mc, p, b, input, settings) == Aim.Result.BLOCKED) moveFor(mc, p, b, eye -> Aim.at(mc, p, eye, b, null) != null);
             return;
         }
         if (!holdFor(p, c.part())) {
             end(Chat.err("Out of blocks for the portal"));
             return;
         }
-        BlockPos against = against(mc, b);
-        if (against == null) {
+        if (!hasSupport(mc, b)) {
             end(Chat.err("Nothing to place the portal's {} against", b.toShortString()));
             return;
         }
-        Direction face = Direction.getApproximateNearest(b.getX() - against.getX(), b.getY() - against.getY(), b.getZ() - against.getZ());
-        if (Aim.at(mc, p, against, face) == null) {
-            walkTo(p, stand);
+        Click k = click(mc, p, p.getEyePosition(), b);
+        if (k == null) {
+            moveFor(mc, p, b, eye -> click(mc, p, eye, b) != null);
             return;
         }
         if (p.tickCount - usedAt < 4) return;
-        if (Aim.useOn(mc, p, against, face, input, settings)) usedAt = p.tickCount;
+        if (Aim.useOn(mc, p, k.against(), k.face(), input, settings)) usedAt = p.tickCount;
     }
 
-    private void ignite(Minecraft mc, LocalPlayer p, BlockPos stand) {
+    /** A new cell to work on: the spots that didn't do for the last one may do for this. */
+    private void working(BlockPos b) {
+        if (b.equals(working)) return;
+        working = b;
+        badSpots.clear();
+    }
+
+    private void ignite(Minecraft mc, LocalPlayer p) {
         PortalFrame.Cell in = site.frame().entrance();
         BlockPos inside = new BlockPos(in.x(), in.y(), in.z());
         if (mc.level.getBlockState(inside).is(Blocks.NETHER_PORTAL)) {
@@ -364,8 +385,9 @@ public final class PortalProcess implements Process {
         }
         PortalFrame.Cell base = site.frame().ignite();
         BlockPos b = new BlockPos(base.x(), base.y(), base.z());
+        working(b);
         if (Aim.at(mc, p, b, Direction.UP) == null) {
-            walkTo(p, stand);
+            moveFor(mc, p, b, eye -> Aim.at(mc, p, eye, b, Direction.UP) != null);
             return;
         }
         if (p.tickCount - usedAt < 10) return;
@@ -410,21 +432,72 @@ public final class PortalProcess implements Process {
         return Hands.has(p, s -> s.is(Items.OBSIDIAN));
     }
 
-    private void walkTo(LocalPlayer p, BlockPos stand) {
+    /**
+     * Out of reach or sight from here: off to the nearest spot round the frame from which it can be done, on the
+     * ground or pillared up on throwaway blocks (the trip places them) for the top of the frame.
+     */
+    private void moveFor(Minecraft mc, LocalPlayer p, BlockPos b, Predicate<Vec3> sees) {
         if (trip.running()) return;
-        if (++tries > TRIES * 3) {
-            end(Chat.err("Can't reach the portal frame from {}", stand.toShortString()));
+        input.release();
+        badSpots.add(p.blockPosition()); // it can't be done from here
+        BlockPos spot = ++tries > TRIES * 4 ? null : spotFor(mc, p, sees);
+        if (spot == null) {
+            end(Chat.err("Can't get to the portal's {} from anywhere near", b.toShortString()));
             return;
         }
-        input.release();
-        trip.go(new GoalBlock(stand.getX(), stand.getY(), stand.getZ()), p, false);
+        goingTo = spot;
+        trip.go(new GoalBlock(spot.getX(), spot.getY(), spot.getZ()), p, false);
     }
 
-    /** A solid neighbour to place {@code b} against (below first), or null. */
-    private static BlockPos against(Minecraft mc, BlockPos b) {
-        if (support(mc, b.below())) return b.below();
-        for (Direction d : Direction.values()) if (support(mc, b.relative(d))) return b.relative(d);
+    /** The cheapest spot (near, little pillaring) round the frame whose eye {@code sees}, or null. */
+    private BlockPos spotFor(Minecraft mc, LocalPlayer p, Predicate<Vec3> sees) {
+        PortalFrame f = site.frame();
+        boolean pillar = settings.allowPlace.get() && Tools.throwaway(p, settings) >= 0;
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (int along = -2; along <= PortalFrame.WIDTH + 1; along++) {
+            for (int out = -3; out <= 3; out++) {
+                if (out == 0) continue; // the frame's own plane
+                int x = f.alongX() ? f.x() + along : f.x() + out, z = f.alongX() ? f.z() + out : f.z() + along;
+                for (int y = f.y() - 2; y <= f.y() + 2; y++) {
+                    BlockPos g = new BlockPos(x, y, z);
+                    if (!support(mc, g.below()) || !clear(mc, g) || !clear(mc, g.above())) continue;
+                    for (int h = 0; h <= (pillar ? 3 : 0); h++) {
+                        BlockPos s = g.above(h);
+                        if (h > 0 && !clear(mc, s.above())) break;
+                        if (badSpots.contains(s)) continue;
+                        double score = h * 3 + Math.sqrt(s.distSqr(p.blockPosition()));
+                        if (score >= bestScore) continue;
+                        if (!sees.test(new Vec3(s.getX() + 0.5, s.getY() + p.getEyeHeight(), s.getZ() + 0.5))) continue;
+                        bestScore = score;
+                        best = s;
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static boolean clear(Minecraft mc, BlockPos b) {
+        return mc.level.getBlockState(b).getCollisionShape(mc.level, b).isEmpty() && mc.level.getFluidState(b).isEmpty();
+    }
+
+    private record Click(BlockPos against, Direction face) {}
+
+    private static final Direction[] SIDES = {Direction.DOWN, Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP};
+
+    /** A solid neighbour of {@code b} (below first) whose face toward it the eye at {@code eye} can click, or null. */
+    private static Click click(Minecraft mc, LocalPlayer p, Vec3 eye, BlockPos b) {
+        for (Direction d : SIDES) {
+            BlockPos n = b.relative(d);
+            if (support(mc, n) && Aim.at(mc, p, eye, n, d.getOpposite()) != null) return new Click(n, d.getOpposite());
+        }
         return null;
+    }
+
+    private static boolean hasSupport(Minecraft mc, BlockPos b) {
+        for (Direction d : SIDES) if (support(mc, b.relative(d))) return true;
+        return false;
     }
 
     /** Something a block can be placed against: solid (not a flower, not leaf litter). */

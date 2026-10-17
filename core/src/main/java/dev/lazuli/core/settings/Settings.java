@@ -98,6 +98,8 @@ public final class Settings {
     public final Setting<Boolean> unstickRestart = bool("unstickRestart", true);
     /** Save a "death" waypoint where the player dies ({@code #back} goes there). */
     public final Setting<Boolean> deathWaypoint = bool("deathWaypoint", true);
+    /** After a respawn, go back to where the player died and pick the dropped items up before they despawn. */
+    public final Setting<Boolean> deathRecovery = bool("deathRecovery", true);
     /** Draw this dimension's waypoints in the world. */
     public final Setting<Boolean> renderWaypoints = bool("renderWaypoints", true);
     /** Move the best tool from the inventory into the hotbar when mining. */
@@ -136,6 +138,8 @@ public final class Settings {
     public final Setting<Boolean> shulkers = bool("shulkers", true);
     /** #sort may move items between the chests and barrels around. */
     public final Setting<Boolean> sortEnabled = bool("sortEnabled", true);
+    /** After #sort, put an item frame (from the inventory) on each box front showing what it holds most of. */
+    public final Setting<Boolean> sortLabels = bool("sortLabels", true);
     /** #sel fill / clear may build and break. */
     public final Setting<Boolean> selEnabled = bool("selEnabled", true);
     /** While a job runs, tops up {@link #restockItems} from known chests (or shulker boxes) when under half. */
@@ -248,6 +252,10 @@ public final class Settings {
     public final Setting<Boolean> portalGather = bool("portalGather", false);
     /** Remember every nether portal seen, for #portal and nether trips. */
     public final Setting<Boolean> portalMemory = bool("portalMemory", true);
+    /** #stronghold: how far to walk square to the first eye throw before the second (longer: more exact). */
+    public final Setting<Integer> strongholdBaseline = integer("strongholdBaseline", 120, 30, 1000);
+    /** #stronghold picks thrown eyes of ender back up when they drop. */
+    public final Setting<Boolean> strongholdPickupEyes = bool("strongholdPickupEyes", true);
     /** #enchant / #repair / #combine place an enchanting table or anvil they carry when none is near. */
     public final Setting<Boolean> enchantPlace = bool("enchantPlace", true);
     /** #brew gets missing ingredients, glass bottles or a brewing stand with #getitem first. */
@@ -261,6 +269,10 @@ public final class Settings {
     public final Setting<Integer> evalHorizon = integer("evalHorizon", 32, 1, 4096);
     public final Setting<Double> heuristicWeight = decimal("heuristicWeight", 1.2, 1.0, 10.0);
     public final Setting<Boolean> renderPath = bool("renderPath", true);
+    /** Ghost view: draw where the player really went on the last trip (red where off the plan) and the plans it dropped. */
+    public final Setting<Boolean> renderGhost = bool("renderGhost", false);
+    /** How many ticks of the ghost trail to keep. */
+    public final Setting<Integer> ghostTicks = integer("ghostTicks", 1200, 20, 12000);
     /** The HUD status as a Material card (off: the plain text panel). */
     public final Setting<Boolean> hudCard = bool("hudCard", true);
     /** Corner radius of the HUD card and minimap, in pixels. */

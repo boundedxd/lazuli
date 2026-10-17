@@ -29,4 +29,11 @@ public final class Hands {
         for (int i = 0; i < 36; i++) if (want.test(p.getInventory().getItem(i))) return true;
         return false;
     }
+
+    /** How many matching items the main inventory and hotbar hold. */
+    public static int count(LocalPlayer p, Predicate<ItemStack> want) {
+        int n = 0;
+        for (int i = 0; i < 36; i++) if (want.test(p.getInventory().getItem(i))) n += p.getInventory().getItem(i).getCount();
+        return n;
+    }
 }

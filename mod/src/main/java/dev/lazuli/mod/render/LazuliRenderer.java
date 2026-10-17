@@ -40,6 +40,8 @@ public final class LazuliRenderer {
     private final Supplier<double[]> prediction;
     private final Supplier<Goal> pendingGoal;
     private final BlockView world;
+    private dev.lazuli.core.control.GhostTrail ghost;
+    private static final int GHOST_COLOR = 0xFF80FF80, GHOST_OFF_COLOR = 0xFFFF4040, GHOST_PLAN_COLOR = 0x90FFFFFF, GHOST_DROPPED_COLOR = 0x60A0A0A0;
 
     public LazuliRenderer(PathingSession session, Settings settings, Supplier<double[]> prediction, Supplier<Goal> pendingGoal,
                           BlockView world) {
@@ -57,6 +59,7 @@ public final class LazuliRenderer {
         PathingSession.Snapshot snap = session.snapshot();
         boolean pathing = snap.state() == PathingSession.State.PATHING;
         float width = LazuliConfig.lineWidth;
+        drawGhost(mc, snap, pathing, width);
         if (pathing && settings.renderPath.get()) {
             List<Long> path = snap.path();
             int color = LazuliConfig.pathColor.getRGB();
@@ -102,6 +105,35 @@ public final class LazuliRenderer {
             Gizmos.line(new Vec3(w.x() + 0.5, w.y() + 1, w.z() + 0.5), new Vec3(w.x() + 0.5, w.y() + 64, w.z() + 0.5), color, width);
             int dist = (int) Math.sqrt(mc.player.blockPosition().distSqr(b));
             Gizmos.billboardTextOverBlock(w.name() + " (" + dist + "m)", b, 0, color, 1.0f);
+        }
+    }
+
+    /** The ghost view: recorded every tick while it's on, drawn until the next trip. */
+    private void drawGhost(Minecraft mc, PathingSession.Snapshot snap, boolean pathing, float width) {
+        if (!settings.renderGhost.get()) {
+            ghost = null;
+            return;
+        }
+        if (ghost == null) ghost = new dev.lazuli.core.control.GhostTrail(settings.ghostTicks.get());
+        ghost.tick(pathing, snap.trip(), snap.path(), mc.player.getX(), mc.player.getY(), mc.player.getZ());
+        var s = ghost.samples();
+        for (int i = 0; i + 1 < s.size(); i++) {
+            var a = s.get(i);
+            var b = s.get(i + 1);
+            Gizmos.line(new Vec3(a.x(), a.y() + LIFT, a.z()), new Vec3(b.x(), b.y() + LIFT, b.z()),
+                a.off() || b.off() ? GHOST_OFF_COLOR : GHOST_COLOR, width);
+        }
+        if (!pathing) {
+            List<Long> path = ghost.path();
+            for (int i = 0; i + 1 < Math.min(path.size(), MAX_NODES); i++) {
+                Gizmos.line(center(path.get(i)), center(path.get(i + 1)), GHOST_PLAN_COLOR, width);
+            }
+        }
+        int n = 0;
+        for (long node : ghost.abandoned()) {
+            if (n++ >= MAX_NODES) break;
+            Vec3 c = center(node);
+            Gizmos.cuboid(new AABB(c.x - 0.1, c.y - 0.1, c.z - 0.1, c.x + 0.1, c.y + 0.1, c.z + 0.1), GizmoStyle.stroke(GHOST_DROPPED_COLOR, width));
         }
     }
 

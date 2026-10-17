@@ -13,7 +13,19 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.BarrelBlock;
 import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.decoration.ItemFrame;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.Vec3;
+import dev.lazuli.mod.control.Aim;
+import dev.lazuli.mod.control.Hands;
+import dev.lazuli.mod.control.InputDriver;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
@@ -36,7 +48,10 @@ import java.util.function.Consumer;
 public final class SortProcess implements Process {
     private static final int MAX_RUNS = 400;
 
-    private enum Phase { IDLE, SCAN, WORK }
+    private enum Phase { IDLE, SCAN, WORK, LABEL }
+
+    /** Ticks to spend labelling one box before leaving it. */
+    private static final int LABEL_TICKS = 200;
 
     private final Settings settings;
     private final Consumer<String> chat;
@@ -75,6 +90,7 @@ public final class SortProcess implements Process {
             case IDLE -> null;
             case SCAN -> "Sort: looking in " + scanned + "/" + boxes.size();
             case WORK -> "Sort: " + moved + " items moved" + (depositing ? " (putting away)" : " (taking out)");
+            case LABEL -> "Sort: labelling (" + toLabel.size() + " left)";
         };
     }
 
@@ -114,6 +130,10 @@ public final class SortProcess implements Process {
             return;
         }
         if (containers.active()) return;
+        if (phase == Phase.LABEL) {
+            label(mc, p);
+            return;
+        }
         if (at != null) {
             if (containers.outcome() == ContainerProcess.Outcome.CANCELLED) {
                 stop(false);
@@ -134,7 +154,7 @@ public final class SortProcess implements Process {
             }
             plan = SortPlan.of(boxList(), SortProcess::stackSize);
             if (plan.sorted()) {
-                end(Chat.ok("Already sorted"));
+                finish(mc, p, Chat.ok("Already sorted"));
                 return;
             }
             phase = Phase.WORK;
@@ -160,7 +180,7 @@ public final class SortProcess implements Process {
             if (from == null || b.distSqr(p.blockPosition()) < from.distSqr(p.blockPosition())) from = b;
         }
         if (from == null) {
-            end(Chat.ok("Sorted: {} items moved", moved));
+            finish(mc, p, Chat.ok("Sorted: {} items moved", moved));
             return;
         }
         List<ItemCount> take = fit(p, misplaced(from));
@@ -329,8 +349,143 @@ public final class SortProcess implements Process {
             }
     }
 
+    // ---- labels
+
+    /** Boxes still to label, and the one being worked on: its front, what goes in its frame, since when. */
+    private final List<BlockPos> toLabel = new ArrayList<>();
+    private BlockPos labelBox;
+    private Direction labelFace;
+    private String labelItem;
+    private int labelSince, usedAt, labelled;
+    private final InputDriver input = new InputDriver();
+
+    /** Sorted: labels the boxes next (sortLabels, with item frames on hand), else done. */
+    private void finish(Minecraft mc, LocalPlayer p, String msg) {
+        chat.accept(msg);
+        if (!settings.sortLabels.get()) {
+            end(null);
+            return;
+        }
+        toLabel.clear();
+        for (BlockPos b : boxes.keySet()) if (main(b) != null && front(mc, b) != null && !labelled(mc, b)) toLabel.add(b);
+        if (toLabel.isEmpty()) {
+            end(null);
+            return;
+        }
+        if (!Hands.has(p, SortProcess::frame)) {
+            end(Chat.info("Carry item frames to have the {} boxes labelled", toLabel.size()));
+            return;
+        }
+        labelBox = null;
+        labelled = 0;
+        phase = Phase.LABEL;
+    }
+
+    private static boolean frame(ItemStack s) {
+        return s.is(Items.ITEM_FRAME) || s.is(Items.GLOW_ITEM_FRAME);
+    }
+
+    /** One tick of labelling: an item frame on the box's front, then one of what it holds most of in the frame. */
+    private void label(Minecraft mc, LocalPlayer p) {
+        if (labelBox == null) {
+            if (toLabel.isEmpty()) {
+                end(Chat.ok("Labelled {} boxes", labelled));
+                return;
+            }
+            labelBox = nearest(p, toLabel);
+            toLabel.remove(labelBox);
+            labelFace = front(mc, labelBox);
+            labelItem = main(labelBox);
+            labelSince = p.tickCount;
+            if (labelFace == null || labelItem == null) labelBox = null;
+            return;
+        }
+        if (p.tickCount - labelSince > LABEL_TICKS) {
+            labelBox = null; // can't: on to the next one
+            input.release();
+            return;
+        }
+        ItemFrame f = frameOn(mc, labelBox, labelFace);
+        if (f != null && !f.getItem().isEmpty()) {
+            labelled++;
+            labelBox = null;
+            input.release();
+            return;
+        }
+        Item item = BuiltInRegistries.ITEM.getOptional(Identifier.tryParse(labelItem)).orElse(Items.AIR);
+        if (!Hands.has(p, s -> s.is(item))) {
+            // one out of the box for the frame
+            containers.start(mc, false, List.of(new ItemCount(labelItem, 1)), labelBox);
+            return;
+        }
+        if (f == null) {
+            if (!Hands.hold(p, ClickDriver.get(), SortProcess::frame)) {
+                if (!Hands.has(p, SortProcess::frame)) end(Chat.warn("Out of item frames ({} boxes labelled)", labelled));
+                return;
+            }
+            if (p.tickCount - usedAt < 6) return;
+            if (Aim.useOn(mc, p, labelBox, labelFace, input, settings)) usedAt = p.tickCount;
+            return;
+        }
+        if (!Hands.hold(p, ClickDriver.get(), s -> s.is(item))) return;
+        Vec3 c = f.getBoundingBox().getCenter(), eye = p.getEyePosition();
+        double dx = c.x - eye.x, dy = c.y - eye.y, dz = c.z - eye.z;
+        float[] aim = {(float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0), (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)))};
+        Aim.turn(mc, p, input, aim, settings);
+        if (p.tickCount - usedAt < 6) return;
+        if (mc.hitResult instanceof EntityHitResult h && h.getEntity() == f) {
+            mc.gameMode.interact(p, f, InteractionHand.MAIN_HAND);
+            p.swing(InteractionHand.MAIN_HAND);
+            usedAt = p.tickCount;
+        }
+    }
+
+    /** What the box holds most of, or null when it is empty. */
+    private String main(BlockPos box) {
+        String best = null;
+        int n = 0;
+        for (var e : boxes.get(box).entrySet()) {
+            if (e.getValue() <= n) continue;
+            n = e.getValue();
+            best = e.getKey();
+        }
+        return best;
+    }
+
+    /** The face a label goes on: the box front, with room in front of it; null if there is none. */
+    private static Direction front(Minecraft mc, BlockPos box) {
+        var s = mc.level.getBlockState(box);
+        Direction d = s.hasProperty(ChestBlock.FACING) ? s.getValue(ChestBlock.FACING)
+            : s.hasProperty(BarrelBlock.FACING) ? s.getValue(BarrelBlock.FACING) : null;
+        if (d == null) return null;
+        return mc.level.getBlockState(box.relative(d)).canBeReplaced() ? d : null;
+    }
+
+    /** Already has a frame with something in it (on its front or, for a double chest, the other half). */
+    private static boolean labelled(Minecraft mc, BlockPos box) {
+        Direction d = front(mc, box);
+        if (d == null) return true;
+        ItemFrame f = frameOn(mc, box, d);
+        if (f != null && !f.getItem().isEmpty()) return true;
+        var s = mc.level.getBlockState(box);
+        if (s.getBlock() instanceof ChestBlock && s.getValue(ChestBlock.TYPE) != ChestType.SINGLE) {
+            ItemFrame o = frameOn(mc, box.relative(ChestBlock.getConnectedDirection(s)), d);
+            return o != null && !o.getItem().isEmpty();
+        }
+        return false;
+    }
+
+    private static ItemFrame frameOn(Minecraft mc, BlockPos box, Direction face) {
+        BlockPos in = box.relative(face);
+        for (ItemFrame f : mc.level.getEntitiesOfClass(ItemFrame.class, new AABB(in))) {
+            if (f.getDirection() == face && f.getPos().equals(in)) return f;
+        }
+        return null;
+    }
+
     private void end(String msg) {
         phase = Phase.IDLE;
+        input.release();
         containers.stop(false);
         if (msg != null) chat.accept(msg);
     }

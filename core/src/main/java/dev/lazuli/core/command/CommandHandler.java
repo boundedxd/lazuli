@@ -206,6 +206,11 @@ public final class CommandHandler {
             reply(Chat.err("Portals aren't available here"));
         }
 
+        /** #stronghold: find the stronghold with eyes of ender and go to its end portal. */
+        default void stronghold() {
+            reply(Chat.err("#stronghold isn't available here"));
+        }
+
         /** A goal far enough that the nether is quicker (netherGoto): true if it set off that way. */
         default boolean netherInstead(Goal goal) {
             return false;
@@ -381,6 +386,7 @@ public final class CommandHandler {
                 }
                 ctx.breed(kinds, n);
             }
+            case "stronghold", "eye" -> ctx.stronghold();
             case "portal", "portals" -> ctx.portal(cmd.equals("portals") || args.length > 0 && args[0].equalsIgnoreCase("list"));
             case "iceboat", "race" -> iceboat(args);
             case "build", "schematic", "schem" -> {
@@ -494,6 +500,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "sort [range]", "sort the chests and barrels around (default 16 blocks): each item into as few as it fits"));
         ctx.reply(Chat.usage(p + "repair <item>", "repair at an anvil with its material or another one"));
         ctx.reply(Chat.usage(p + "combine <item> <with>", "put two things together at an anvil (an enchanted_book...)"));
+        ctx.reply(Chat.usage(p + "stronghold", "find the stronghold with two eye of ender throws and go to its end portal"));
         ctx.reply(Chat.usage(p + "portal [list]", "go through the nearest known nether portal (or build one here) | the ones known here"));
         ctx.reply(Chat.usage(p + "fly <x z | x y z | waypoint>", "fly there with an elytra and rockets (far #goto does too: elytraGoto)"));
         ctx.reply(Chat.usage(p + "find <item>", "which chests (opened before) hold an item"));
@@ -651,7 +658,7 @@ public final class CommandHandler {
     /** Commands a "then" after #getitem runs (anything else there is a waypoint to bring it to). */
     private static final java.util.Set<String> CHAINED = java.util.Set.of("goto", "mine", "smelt", "craft", "farm", "fish",
         "tunnel", "explore", "follow", "build", "breed", "trade", "brew", "enchant", "repair", "sort", "sleep", "come",
-        "drop", "withdraw", "getitem", "get", "portal", "wp", "home", "set", "stop");
+        "drop", "withdraw", "getitem", "get", "portal", "stronghold", "wp", "home", "set", "stop");
 
     /** getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit] */
     private void getItem(String[] args) {

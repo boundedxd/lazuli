@@ -107,6 +107,8 @@ public final class LazuliClient implements ClientModInitializer {
 	private TunnelProcess tunnel;
 	private FarmProcess farm;
 	private SleepProcess sleeps;
+	private dev.lazuli.mod.process.DeathRecovery recovery;
+	private dev.lazuli.mod.process.StrongholdProcess strongholds;
 	private dev.lazuli.mod.process.Guard guard;
 	private ContainerProcess containers;
 	private CraftProcess crafts;
@@ -207,10 +209,13 @@ public final class LazuliClient implements ClientModInitializer {
 		fishing = new dev.lazuli.mod.process.FishProcess(session, settings, this::chat);
 		portals = new dev.lazuli.mod.process.PortalProcess(session, settings, cache, this::portalMemory, LazuliClient::dimension, this::chat);
 		portals.useGetItem(getItem);
+		strongholds = new dev.lazuli.mod.process.StrongholdProcess(session, settings,
+			(mc, b) -> waypoints(mc).set("stronghold", dimension(mc), b.getX(), b.getY(), b.getZ()), this::chat);
+		recovery = new dev.lazuli.mod.process.DeathRecovery(session, settings, LazuliClient::dimension, this::chat);
 		iceboat = new dev.lazuli.mod.process.IceBoatProcess(settings, cache,
 			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("iceboat"), this::chat);
-		processes = java.util.List.of(iceboat, portals, mine, follow, explore, tunnel, farm, breeds, fishing, containers, crafts, smelts, hunt, getItem,
-			trades, brews, enchants, elytra, sorts, builds, sleeps, restock, guard);
+		processes = java.util.List.of(iceboat, portals, strongholds, mine, follow, explore, tunnel, farm, breeds, fishing, containers, crafts, smelts, hunt, getItem,
+			trades, brews, enchants, elytra, sorts, builds, sleeps, recovery, restock, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override
 			public int[] playerFeet() {
@@ -387,6 +392,13 @@ public final class LazuliClient implements ClientModInitializer {
 						else iceboat.toGoal(mc, target[0], target[1] == Integer.MIN_VALUE ? null : target[1], target[2]);
 					}
 				}
+			}
+
+			@Override
+			public void stronghold() {
+				LazuliClient.this.stopProcesses(false);
+				if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
+				strongholds.start(Minecraft.getInstance());
 			}
 
 			@Override
@@ -904,6 +916,8 @@ public final class LazuliClient implements ClientModInitializer {
 			waypoints(mc).set(Waypoints.DEATH, dimension(mc), b.getX(), b.getY(), b.getZ());
 			chat(Chat.info("Died at {} ({}back to go there)", b.getX() + " " + b.getY() + " " + b.getZ(), settings.prefix.get()));
 		}
+		if (dead && !wasDead) recovery.died(mc, mc.player.blockPosition());
+		recovery.watch(mc);
 		wasDead = dead;
 		clicks.tick(mc, settings.clicksPerTick.get());
 		if (ticks % 10 == 0) session.setHazards(mc.player == null || !settings.avoidMobs.get() || hunt.active() || !busy()

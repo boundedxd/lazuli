@@ -9,9 +9,9 @@ export JAVA_HOME="/c/Program Files/Java/jdk-25.0.2"
 ./gradlew :core:test                 # full suite, ~2.5 min, must stay green
 ./gradlew :core:test --tests '*Name*' # one class
 ./gradlew :mod:build -x test
-cp mod/build/libs/lazuli-0.1.0.jar "/c/Users/colin/AppData/Roaming/PrismLauncher/instances/1.21.11(2)/minecraft/mods/"
+cp mod/build/libs/lazuli-0.1.0.jar "/c/Users/colin/AppData/Roaming/PrismLauncher/instances/Main/minecraft/mods/"
 ```
-ALWAYS copy the jar to the Prism mods folder after a build. Commit + push to `feat/lazuli-plan1` when a feature is done.
+ALWAYS copy the jar to the Prism `Main` instance mods folder after a build. Commit + push to `feat/lazuli-plan1` when a feature is done.
 Gradle prints "BUILD SUCCESSFUL" fast (warm daemon); check `core/build/test-results/test/TEST-*.xml` if unsure tests ran.
 
 ## Two modules
@@ -126,6 +126,10 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
 - Shulker boxes -> `mod/process/ShulkerUnpack` (place, take, pick up; `Station.startPlaced`), chest memory names
   `shulker>id` (`ItemKeys.inShulker`); used through `ChestTake`. Restock -> `core/inventory/Restock`,
   `mod/process/RestockProcess` (pauses the job like Guard; per-thing toggles in `Settings.restockSpec`, own Restock tab).
+- `#stronghold` -> `mod/process/StrongholdProcess` (two eye throws, `core/portal/Triangulation`, then the end portal frame via BlockSearch; waypoint `stronghold`).
+- Death recovery -> `mod/process/DeathRecovery` (deathRecovery: back to the death spot after respawn, picks the items up before despawn).
+- `#sort` labels -> `SortProcess.label` (sortLabels: item frame on each box front with its main item).
+- Ghost view -> `core/control/GhostTrail` drawn by `LazuliRenderer.drawGhost` (renderGhost, ghostTicks).
 
 ## More gotchas
 - Restart the game after every deploy: copying the jar over a running game crashes it on the next class load.

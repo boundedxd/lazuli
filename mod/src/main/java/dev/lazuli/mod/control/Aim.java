@@ -28,7 +28,11 @@ public final class Aim {
 
     /** Yaw and pitch putting the crosshair on {@code bp} (on {@code face}, if not null) within reach, or null. */
     public static float[] at(Minecraft mc, LocalPlayer player, BlockPos bp, Direction face) {
-        Vec3 eye = player.getEyePosition();
+        return at(mc, player, player.getEyePosition(), bp, face);
+    }
+
+    /** {@link #at} from an eye somewhere else (where the player could stand). */
+    public static float[] at(Minecraft mc, LocalPlayer player, Vec3 eye, BlockPos bp, Direction face) {
         double reach = player.blockInteractionRange();
         for (double[] q : POINTS) {
             double qx = q[0], qy = q[1], qz = q[2];
@@ -43,7 +47,7 @@ public final class Aim {
             double dx = t.x - eye.x, dy = t.y - eye.y, dz = t.z - eye.z;
             float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
             float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)));
-            BlockHitResult h = crosshair(mc, player, yaw, pitch);
+            BlockHitResult h = crosshair(mc, player, eye, yaw, pitch);
             if (h != null && h.getBlockPos().equals(bp) && (face == null || h.getDirection() == face)) return new float[]{yaw, pitch};
         }
         return null;
@@ -51,7 +55,10 @@ public final class Aim {
 
     /** What a view along yaw/pitch from the eye hits within reach, or null. */
     public static BlockHitResult crosshair(Minecraft mc, LocalPlayer player, float yaw, float pitch) {
-        Vec3 eye = player.getEyePosition();
+        return crosshair(mc, player, player.getEyePosition(), yaw, pitch);
+    }
+
+    private static BlockHitResult crosshair(Minecraft mc, LocalPlayer player, Vec3 eye, float yaw, float pitch) {
         Vec3 dir = Vec3.directionFromRotation(pitch, yaw);
         HitResult h = mc.level.clip(new ClipContext(eye, eye.add(dir.scale(player.blockInteractionRange())),
             ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
