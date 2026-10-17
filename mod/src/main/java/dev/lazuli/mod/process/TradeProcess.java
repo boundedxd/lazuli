@@ -61,7 +61,7 @@ import java.util.function.ToDoubleFunction;
  * pick the trade and take the result as many times as planned. Plans again after each step, like #getitem.
  */
 public final class TradeProcess implements Process {
-    private static final int MAX_STEPS = 60, SCAN_MAX = 16, GO_TICKS = 20 * 90, OPEN_TICKS = 100, TRIES = 3;
+    private static final int MAX_STEPS = 60, GO_TICKS = 20 * 90, OPEN_TICKS = 100, TRIES = 3;
     /** Chests looked in around a villager that buys what's needed (blocks). */
     private static final int LOOT_RADIUS = 16, LOOT_MAX = 8;
 
@@ -160,6 +160,11 @@ public final class TradeProcess implements Process {
 
     /** Sells {@code count} of {@code item} (negative: all of it) to the best-paying villagers around. */
     public void sell(Minecraft mc, String item, int count) {
+        if (item.equals(TradePlanner.EMERALD)) {
+            // "sell for emeralds": whatever on hand the villagers take
+            start(mc, List.of(new Want(item, null, 0, Inventories.plainCounts(mc.player).getOrDefault(item, 0) + Math.max(1, count))));
+            return;
+        }
         sellItem = item;
         sellHad = Inventories.plainCounts(mc.player).getOrDefault(item, 0);
         sellKeep = count < 0 ? 0 : Math.max(0, sellHad - count);
@@ -185,9 +190,8 @@ public final class TradeProcess implements Process {
         toLoot.clear();
         RecipeData.get();
         RecipeData.drops();
-        // first the villagers that might sell it and haven't been looked at (an enchant: the librarians)
-        boolean books = wants.stream().anyMatch(w -> w.enchant() != null);
-        queueUnknown(mc, v -> scanOnly || !books || TradeWatcher.profession(v).equals("librarian"));
+        // trades already known come first: the villagers not looked at yet only when those can't do it (see plan)
+        if (scanOnly) queueUnknown(mc, v -> true, Integer.MAX_VALUE);
         if (scanOnly && toScan.isEmpty()) {
             end(Outcome.DONE, Chat.ok("Every villager around has been looked at ({} known)", memory.apply(mc).size()));
             return;
@@ -279,7 +283,7 @@ public final class TradeProcess implements Process {
             // maybe one not looked at yet buys or sells it: look at every villager around once, then plan again
             if (!scannedAll) {
                 scannedAll = true;
-                queueUnknown(mc, v -> true);
+                queueUnknown(mc, v -> true, Integer.MAX_VALUE);
                 if (!toScan.isEmpty()) {
                     chat.accept(Chat.info("Looking at {} more villagers' trades", toScan.size()));
                     next(mc);
@@ -343,7 +347,7 @@ public final class TradeProcess implements Process {
         if (!plan.ok()) {
             if (!scannedAll) {
                 scannedAll = true;
-                queueUnknown(mc, v -> true);
+                queueUnknown(mc, v -> true, Integer.MAX_VALUE);
                 if (!toScan.isEmpty()) {
                     chat.accept(Chat.info("Looking at {} more villagers' trades", toScan.size()));
                     next(mc);
@@ -407,8 +411,8 @@ public final class TradeProcess implements Process {
         return item -> memo.computeIfAbsent(item, i -> stored.getOrDefault(i, 0) > 0 ? 0.05 : planner.cost(i, have, pick));
     }
 
-    /** Villagers in range whose trades aren't known yet (and {@code which} takes), nearest first. */
-    private void queueUnknown(Minecraft mc, java.util.function.Predicate<AbstractVillager> which) {
+    /** Villagers in range whose trades aren't known yet (and {@code which} takes), nearest first, at most {@code max}. */
+    private void queueUnknown(Minecraft mc, java.util.function.Predicate<AbstractVillager> which, int max) {
         LocalPlayer p = mc.player;
         TradeMemory mem = memory.apply(mc);
         int range = settings.tradeRange.get();
@@ -421,7 +425,7 @@ public final class TradeProcess implements Process {
             found.add(v);
         }
         found.sort(java.util.Comparator.comparingDouble(v -> v.distanceToSqr(p)));
-        for (int i = 0; i < Math.min(SCAN_MAX, found.size()); i++) toScan.add(found.get(i).getUUID().toString());
+        for (int i = 0; i < Math.min(max, found.size()); i++) toScan.add(found.get(i).getUUID().toString());
     }
 
     /** Chests near the villagers this plan sells {@code item} to, not opened before. */

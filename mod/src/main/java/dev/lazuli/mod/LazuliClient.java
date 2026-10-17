@@ -573,7 +573,10 @@ public final class LazuliClient implements ClientModInitializer {
 			@Override
 			public void trade(java.util.List<dev.lazuli.core.trade.Want> wants) {
 				LazuliClient.this.stopProcesses(false);
-				trades.start(Minecraft.getInstance(), wants);
+				// #trade emerald 3: three more than you have, not three in all
+				var p = Minecraft.getInstance().player;
+				trades.start(Minecraft.getInstance(), wants.stream().map(w -> new dev.lazuli.core.trade.Want(w.item(), w.enchant(), w.level(),
+					w.count() + dev.lazuli.mod.inventory.TradeWatcher.count(p, w))).toList());
 			}
 
 			@Override

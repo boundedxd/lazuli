@@ -220,7 +220,8 @@ public final class TradePlanner {
     private static double price(ItemCount c, Map<String, Integer> inv, ToDoubleFunction<String> gatherCost) {
         boolean has = inv.getOrDefault(c.item(), 0) >= c.count();
         double unit = c.item().equals(EMERALD) ? EMERALD_COST : Math.min(NO_WAY, gatherCost.applyAsDouble(c.item()));
-        return c.count() * (has ? unit / 4 : unit);
+        // on hand: next to nothing (emeralds still count, to save them), however hard it would be to get more
+        return c.count() * (has ? (c.item().equals(EMERALD) ? unit / 4 : 0.01) : unit);
     }
 
     private static int left(Map<String, Integer> uses, Trader t, Offer o) {

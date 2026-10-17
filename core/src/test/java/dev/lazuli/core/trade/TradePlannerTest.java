@@ -50,6 +50,18 @@ class TradePlannerTest {
     }
 
     @Test
+    void emeraldsFromTheStringOnHandBeforeANearerTradeItCantPay() {
+        // string it can't get more of, but 40 are on hand: that far villager, not the near farmer it has no wheat for
+        Trader fisher = trader("f", "fisherman", 80, buys(0, "minecraft:string", 19));
+        Trader farmer = trader("w", "farmer", 3, buys(0, "minecraft:wheat", 20));
+        var p = plan(List.of(new Want(EMERALD, null, 0, 1)), Map.of("minecraft:string", 40), List.of(farmer, fisher), true,
+            i -> i.equals("minecraft:wheat") ? 0.5 : NO);
+        assertTrue(p.ok(), p.problem());
+        assertEquals(1, p.steps().size(), "no gathering: the string is there");
+        assertEquals("f", p.steps().get(0).trader().id());
+    }
+
+    @Test
     void aLowerLevelBookDoesntCount() {
         Trader lib = trader("a", "librarian", 10, book(0, 9, "minecraft:sharpness", 3));
         var p = plan(List.of(new Want(EBOOK, "minecraft:sharpness", 5, 1)), Map.of(EMERALD, 30, BOOK, 2), List.of(lib), false, i -> NO);
