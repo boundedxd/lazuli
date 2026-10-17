@@ -121,6 +121,8 @@ public final class LazuliClient implements ClientModInitializer {
 	private final java.util.Map<String, dev.lazuli.core.trade.TradeMemory> tradesByWorld = new java.util.HashMap<>();
 	private Upkeep upkeep;
 	private dev.lazuli.mod.process.RestockProcess restock;
+	/** Every ore seen in this world (kept after its chunk unloads): #mine looks here first. */
+	private final dev.lazuli.mod.world.OreIndex ores = new dev.lazuli.mod.world.OreIndex();
 	private dev.lazuli.mod.process.SortProcess sorts;
 	private dev.lazuli.mod.process.BuildProcess builds;
 	private dev.lazuli.mod.process.BreedProcess breeds;
@@ -159,6 +161,7 @@ public final class LazuliClient implements ClientModInitializer {
 			() -> Tools.snapshot(Minecraft.getInstance().player, settings));
 		executor = new PathExecutor(session, settings, cache, this::chat);
 		mine = new MineProcess(session, settings, cache, this::chat);
+		mine.useOreIndex(ores);
 		follow = new FollowProcess(session, settings, this::chat);
 		explore = new ExploreProcess(session, this::chat);
 		tunnel = new TunnelProcess(session, settings, this::chat);
@@ -989,11 +992,13 @@ public final class LazuliClient implements ClientModInitializer {
 		if (level != lastLevel) {
 			lastLevel = level;
 			cache.reset(level.getMinY(), level.getHeight());
+			ores.clear();
 			if (session.snapshot().state() == PathingSession.State.PATHING) session.stop();
 		}
 		int cx = chunk.getPos().x, cz = chunk.getPos().z;
 		ChunkScanner.Scan scan = ChunkScanner.scan(chunk, cache.sectionCount());
 		cache.putChunk(cx, cz, scan.kinds(), scan.physics());
+		ores.putChunk(cx, cz, scan.ores(), scan.oreBlocks());
 		session.regionChanged(cx * 16, cache.minY(), cz * 16, cx * 16 + 15, cache.maxY(), cz * 16 + 15);
 		mine.onChunkLoad(chunk);
 		explore.onChunkLoad(chunk);
@@ -1011,6 +1016,7 @@ public final class LazuliClient implements ClientModInitializer {
 	public static void onBlockChanged(ClientLevel level, BlockPos pos, BlockState state) {
 		LazuliClient self = instance;
 		if (self == null || level != self.lastLevel) return;
+		self.ores.set(dev.lazuli.core.world.Pos.pack(pos.getX(), pos.getY(), pos.getZ()), pos.getX(), pos.getZ(), state);
 		self.mine.onBlockChanged(pos, state);
 		if (self.settings.portalMemory.get() && state.is(net.minecraft.world.level.block.Blocks.NETHER_PORTAL)) {
 			Minecraft mc = Minecraft.getInstance();

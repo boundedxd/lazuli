@@ -211,18 +211,15 @@ public final class FarmProcess implements Process {
         jobs.clear();
         boolean seeds = seedSlot(player, false, settings.allowInventory.get() ? 36 : 9) >= 0,
             wart = seedSlot(player, true, settings.allowInventory.get() ? 36 : 9) >= 0;
-        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-        for (int x = center.getX() - range; x <= center.getX() + range; x++)
-            for (int z = center.getZ() - range; z <= center.getZ() + range; z++)
-                for (int y = center.getY() - BELOW; y <= center.getY() + ABOVE; y++) {
-                    m.set(x, y, z);
-                    BlockState s = mc.level.getBlockState(m);
-                    if (s.isAir()) continue;
-                    if (ripe(mc, m, s)) jobs.add(new Job(Kind.HARVEST, m.immutable()));
-                    else if ((seeds && s.is(Blocks.FARMLAND) || wart && s.is(Blocks.SOUL_SAND)) && mc.level.getBlockState(m.above()).isAir()) {
-                        jobs.add(new Job(Kind.PLANT, m.immutable()));
-                    }
+        // only chunk sections holding crops or farmland are looked through block by block
+        dev.lazuli.mod.world.BlockSearch.forEach(mc.level, center.getX() - range, center.getY() - BELOW, center.getZ() - range,
+            center.getX() + range, center.getY() + ABOVE, center.getZ() + range, FarmProcess::farmable, m -> {
+                BlockState s = mc.level.getBlockState(m);
+                if (ripe(mc, m, s)) jobs.add(new Job(Kind.HARVEST, m.immutable()));
+                else if ((seeds && s.is(Blocks.FARMLAND) || wart && s.is(Blocks.SOUL_SAND)) && mc.level.getBlockState(m.above()).isAir()) {
+                    jobs.add(new Job(Kind.PLANT, m.immutable()));
                 }
+            });
         AABB area = new AABB(center).inflate(range, ABOVE, range);
         for (ItemEntity item : mc.level.getEntitiesOfClass(ItemEntity.class, area, ItemEntity::isAlive)) {
             jobs.add(new Job(Kind.PICKUP, item.blockPosition()));
@@ -235,6 +232,13 @@ public final class FarmProcess implements Process {
             case PLANT -> mc.level.getBlockState(j.pos().above()).isAir();
             case PICKUP -> !mc.level.getEntitiesOfClass(ItemEntity.class, new AABB(j.pos()).inflate(1.5), ItemEntity::isAlive).isEmpty();
         };
+    }
+
+    /** Could be harvested or planted on (what {@link #ripe} and planting look at). */
+    private static boolean farmable(BlockState s) {
+        Block b = s.getBlock();
+        return b instanceof CropBlock || b instanceof NetherWartBlock || b == Blocks.MELON || b == Blocks.PUMPKIN
+            || b == Blocks.SUGAR_CANE || b == Blocks.BAMBOO || b == Blocks.FARMLAND || b == Blocks.SOUL_SAND;
     }
 
     private static boolean ripe(Minecraft mc, BlockPos p, BlockState s) {

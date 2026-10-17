@@ -355,21 +355,9 @@ final class Station {
 
     private static BlockPos nearest(Minecraft mc, LocalPlayer p, Predicate<net.minecraft.world.level.block.state.BlockState> test,
                                     int r, BlockPos skip) {
-        BlockPos feet = p.blockPosition(), best = null;
-        double bestD = Double.MAX_VALUE;
-        BlockPos.MutableBlockPos at = new BlockPos.MutableBlockPos();
-        int minY = Math.max(mc.level.getMinY(), feet.getY() - r / 2), maxY = Math.min(mc.level.getMaxY(), feet.getY() + r / 2);
-        for (int y = minY; y <= maxY; y++)
-            for (int x = feet.getX() - r; x <= feet.getX() + r; x++)
-                for (int z = feet.getZ() - r; z <= feet.getZ() + r; z++) {
-                    at.set(x, y, z);
-                    if (!test.test(mc.level.getBlockState(at)) || at.equals(skip)) continue;
-                    double d = at.distSqr(feet);
-                    if (d < bestD) {
-                        bestD = d;
-                        best = at.immutable();
-                    }
-                }
-        return best;
+        BlockPos feet = p.blockPosition();
+        // only the chunk sections that can hold one are looked through
+        return dev.lazuli.mod.world.BlockSearch.best(mc.level, feet.getX() - r, feet.getY() - r / 2, feet.getZ() - r,
+            feet.getX() + r, feet.getY() + r / 2, feet.getZ() + r, test, at -> at.equals(skip) ? Double.MAX_VALUE : at.distSqr(feet));
     }
 }

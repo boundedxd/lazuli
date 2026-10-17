@@ -104,6 +104,7 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(bool(s.minePickup, "#mine walks over to pick up what each broken block drops."))
                     .option(bool(s.mineSearch, "None found: strip-mine at the ore's best Y level, or explore for anything else (logs, sand...)."))
                     .option(bool(s.antiXray, "The server hides ores (anti-xray): only trust ores you can see, find the rest by strip mining."))
+                    .option(bool(s.oreMemory, "Remember every ore seen as chunks load, even after they unload: #mine picks targets at once instead of scanning, and goes back for ones seen earlier."))
                     .option(Options.ofNumber("Strip mine length", s.stripLength::get, s.stripLength.defaultValue(), s.stripLength::set)
                         .range(8, 256, 8)
                         .description(OptionDescription.ofText(() -> "How long each tunnel of the strip mine is (they're 4 apart).")).build())

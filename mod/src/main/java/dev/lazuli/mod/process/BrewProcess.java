@@ -73,7 +73,9 @@ public final class BrewProcess implements Process {
     private Brewing.Form form;
     private int count, made, batch, step, phaseStart, usedAt, activeAt, fillTrips, settleAt;
     private Brewing.Route route;
-    private boolean gathered, loaded;
+    private boolean loaded;
+    /** What #getitem was already sent for this #brew (each thing once: bottles, then the ingredients, then a stand). */
+    private final java.util.Set<String> gathered = new java.util.HashSet<>();
     private BlockPos standPos, water;
     /** Water it couldn't get to this time: tried no more. */
     private final Set<BlockPos> badWater = new HashSet<>();
@@ -140,7 +142,7 @@ public final class BrewProcess implements Process {
         this.form = form;
         this.count = Math.max(1, count);
         made = fromChests = 0;
-        gathered = false;
+        gathered.clear();
         standPos = null;
         chat.accept(Chat.ok("Brewing {} {}{}", this.count, name(this.potion), form == Brewing.Form.DRINK ? "" : " (" + form.name().toLowerCase() + ")"));
         if (!takeFinished(mc)) plan(mc);
@@ -254,10 +256,11 @@ public final class BrewProcess implements Process {
         station.start(p, Blocks.BREWING_STAND, STAND, "brewing stand", m -> m instanceof BrewingStandMenu, standPos, mayPlace());
     }
 
-    /** Gets items with #getitem (once per #brew); false if that's off or already tried. */
+    /** Gets items with #getitem (each item once per #brew); false if that's off or they were all tried already. */
     private boolean gather(Minecraft mc, List<ItemCount> items) {
-        if (gathered || getItem == null || !settings.brewGather.get()) return false;
-        gathered = true;
+        if (getItem == null || !settings.brewGather.get()) return false;
+        if (items.stream().allMatch(i -> gathered.contains(i.item()))) return false; // tried all of these already
+        items.forEach(i -> gathered.add(i.item()));
         enter(Phase.GATHER, mc.player);
         chat.accept(Chat.info("Getting {} first", ItemCount.describe(items.stream().map(i -> new ItemCount(name(i.item()), i.count())).toList())));
         getItem.start(mc, new ItemRequest(items, null, false), true);
@@ -394,22 +397,14 @@ public final class BrewProcess implements Process {
      */
     private BlockPos surfaceWater(Minecraft mc, LocalPlayer p) {
         int r = settings.stationRange.get();
-        BlockPos feet = p.blockPosition(), best = null;
-        double bestScore = Double.MAX_VALUE;
-        BlockPos.MutableBlockPos at = new BlockPos.MutableBlockPos();
-        for (int y = Math.max(mc.level.getMinY(), feet.getY() - r / 2); y <= Math.min(mc.level.getMaxY(), feet.getY() + r / 2); y++)
-            for (int x = feet.getX() - r; x <= feet.getX() + r; x++)
-                for (int z = feet.getZ() - r; z <= feet.getZ() + r; z++) {
-                    at.set(x, y, z);
-                    if (!source(mc, at) || !mc.level.getBlockState(at.above()).isAir() || badWater.contains(at)) continue;
-                    int dy = y - feet.getY();
-                    double score = at.distSqr(feet) + 8.0 * dy * dy;
-                    if (score < bestScore) {
-                        bestScore = score;
-                        best = at.immutable();
-                    }
-                }
-        return best;
+        BlockPos feet = p.blockPosition();
+        return dev.lazuli.mod.world.BlockSearch.best(mc.level, feet.getX() - r, feet.getY() - r / 2, feet.getZ() - r,
+            feet.getX() + r, feet.getY() + r / 2, feet.getZ() + r,
+            st -> st.getFluidState().is(Fluids.WATER) && st.getFluidState().isSource(), at -> {
+                if (!mc.level.getBlockState(at.above()).isAir() || badWater.contains(at)) return Double.MAX_VALUE;
+                int dy = at.getY() - feet.getY();
+                return at.distSqr(feet) + 8.0 * dy * dy;
+            });
     }
 
     private static boolean source(Minecraft mc, BlockPos at) {

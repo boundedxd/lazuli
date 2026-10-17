@@ -93,7 +93,7 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
 ## Where features live (command -> code)
 - `#goto`/`#path` -> PathingSession + PathExecutor (above). Far `#goto` may fly: `mod/process/ElytraProcess`,
   `core/control/ElytraPilot`, `core/physics/ElytraSim`.
-- `#mine` -> `mod/control/MineProcess` (strip-mines at `core/mine/OreDepth` via TunnelProcess when none known).
+- `#mine` -> `mod/control/MineProcess` (targets from `mod/world/OreIndex`, every ore seen as chunks load, kept after unload (oreMemory); strip-mines at `core/mine/OreDepth` via TunnelProcess when none known). Block searches go through `mod/world/BlockSearch` (skips chunk sections by palette, like Baritone).
 - `#deposit`/`#withdraw`/`#drop`/`#find` -> `mod/process/ContainerProcess`, chest memory `core/storage/ChestMemory`
   + `mod/inventory/ChestWatcher`; taking from remembered chests for other jobs: `mod/process/ChestTake`.
 - `#craft` -> `mod/process/CraftProcess` + `core/craft/CraftTree`/`Crafter`; recipes from the game jar `mod/craft/RecipeData`.

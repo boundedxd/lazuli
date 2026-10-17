@@ -241,6 +241,26 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         double px = mc.player.getX(), py = mc.player.getY(), pz = mc.player.getZ();
         // max-heap on score: the worst kept target is on top, ready to be replaced
         java.util.PriorityQueue<double[]> best = new java.util.PriorityQueue<>((a, b) -> Double.compare(b[0], a[0]));
+        if (oreIndex != null && settings.oreMemory.get() && dev.lazuli.mod.world.OreIndex.ORES.containsAll(targets)) {
+            // ores: straight from the index of every one seen (no chunk scanning), farther ones it saw earlier included
+            boolean antiXray = settings.antiXray.get();
+            for (Block blk : targets) {
+                oreIndex.forEach(blk, p -> {
+                    if (blacklist.contains(p)) return;
+                    int bx = Pos.x(p), by = Pos.y(p), bz = Pos.z(p);
+                    if (antiXray && hidden.contains(blk) && !exposed(bx, by, bz)) return;
+                    double score = Math.sqrt(sq(bx + 0.5 - px) + sq(by + 0.5 - py) + sq(bz + 0.5 - pz)) + penalty(bx, by, bz);
+                    if (best.size() < KEEP) best.add(new double[]{score, p});
+                    else if (score < best.peek()[0]) {
+                        best.poll();
+                        best.add(new double[]{score, p});
+                    }
+                });
+            }
+            known.clear();
+            for (double[] e : best) known.add((long) e[1]);
+            return;
+        }
         int r = mc.options.getEffectiveRenderDistance() + 1;
         int pcx = mc.player.blockPosition().getX() >> 4, pcz = mc.player.blockPosition().getZ() >> 4;
         for (int d = 0; d <= r; d++) {
@@ -303,6 +323,13 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             if (k == BlockKind.AIR || k == BlockKind.WATER) return true;
         }
         return false;
+    }
+
+    private dev.lazuli.mod.world.OreIndex oreIndex;
+
+    /** Where ores have been seen: rescans for ores read it instead of scanning chunks (oreMemory). */
+    public void useOreIndex(dev.lazuli.mod.world.OreIndex index) {
+        this.oreIndex = index;
     }
 
     /** Called for every loaded chunk while mining (new targets are picked up by the next rescan). */
