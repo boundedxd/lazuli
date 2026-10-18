@@ -236,6 +236,7 @@ public final class PathingSession {
     private MoveGraph graphFor(Interaction in) {
         return new MoveGraph(world, settings.maxFallHeight.get(), settings.allowSprint.get(),
             settings.heuristicWeight.get(), settings.allowParkour.get(), in).withClutch(clutchFall).withInteraction(in)
+            .withSwimUp(settings.swimUp.get() ? settings.swimUpMax.get() : 0)
             .withHazards(settings.avoidMobs.get() ? hazards : Hazards.NONE, settings.avoidLava.get() ? LAVA_EDGE : 0);
     }
 

@@ -63,6 +63,28 @@ public final class Standing {
         return Long.MIN_VALUE;
     }
 
+    /**
+     * Blocks of water above (x, y, z) up to the surface cell, when it is submerged: water with water above, the column
+     * ending in open air within {@code max} cells. 0 for a surface cell, -1 if not water, roofed over or too deep.
+     */
+    public static int depth(BlockView w, int x, int y, int z, int max) {
+        for (int d = 0; d <= max; d++) {
+            if (w.get(x, y + d, z) != BlockKind.WATER) return -1;
+            if (swimmable(w, x, y + d, z)) return d;
+        }
+        return -1;
+    }
+
+    /**
+     * Like {@link #swimNode}, but when {@code deepMax > 0} a swimmer under the surface is at the cell it is in
+     * (a node of its own, see {@link MoveGraph}) as long as that column reaches the surface within deepMax blocks.
+     */
+    public static long waterNode(BlockView w, double x, double y, double z, int deepMax) {
+        int bx = (int) Math.floor(x), bz = (int) Math.floor(z), by = (int) Math.floor(y);
+        if (deepMax > 0 && !swimmable(w, bx, by - 1, bz) && depth(w, bx, by, bz, deepMax) > 0) return Pos.pack(bx, by, bz);
+        return swimNode(w, x, y, z);
+    }
+
     /** How far under the surface a swimmer still counts as at its surface node (a big drop sinks deep). */
     public static final int SWIM_DEPTH = 6;
 

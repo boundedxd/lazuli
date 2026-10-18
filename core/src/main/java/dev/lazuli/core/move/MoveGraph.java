@@ -121,7 +121,7 @@ public final class MoveGraph implements Graph {
 
     @Override
     public boolean isNode(long u) {
-        return !Double.isNaN(feet(u)) || swims(u) || Climbing.node(w, u) || dig.kind(Pos.x(u), Pos.y(u), Pos.z(u)) != Digging.Kind.NONE;
+        return !Double.isNaN(feet(u)) || swims(u) || deep(u) || Climbing.node(w, u) || dig.kind(Pos.x(u), Pos.y(u), Pos.z(u)) != Digging.Kind.NONE;
     }
 
     /** Deepest drop into water planned: water takes all the fall damage, but a deeper fall is just slow. */
@@ -130,6 +130,35 @@ public final class MoveGraph implements Graph {
     static final double SWIM = 10;
     /** Pulling out of the water onto a block a level up: a jump out of the fluid. */
     static final double CLIMB_OUT = 6;
+
+    /** Most blocks of water swum up under the surface in one go; 0: not at all. */
+    private int swimUp;
+    private final dev.lazuli.core.util.LongMap<Integer> depthCache = new dev.lazuli.core.util.LongMap<>(1024);
+    /** Ticks per block swum up (jump held, about 0.12 a tick) and sinking down. */
+    static final double RISE = 8.3, SINK = 5;
+    /** Swimming along under the surface costs this much more than at the surface (air, and slower to steer). */
+    static final double DEEP_FACTOR = 1.25;
+
+    /** Swim up (and down) through submerged water columns that reach the surface within {@code blocks}. */
+    public MoveGraph withSwimUp(int blocks) {
+        this.swimUp = Math.max(0, blocks);
+        return this;
+    }
+
+    /** Submerged water under a surface cell within swimUp blocks: a node for rising through a column. */
+    public boolean deep(long u) {
+        if (swimUp <= 0) return false;
+        Integer d = depthCache.get(u);
+        if (d == null) {
+            d = Standing.depth(w, Pos.x(u), Pos.y(u), Pos.z(u), swimUp);
+            depthCache.put(u, d);
+        }
+        return d > 0;
+    }
+
+    private boolean wet(long u) {
+        return swims(u) || deep(u);
+    }
 
     /** Water at the surface, where a swimmer floats: water with open air above. */
     public boolean swims(long u) {
@@ -162,6 +191,23 @@ public final class MoveGraph implements Graph {
         double lo = Math.max(uy, fv);
         if (!Standing.passage(w, ux, uz, vx, vz, lo, lo + Standing.BODY, true)) return INF;
         return SWIM * step + (fv > uy + 0.5 ? CLIMB_OUT : 0);
+    }
+
+    /** Straight up or down inside a water column (surface cell on top): the body's column is clear water. */
+    private double riseCost(long u, long v) {
+        int dy = Pos.y(v) - Pos.y(u);
+        if (Math.abs(dy) != 1 || !wet(u) || !wet(v)) return INF;
+        int x = Pos.x(u), z = Pos.z(u), lo = Math.min(Pos.y(u), Pos.y(v));
+        if (!Standing.clear(w, x + 0.2, z + 0.2, x + 0.8, z + 0.8, lo + 0.1, lo + 1 + Standing.BODY, true)) return INF;
+        return dy > 0 ? RISE : SINK;
+    }
+
+    /** Along under the surface, level: both ends in water (one may be a surface cell). */
+    private double deepCost(long u, long v, boolean wu, boolean wv) {
+        int ux = Pos.x(u), uy = Pos.y(u), uz = Pos.z(u), vx = Pos.x(v), vz = Pos.z(v);
+        if (!wu || !wv || Pos.y(v) != uy) return INF;
+        if (!Standing.passage(w, ux, uz, vx, vz, uy + 0.1, uy + Standing.BODY, true)) return INF;
+        return SWIM * DEEP_FACTOR * (ux != vx && uz != vz ? Costs.SQRT2 : 1);
     }
 
     /**
@@ -258,8 +304,10 @@ public final class MoveGraph implements Graph {
         if (Math.abs(dx) > 1 || Math.abs(dz) > 1) return jumpCost(u, v);
         double climb = Climbing.cost(w, u, v, feet(u), feet(v), flat);
         if (!Double.isNaN(climb)) return climb;
-        if (dx == 0 && dz == 0) return INF;
         boolean su = swims(u), sv = swims(v);
+        boolean du = !su && deep(u), dv = !sv && deep(v);
+        if (dx == 0 && dz == 0) return riseCost(u, v);
+        if (du || dv) return deepCost(u, v, su || du, sv || dv);
         if (su || sv) return waterCost(u, v, su, sv);
         double fu = feet(u), fv = feet(v);
         if (Double.isNaN(fu) || Double.isNaN(fv)) return INF;
@@ -467,12 +515,12 @@ public final class MoveGraph implements Graph {
 
     /** A node only because it can be dug or built into: no walking, swimming or climbing there as the world is. */
     private boolean digOnly(long u) {
-        return Double.isNaN(feet(u)) && !swims(u) && !Climbing.node(w, u);
+        return Double.isNaN(feet(u)) && !swims(u) && !deep(u) && !Climbing.node(w, u);
     }
 
     /** A node as the world is (no digging needed to stand there). */
     private boolean walkNode(long u) {
-        return !Double.isNaN(feet(u)) || swims(u) || Climbing.node(w, u);
+        return !Double.isNaN(feet(u)) || swims(u) || deep(u) || Climbing.node(w, u);
     }
 
     /**
@@ -500,6 +548,12 @@ public final class MoveGraph implements Graph {
             for (int dy = -1; dy <= 1; dy += 2) {
                 long v = Pos.offset(u, 0, dy, 0);
                 if (isNode(v)) out.accept(v);
+            }
+        }
+        if (swimUp > 0 && wet(u)) {
+            for (int dy = -1; dy <= 1; dy += 2) {
+                long v = Pos.offset(u, 0, dy, 0);
+                if (wet(v)) out.accept(v);
             }
         }
         if (!Double.isNaN(feet(u))) {
@@ -548,6 +602,12 @@ public final class MoveGraph implements Graph {
             for (int dy = -1; dy <= 1; dy += 2) {
                 long u = Pos.offset(v, 0, dy, 0);
                 if (isNode(u)) out.accept(u);
+            }
+        }
+        if (swimUp > 0 && wet(v)) {
+            for (int dy = -1; dy <= 1; dy += 2) {
+                long u = Pos.offset(v, 0, dy, 0);
+                if (wet(u)) out.accept(u);
             }
         }
         if (swims(v)) {

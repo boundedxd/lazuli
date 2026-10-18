@@ -116,6 +116,7 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
 - `#trade` -> `mod/process/TradeProcess`, `core/trade/*`, `mod/inventory/TradeWatcher`.
 - `#brew` -> `mod/process/BrewProcess` + `core/craft/Brewing`. `#enchant`/`#repair`/`#combine` -> `mod/process/EnchantProcess`
   + `core/craft/Enchanting`.
+- Swimming up water columns (waterfalls, still shafts, soul-sand bubble columns: all BlockKind.WATER) -> `MoveGraph.deep` (submerged water whose column reaches air within `swimUpMax` blocks, `withSwimUp`; vertical edges `RISE`/`SINK`, level `DEEP_FACTOR`), `Standing.depth/waterNode`, driven by `core/control/WaterRiser` (jump held to rise, before the Jumper/MPC in `PathExecutor`); settings `swimUp`, `swimUpMax` (Movement tab). Test: `WaterRiseCourseTest`. Air budget is just the depth cap, not tracked per path.
 - Boats -> `mod/control/BoatRider` (place/mount waits out lag; drives with `IceRacer` over `TrackField.water`, a
   water-only field that skips 1-wide channels; `BoatCrossingTest`), `core/move/Boating.fits`. Water clutch -> `mod/control/Clutch`.
 - Safety -> `mod/process/Guard` (creepers, fight, low HP, fight-or-flee via `core/control/Threat`), `mod/control/Combat`

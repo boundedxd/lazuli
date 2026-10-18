@@ -42,6 +42,7 @@ public final class PathExecutor {
     private final PathFollower follower;
     private final Climber climber;
     private final Jumper jumper;
+    private final dev.lazuli.core.control.WaterRiser riser;
     private final PathTracker tracker = new PathTracker();
     private final BlockView world;
     private final EdgeWatch edgeWatch = new EdgeWatch();
@@ -79,6 +80,7 @@ public final class PathExecutor {
         this.follower = new PathFollower(world);
         this.climber = new Climber(world);
         this.jumper = new Jumper(world);
+        this.riser = new dev.lazuli.core.control.WaterRiser(world);
         this.swimmer = new Swimmer(world);
         this.boat = new BoatRider(world, settings);
         this.torcher = new Torcher(settings);
@@ -108,7 +110,8 @@ public final class PathExecutor {
 
         BlockPos bp = player.blockPosition();
         // standing over an edge, the node is the block actually under the player, not the air beside it
-        long swim = player.isInWater() ? Standing.swimNode(world, player.getX(), player.getY(), player.getZ()) : Long.MIN_VALUE;
+        long swim = player.isInWater() ? Standing.waterNode(world, player.getX(), player.getY(), player.getZ(),
+            settings.swimUp.get() ? settings.swimUpMax.get() : 0) : Long.MIN_VALUE;
         boolean settled = player.onGround() || swim != Long.MIN_VALUE; // standing, or floating at the surface
         long block = swim != Long.MIN_VALUE ? swim
             : player.onGround() ? Standing.nodeUnder(world, player.getX(), player.getY(), player.getZ())
@@ -161,6 +164,7 @@ public final class PathExecutor {
         boolean building = c != null;
         // ladders and vines (still watched for getting stuck, unlike building)
         if (c == null && idx >= 0) c = climber.tick(state, path, idx);
+        if (c == null && idx >= 0 && settings.swimUp.get()) c = riser.tick(state, path, idx);
         // long and upward gap jumps: played exactly as proven, not left to the input planner
         jumper.setSneak(settings.allowSneakStop.get());
         if (c == null && !building) c = jumper.tick(state, path, idx, sprint);

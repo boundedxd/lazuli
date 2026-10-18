@@ -19,6 +19,8 @@ public final class MovementTab {
             Ui.group("Water",
                 Ui.bool(s.sprintSwim, "Swim mode (sprint-swimming) across open water, just under the surface, coming up for air before it runs low."),
                 Ui.bool(s.surfaceSwim, "Otherwise swim at the surface with your head out of the water (never sprint-swim under)."),
+                Ui.bool(s.swimUp, "Swim up through water columns (waterfalls, still shafts), holding jump, instead of going around."),
+                Ui.num(s.swimUpMax, 1, 30, 1, "Most blocks of water it swims up in one go (the air lasts about 30)."),
                 Ui.bool(s.useBoats, "Cross long stretches of water by boat when you have one."),
                 Ui.num(s.boatMinWater, 3, 128, 1, "Water blocks in a row on the path before it takes the boat."),
                 Ui.bool(s.boatPickup, "Break the boat after getting out, to take it along.")),

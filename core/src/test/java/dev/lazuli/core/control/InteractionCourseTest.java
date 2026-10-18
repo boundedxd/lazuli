@@ -169,6 +169,7 @@ public class InteractionCourseTest {
         PathTracker tracker = new PathTracker();
         EdgeWatch edgeWatch = new EdgeWatch();
         Climber climber = new Climber(w);
+        WaterRiser riser = new WaterRiser(w);
         Jumper jumper = new Jumper(w);
         float yaw = PathFollower.yawTo(sx, sz, gx, gz), pitch = 10f;
         long lastBlock = Long.MIN_VALUE;
@@ -185,7 +186,7 @@ public class InteractionCourseTest {
                 return new Run(false, t, hands.breaks, hands.places, lowest, maxFall, msgs + "\n" + log, turned);
             }
             if (s.y < -40) return new Run(false, t, hands.breaks, hands.places, lowest, maxFall, "fell\n" + log, turned);
-            long swim = s.inWater ? Standing.swimNode(w, s.x, s.y, s.z) : Long.MIN_VALUE;
+            long swim = s.inWater ? Standing.waterNode(w, s.x, s.y, s.z, settings.swimUp.get() ? settings.swimUpMax.get() : 0) : Long.MIN_VALUE;
             boolean settled = s.onGround || swim != Long.MIN_VALUE;
             long block = swim != Long.MIN_VALUE ? swim
                 : s.onGround ? Standing.nodeUnder(w, s.x, s.y, s.z)
@@ -213,6 +214,10 @@ public class InteractionCourseTest {
             if (c == null && idx >= 0) {
                 c = climber.tick(st, path, idx);
                 who = "climb";
+            }
+            if (c == null && idx >= 0) {
+                c = riser.tick(st, path, idx);
+                who = "rise";
             }
             if (c == null && !building) {
                 c = jumper.tick(st, path, idx, true);

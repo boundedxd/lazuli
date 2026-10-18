@@ -14,6 +14,10 @@ public final class Settings {
     public final Setting<Boolean> surfaceSwim = bool("surfaceSwim", true);
     /** Across open water use swim mode (sprint-swimming, fast) just under the surface, coming up for air in time. */
     public final Setting<Boolean> sprintSwim = bool("sprintSwim", true);
+    /** Paths may swim up through columns of water (waterfalls, still shafts), holding jump. */
+    public final Setting<Boolean> swimUp = bool("swimUp", true);
+    /** Most blocks of water swum up in one go (about 8 ticks each of the 300 ticks of air). */
+    public final Setting<Integer> swimUpMax = integer("swimUpMax", 20, 1, 30);
     /** Cross long stretches of water by boat when there's one in the inventory. */
     public final Setting<Boolean> useBoats = bool("useBoats", true);
     /** Water blocks in a row on the path it takes to bother with the boat. */
