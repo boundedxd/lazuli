@@ -18,6 +18,7 @@ public final class BuildingTab {
                 Ui.bool(s.blockBudget, "With building blocks not restocked: a path needing more blocks than you carry goes the way round without placing instead (when there is one).")),
             Ui.group("Breaking",
                 Ui.bool(s.allowBreak, "Mine through blocks in the way, with the best tool in the hotbar."),
+                Ui.dec(s.breakCostFactor, 1.0, 20.0, 0.5, "How much the planner dislikes mining through blocks: higher goes over or around a hill instead of tunnelling through it (1 = break time as is)."),
                 Ui.bool(s.breakNeedsTool, "Never dig through blocks that need a tool it doesn't have (stone without a pickaxe) on the way somewhere."),
                 Ui.bool(s.mineSneak, "Crouch while standing still to break blocks in the way (off: stand normally).")),
             Ui.folded("Advanced: bridging style",

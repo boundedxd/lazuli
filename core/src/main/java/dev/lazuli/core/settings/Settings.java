@@ -34,6 +34,8 @@ public final class Settings {
     public final Setting<Boolean> allowParkour = bool("allowParkour", true);
     public final Setting<Boolean> allowBreak = bool("allowBreak", true);
     public final Setting<Boolean> allowPlace = bool("allowPlace", true);
+    /** How much the planner dislikes breaking blocks on the way, times the vanilla break time (higher: goes over or around a hill rather than tunnelling through it). */
+    public final Setting<Double> breakCostFactor = decimal("breakCostFactor", 3.0, 1.0, 20.0);
     /** Bridge eagle-style: crouch only at the edge (faster); off, ninja-style, sneaking the whole way. */
     public final Setting<Boolean> eagleBridge = bool("eagleBridge", false);
     /** Crouch while standing still to break a block in the path (off: stand up, as most players do). */

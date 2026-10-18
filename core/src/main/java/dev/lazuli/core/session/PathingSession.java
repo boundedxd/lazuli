@@ -226,10 +226,14 @@ public final class PathingSession {
         });
     }
 
+    private static Interaction.BreakTime scaled(Interaction.BreakTime t, double factor) {
+        return factor == 1.0 ? t : p -> t.ticks(p) * factor;
+    }
+
     private MoveGraph newGraph() {
         Interaction in = interaction.get();
         in = new Interaction(in.allowBreak() && settings.allowBreak.get(), in.allowPlace() && settings.allowPlace.get(),
-            in.throwaways(), in.breakTime());
+            in.throwaways(), scaled(in.breakTime(), settings.breakCostFactor.get()));
         return graphFor(in);
     }
 
