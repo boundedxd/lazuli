@@ -195,8 +195,12 @@ public final class PathExecutor {
         if (!interacting && c != null && idx >= 0 && idx + 1 < path.size()) {
             // dropping down a hole it's digging: keep looking down (the next block to mine is right below)
             long u = path.get(idx), w = path.get(idx + 1);
-            if (Pos.x(u) == Pos.x(w) && Pos.z(u) == Pos.z(w) && Pos.y(w) < Pos.y(u) && c.targetPitch() < curPitch) {
-                c = new Controls(c.forward(), c.back(), c.jump(), c.sprint(), c.targetYaw(), curPitch, c.strafe(), c.sneak());
+            if (Pos.x(u) == Pos.x(w) && Pos.z(u) == Pos.z(w) && Pos.y(w) < Pos.y(u)) {
+                // straight down: no reason to turn (where the path goes after the shaft can wait till the bottom); the
+                // yaw only when no key is held, since the keys were chosen for the planner's own facing
+                boolean keys = c.forward() || c.back() || c.strafe() != 0;
+                c = new Controls(c.forward(), c.back(), c.jump(), c.sprint(), keys ? c.targetYaw() : curYaw,
+                    Math.max(curPitch, c.targetPitch()), c.strafe(), c.sneak());
             }
         }
         long[] failed = edgeWatch.update(path, idx, block, settled, Math.hypot(v.x, v.z), building);

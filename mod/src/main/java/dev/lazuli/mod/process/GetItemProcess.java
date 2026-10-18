@@ -303,6 +303,8 @@ public final class GetItemProcess implements Process {
         if (a.kind() != ItemPlanner.Kind.CRAFT && crafts.pickUpTable()) return;
         // what the first step makes is lying in a chest: take it instead
         if (withdraw(mc, p, a.item(), a.count(), !forIngredients && wants.stream().anyMatch(w -> w.item().equals(a.item())))) return;
+        // upgrading what's worn: off it comes first (planned again next tick, with it in the inventory)
+        if (a.kind() == ItemPlanner.Kind.SMITH && unequipFor(p, a)) return;
         String key = a.toString();
         repeats = key.equals(lastStep) ? repeats + 1 : 0;
         lastStep = key;
@@ -420,9 +422,14 @@ public final class GetItemProcess implements Process {
     /** The steps from what the player has now (stations around count). */
     private ItemPlanner.Plan plan(Minecraft mc, LocalPlayer p, ItemPlanner planner, List<ItemCount> wants) {
         int range = settings.stationRange.get();
-        // what it wants and already has counts worn or used too (armor it put on, a damaged pickaxe): never made again
+        // worn armor and the offhand count as had, for what it wants and for what goes into it (the diamond chestplate
+        // a netherite one is smithed from): never made again; it's taken off when a step uses it (see unequipFor)
         Map<String, Integer> have = new HashMap<>(Inventories.plainCounts(p));
-        for (ItemCount w : wants) have.merge(w.item(), count(p, w.item()), Math::max);
+        for (EquipmentSlot e : EquipmentSlot.values()) {
+            if (e == EquipmentSlot.MAINHAND) continue;
+            ItemStack s = p.getItemBySlot(e);
+            if (!s.isEmpty()) have.merge(BuiltInRegistries.ITEM.getKey(s.getItem()).toString(), s.getCount(), Integer::sum);
+        }
         planner.smithingTable(Station.nearest(mc, p, Blocks.SMITHING_TABLE, range) != null);
         return planner.plan(wants, have, pickTier(p),
             Station.nearest(mc, p, Blocks.CRAFTING_TABLE, range) != null, Station.nearest(mc, p, Blocks.FURNACE, range) != null);
@@ -533,6 +540,39 @@ public final class GetItemProcess implements Process {
     }
 
     /** Any of {@code item} in the main inventory and hotbar, enchanted or worn too, and what's worn or in the offhand. */
+    /** Menu slots of the armor pieces and the offhand in the player's own inventory screen. */
+    private static final int[] WORN = {5, 6, 7, 8, 45};
+    private static final EquipmentSlot[] WORN_SLOT = {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
+        EquipmentSlot.FEET, EquipmentSlot.OFFHAND};
+
+    /**
+     * A smithing step whose base item is worn (or in the offhand) and not in the inventory: takes it off into the
+     * inventory (one shift-click), true while doing so.
+     */
+    private boolean unequipFor(LocalPlayer p, ItemPlanner.Action a) {
+        Recipes recipes = RecipeData.get().getNow(null);
+        if (recipes == null) return false;
+        Map<String, Integer> inv = Inventories.plainCounts(p);
+        for (dev.lazuli.core.craft.SmithRecipe r : recipes.smithing(a.item())) {
+            if (r.base().stream().anyMatch(b -> inv.getOrDefault(b, 0) > 0)) return false; // one's in the inventory already
+            for (int i = 0; i < WORN.length; i++) {
+                ItemStack s = p.getItemBySlot(WORN_SLOT[i]);
+                if (s.isEmpty() || !r.base().contains(BuiltInRegistries.ITEM.getKey(s.getItem()).toString())) continue;
+                // curse of binding: it won't come off
+                if (net.minecraft.world.item.enchantment.EnchantmentHelper.has(s,
+                    net.minecraft.world.item.enchantment.EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE)) continue;
+                if (p.getInventory().getFreeSlot() < 0) return false; // no room: the smith step says what's missing
+                var clicks = dev.lazuli.mod.inventory.ClickDriver.get();
+                if (!clicks.busy()) {
+                    chat.accept(Chat.info("Taking off the {} to upgrade it", name(BuiltInRegistries.ITEM.getKey(s.getItem()).toString())));
+                    clicks.add(p.inventoryMenu.containerId, List.of(dev.lazuli.core.inventory.Click.shift(WORN[i])));
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static int count(LocalPlayer p, String item) {
         int n = 0;
         for (int i = 0; i < 36; i++) {

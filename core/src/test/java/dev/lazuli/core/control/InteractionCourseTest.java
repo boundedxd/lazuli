@@ -222,7 +222,7 @@ public class InteractionCourseTest {
                 planner.reset();
             } else if (idx >= 0) {
                 List<Long> walkable = path.subList(0, Builder.walkableEnd(w, path, idx, 64) + 1);
-                c = planner.plan(st, walkable, idx, true, CourseTest.MAX_TURN);
+                c = planner.plan(st, walkable, idx, !s.inWater, CourseTest.MAX_TURN); // in water the game plans without sprint (surfaceSwim)
                 who = "mpc";
                 if (c == null && !s.onGround) {
                     c = InputPlanner.airBrake(st, false);
@@ -302,6 +302,25 @@ public class InteractionCourseTest {
             new GoalBlock(45, 1, 0), 45, 0, 3000);
         assertTrue(r.arrived(), r.log());
         assertTrue(lastUnderwater < 20, "head under water for " + lastUnderwater + " ticks in a row" + System.lineSeparator() + r.log());
+    }
+
+    @Test
+    void wadesThroughWaterOneDeep() {
+        // a swampy dip: the ground a block lower, water to the brim over it
+        GridWorld w = GridWorld.flatFloor(-5, -5, 30, 5).fill(4, 0, -5, 20, 0, 5, BlockKind.WATER)
+            .fill(4, -1, -5, 20, -1, 5, BlockKind.SOLID);
+        Run r = drive(w, new Interaction(false, false, 0, p -> Double.POSITIVE_INFINITY), 0, false, 0, 1, 0,
+            new GoalBlock(26, 1, 0), 26, 0, 1500);
+        assertTrue(r.arrived(), r.log());
+    }
+
+    @Test
+    void wadesThroughAnkleDeepWaterOnTheGround() {
+        // water lying on flat ground (the feet's block is water, the floor is right under it)
+        GridWorld w = GridWorld.flatFloor(-5, -5, 30, 5).fill(4, 1, -5, 20, 1, 5, BlockKind.WATER);
+        Run r = drive(w, new Interaction(false, false, 0, p -> Double.POSITIVE_INFINITY), 0, false, 0, 1, 0,
+            new GoalBlock(26, 1, 0), 26, 0, 1500);
+        assertTrue(r.arrived(), r.log());
     }
 
     @Test

@@ -79,6 +79,10 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     private static final double BURIED = 2;
     private static final int RESCAN_TICKS = 100;
     private final Set<Long> blacklist = new HashSet<>();
+    /** Targets a trip to gave up on (not proven out of reach): left alone until the tick given. */
+    private final java.util.Map<Long, Integer> cooling = new java.util.HashMap<>();
+    private static final int COOL_TICKS = 20 * 45;
+    private final java.util.Map<Long, Integer> cools = new java.util.HashMap<>();
     private Phase phase = Phase.IDLE;
     private List<Long> tripTargets = List.of();
     /** The trip number of the trip this process asked for (-1: none); its snapshots carry it once the session takes it. */
@@ -196,6 +200,8 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         mined = 0;
         known.clear();
         blacklist.clear();
+        cooling.clear();
+        cools.clear();
         drops.clear();
         tripStart = -1;
         tripTargets = List.of();
@@ -393,13 +399,29 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             // the trip ended without a target coming into sight: don't head for it (or them, if it failed) again
             if (dev.lazuli.mod.process.Guard.interrupted(tripStart)) {
                 // cut short to dodge or heal: nothing wrong with the targets
-            } else if (snap.trip() == tripStart && snap.state() == PathingSession.State.ARRIVED) blacklist.add(tripTargets.get(0));
-            else blacklist.addAll(tripTargets);
+            } else if (snap.trip() == tripStart && snap.state() == PathingSession.State.ARRIVED) {
+                blacklist.add(tripTargets.get(0));
+            } else if (snap.trip() == tripStart && session.failure(tripStart) == PathingSession.Failure.UNREACHABLE) {
+                blacklist.addAll(tripTargets); // proven out of reach
+            } else {
+                // the search gave up, or the trip got stuck or stopped: nothing says they can't be got. Others first
+                // for a while; banning them for good is what left known trees "searching" forever
+                for (long q : tripTargets) {
+                    // given up on three times: that's an answer too
+                    if (cools.merge(q, 1, Integer::sum) >= 3) blacklist.add(q);
+                    else cooling.put(q, player.tickCount + COOL_TICKS);
+                }
+            }
             tripStart = -1;
         }
-        long left = known.stream().filter(q -> !blacklist.contains(q)).count();
+        cooling.values().removeIf(until -> until <= player.tickCount);
+        long left = known.stream().filter(q -> !blacklist.contains(q) && !cooling.containsKey(q)).count();
         if (left < KEEP / 4 || player.tickCount - lastScan > RESCAN_TICKS) rescan(mc);
         List<Long> next = nearest(player, TRIP_TARGETS);
+        if (next.isEmpty() && !cooling.isEmpty()) {
+            cooling.clear(); // the only ones known: again now, rather than off looking for others
+            next = nearest(player, TRIP_TARGETS);
+        }
         if (next.isEmpty()) {
             if (quantity > 0 && settings.mineSearch.get() && beginSearch(mc, player)) return;
             if (searched) {
@@ -743,7 +765,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     /** The nearest targets not ruled out, safe to open up (no lava next to them). */
     private List<Long> nearest(LocalPlayer player, int n) {
         double px = player.getX(), py = player.getY(), pz = player.getZ();
-        return known.stream().filter(p -> !blacklist.contains(p) && safe(p))
+        return known.stream().filter(p -> !blacklist.contains(p) && !cooling.containsKey(p) && safe(p))
             .sorted(Comparator.comparingDouble(p -> Math.sqrt(sq(Pos.x(p) + 0.5 - px) + sq(Pos.y(p) + 0.5 - py) + sq(Pos.z(p) + 0.5 - pz))
                 + penalty(Pos.x(p), Pos.y(p), Pos.z(p))))
             .limit(n).toList();

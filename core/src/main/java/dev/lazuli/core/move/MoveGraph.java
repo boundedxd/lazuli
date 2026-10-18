@@ -44,6 +44,8 @@ public final class MoveGraph implements Graph {
     private final dev.lazuli.core.util.EdgeMap jumpTicks = new dev.lazuli.core.util.EdgeMap(256);
     private final dev.lazuli.core.util.LongMap<Double> feetCache = new dev.lazuli.core.util.LongMap<>(4096);
     private final dev.lazuli.core.util.EdgeMap costCache = new dev.lazuli.core.util.EdgeMap(8192);
+    /** Edge costs kept at most (~24 bytes each). */
+    private static final int MAX_CACHED = 1_000_000;
 
 
     public MoveGraph(BlockView world, int maxFall, boolean sprint) {
@@ -146,7 +148,8 @@ public final class MoveGraph implements Graph {
         if (sv) {
             double fu = feet(u);
             if (Double.isNaN(fu) || vy > uy) return INF;
-            if (!Standing.passage(w, ux, uz, vx, vz, fu, fu + Standing.BODY)) return INF;
+            // walking in: the water is where the legs go (water lying level with the ground, a stream's edge)
+            if (!Standing.passage(w, ux, uz, vx, vz, fu, fu + Standing.BODY, true)) return INF;
             if (!Standing.clear(w, vx + 0.2, vz + 0.2, vx + 0.8, vz + 0.8, vy + 1, fu + Standing.BODY)) return INF;
             for (int y = vy + 1; y <= (int) Math.floor(fu); y++) {
                 if (w.get(vx, y, vz) == BlockKind.UNKNOWN) return INF; // no blind leaps into the unknown
@@ -194,6 +197,8 @@ public final class MoveGraph implements Graph {
         double c = costCache.get(u, v, Double.NaN);
         if (Double.isNaN(c)) {
             c = computeOptimistic(u, v);
+            // only a cache: a search through solid rock (every cell a node) filled it until the heap ran out
+            if (costCache.size() >= MAX_CACHED) costCache.clear();
             costCache.put(u, v, c);
         }
         return c < INF && !hazards.isEmpty() ? c + hazards.cost(Pos.x(v), Pos.y(v), Pos.z(v)) : c;
@@ -460,12 +465,35 @@ public final class MoveGraph implements Graph {
         return out.toArray(new int[0][]);
     }
 
+    /** A node only because it can be dug or built into: no walking, swimming or climbing there as the world is. */
+    private boolean digOnly(long u) {
+        return Double.isNaN(feet(u)) && !swims(u) && !Climbing.node(w, u);
+    }
+
+    /** A node as the world is (no digging needed to stand there). */
+    private boolean walkNode(long u) {
+        return !Double.isNaN(feet(u)) || swims(u) || Climbing.node(w, u);
+    }
+
+    /**
+     * Whether u->v can be an edge at all, by shape: an edge with a dig-only end is a dig edge, and those go straight
+     * (cardinal), at most a block up and maxFall down (see {@link Digging#cost}). Solid rock is all dig-only nodes:
+     * this halves what a search through it looks at.
+     */
+    private boolean shapeOk(long u, long v, boolean uDig, int[] d, int dy) {
+        boolean diag = d[0] != 0 && d[1] != 0;
+        if (uDig) return !diag && dy <= 1 && -dy <= maxFall && isNode(v);
+        return diag ? walkNode(v) : isNode(v) && (dy <= 1 && -dy <= maxFall || walkNode(v));
+    }
+
     @Override
     public void successors(long u, LongConsumer out) {
+        boolean uDig = digOnly(u);
         for (int[] d : DIRS) {
+            if (uDig && d[0] != 0 && d[1] != 0) continue;
             for (int dy = -maxFall - 1; dy <= 2; dy++) {
                 long v = Pos.offset(u, d[0], dy, d[1]);
-                if (isNode(v)) out.accept(v); // most of the column is solid ground or open air: no edge to price
+                if (shapeOk(u, v, uDig, d, dy)) out.accept(v); // most of the column is solid ground or open air
             }
         }
         if (dig.enabled() || climbs(u)) {
@@ -503,10 +531,17 @@ public final class MoveGraph implements Graph {
 
     @Override
     public void predecessors(long v, LongConsumer out) {
+        boolean vDig = digOnly(v);
         for (int[] d : DIRS) {
+            boolean diag = d[0] != 0 && d[1] != 0;
+            if (vDig && diag) continue;
             for (int dy = -2; dy <= maxFall + 1; dy++) {
                 long u = Pos.offset(v, d[0], dy, d[1]);
-                if (isNode(u)) out.accept(u);
+                // the edge is u->v: it climbs -dy and drops dy
+                int up = -dy;
+                boolean ok = vDig ? up <= 1 && dy <= maxFall && isNode(u)
+                    : diag ? walkNode(u) : isNode(u) && (up <= 1 && dy <= maxFall || walkNode(u));
+                if (ok) out.accept(u);
             }
         }
         if (dig.enabled() || climbs(v)) {

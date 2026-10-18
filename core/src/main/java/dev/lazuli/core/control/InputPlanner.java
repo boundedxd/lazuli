@@ -408,7 +408,7 @@ public final class InputPlanner {
                 s.step(warmFwd[t], warmStrafe[t], warmJump[t], warmFwd[t] > 0 && allowSprint, yaw);
             } else if (warmCont == PURSUE) {
                 yaw = approach(yaw, pursuitYaw(s, c), maxTurn);
-                s.step(1, 0, true, true, yaw);
+                s.step(1, 0, true, allowSprint, yaw);
             } else {
                 int fwd = s.onGround ? 0 : warmCont;
                 s.step(fwd, 0, false, fwd > 0 && allowSprint, yaw);
@@ -475,19 +475,21 @@ public final class InputPlanner {
         for (int fwd : new int[]{0, -1, 1}) {
             if (rests(cand, c, fwd, allowSprint)) return fwd;
         }
-        if (allowSprint && pursues(cand, c)) return PURSUE;
+        // in water sprint makes no difference (jump held is what keeps the head up), and the game plans without it there:
+        // without this every plan in water came out unsafe and nothing moved the player
+        if ((allowSprint || cand.s.inWater) && pursues(cand, c, allowSprint)) return PURSUE;
         return UNSAFE;
     }
 
     /** Sprint-jumping toward the path's next node stays in the corridor until it leaves the window or 3 s pass. */
-    private boolean pursues(Cand cand, Corridor c) {
+    private boolean pursues(Cand cand, Corridor c, boolean sprint) {
         PlayerSim s = cand.s.copy();
         float yaw = cand.yaw;
         double total = c.cum[c.nodes.length - 1];
         for (int t = 0; t < SAFE_TICKS; t++) {
             yaw = approach(yaw, pursuitYaw(s, c), maxTurn);
             boolean air = !s.onGround;
-            s.step(1, 0, true, true, yaw);
+            s.step(1, 0, true, sprint, yaw);
             if (!alive(s, c, air)) return false;
             if (s.onGround && !c.includesEnd && progress(s, c) >= total - 1.5) return true;
         }

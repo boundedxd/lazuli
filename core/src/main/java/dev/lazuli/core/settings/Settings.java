@@ -32,6 +32,8 @@ public final class Settings {
     public final Setting<Boolean> allowPlace = bool("allowPlace", true);
     /** Bridge eagle-style: crouch only at the edge (faster); off, ninja-style, sneaking the whole way. */
     public final Setting<Boolean> eagleBridge = bool("eagleBridge", false);
+    /** Crouch while standing still to break a block in the path (off: stand up, as most players do). */
+    public final Setting<Boolean> mineSneak = bool("mineSneak", false);
     /** Block ids (namespace optional) the path may place for bridging and pillaring. */
     public final Setting<String> throwawayBlocks = register(new Setting<>("throwawayBlocks",
         "dirt,cobblestone,cobbled_deepslate,netherrack,stone,andesite,diorite,granite,tuff,deepslate,blackstone,end_stone",

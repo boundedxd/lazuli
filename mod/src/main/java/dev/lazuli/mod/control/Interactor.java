@@ -78,6 +78,7 @@ public final class Interactor implements Builder.Hands {
         if (placeCooldown > 0) placeCooldown--;
         if (rebuildCooldown > 0) rebuildCooldown--;
         builder.setEagle(settings.eagleBridge.get());
+        builder.setMineSneak(settings.mineSneak.get());
         return builder.tick(state, path, idx, block, settings.allowBreak.get(), settings.allowPlace.get());
     }
 

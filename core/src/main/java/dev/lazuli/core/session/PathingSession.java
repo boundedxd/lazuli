@@ -114,6 +114,17 @@ public final class PathingSession {
         return snapshot;
     }
 
+    /** Why a trip FAILED: proven out of reach, or the search gave up (out of time) without telling either way. */
+    public enum Failure { NONE, UNREACHABLE, GAVE_UP }
+
+    private volatile Failure failure = Failure.NONE;
+    private volatile long failedTrip = -1;
+
+    /** Why trip {@code trip} failed ({@link Failure#NONE} if it didn't, or that's not known). */
+    public Failure failure(long trip) {
+        return failedTrip == trip ? failure : Failure.NONE;
+    }
+
     /** A trip was asked for and its first path isn't out yet (still searching). */
     private volatile boolean planning;
 
@@ -379,19 +390,27 @@ public final class PathingSession {
     /** Plans from the player: straight to the goal when it's near, otherwise the next segment toward it. */
     private void begin() {
         segment = null;
+        // any goal with a place counts (#mine's and #getitem's "any of these blocks" too, the nearest of them): planned
+        // in one search all the way, a far one floods the ground (through rock when digging) until it gives up
+        handoff = HANDOFF;
+        int[] p = goalPoint(goal);
+        if (p != null && graph.digs() && rockLeg(p)) return;
         int[] t = goalXZ();
+        if (t == null && p != null) t = new int[]{p[0], p[2]};
         if (t != null) {
             double dx = t[0] - Pos.x(player), dz = t[1] - Pos.z(player), d = Math.sqrt(dx * dx + dz * dz);
             if (d > DIRECT) {
-                // straight ahead first, then fanning out, then nearer, in case the way ahead is a lake or a cliff
-                double[][] tries = {{0, SEGMENT}, {0.6, SEGMENT}, {-0.6, SEGMENT}, {1.2, SEGMENT}, {-1.2, SEGMENT}, {0, SEGMENT / 2.0}};
+                // straight ahead first, then fanning out, then nearer, in case the way ahead is a lake or a cliff.
+                // Through solid ground (digging) a segment is a tunnel, every block of it dug: half as long, or the
+                // search floods the rock round it and runs out of time before it gets there
+                double len = graph.digs() && solidAhead(dx / d, dz / d) ? SEGMENT / 2.0 : SEGMENT;
+                double[][] tries = {{0, len}, {0.6, len}, {-0.6, len}, {1.2, len}, {-1.2, len}, {0, len / 2}};
                 for (double[] tr : tries) {
                     double c = Math.cos(tr[0]), sn = Math.sin(tr[0]);
                     double ux = (dx * c - dz * sn) / d, uz = (dx * sn + dz * c) / d;
                     int wx = (int) Math.round(Pos.x(player) + ux * tr[1]), wz = (int) Math.round(Pos.z(player) + uz * tr[1]);
                     int wy = Pos.y(player);
-                    if (goal instanceof GoalBlock b) wy += (int) Math.round((b.y() - wy) * tr[1] / d);
-                    else if (goal instanceof GoalNear n) wy += (int) Math.round((n.y() - wy) * tr[1] / d);
+                    if (p != null) wy += (int) Math.round((p[1] - wy) * tr[1] / d);
                     segment = new GoalNear(wx, surface(wx, wy, wz), wz, SEGMENT_RADIUS);
                     createPlanner();
                     PlanResult r = search(SEGMENT_NANOS);
@@ -404,7 +423,6 @@ public final class PathingSession {
                 segment = null; // nothing ahead worked; search the whole way and report honestly
             }
         }
-        int[] p = goalPoint(goal);
         if (p != null && graph.digs() && Math.abs(p[1] - Pos.y(player)) > DEEP) {
             // a dig toward it, DEEP blocks up or down at a time
             double f = (double) DEEP / Math.abs(p[1] - Pos.y(player));
@@ -422,6 +440,61 @@ public final class PathingSession {
         }
         createPlanner();
         replan();
+    }
+
+    /** How far one leg dug through solid ground goes (along the straight line, any direction). */
+    static final int ROCK_LEG = 24;
+
+    /**
+     * The goal is far and the straight line to it is mostly solid: a tunnel or shaft the whole way, every block dug.
+     * One search for all of it floods the rock round the player (dig costs are several times what the walking
+     * estimate guesses) and runs out of time; legs of {@link #ROCK_LEG} along the line are found in well under a
+     * second each. True if a leg was found and published.
+     */
+    /** How near the segment's end the next one gets planned: a third of a rock leg, else {@link #HANDOFF}. */
+    private int handoff = HANDOFF;
+
+    private boolean rockLeg(int[] p) {
+        double dx = p[0] - Pos.x(player), dy = p[1] - Pos.y(player), dz = p[2] - Pos.z(player);
+        double d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (d <= ROCK_LEG + 4 || !solidLine(dx / d, dy / d, dz / d, d)) return false;
+        for (double len : new double[]{ROCK_LEG, ROCK_LEG / 2.0}) {
+            segment = new GoalNear((int) Math.round(Pos.x(player) + dx / d * len), (int) Math.round(Pos.y(player) + dy / d * len),
+                (int) Math.round(Pos.z(player) + dz / d * len), SEGMENT_RADIUS);
+            createPlanner();
+            PlanResult r = search(SEGMENT_NANOS);
+            if (stale()) return true;
+            if (r.status() == PlanResult.Status.FOUND) {
+                handoff = Math.max(4, (int) len / 3);
+                publish(State.PATHING, r.path());
+                return true;
+            }
+        }
+        segment = null;
+        return false;
+    }
+
+    /** Whether most of the straight line (unit direction, length d) from the player's head is solid ground. */
+    private boolean solidLine(double ux, double uy, double uz, double d) {
+        int solid = 0, n = 0;
+        double hx = Pos.x(player) + 0.5, hy = Pos.y(player) + 1.5, hz = Pos.z(player) + 0.5;
+        for (double i = 1; i <= Math.min(d, SEGMENT); i += 1) {
+            n++;
+            if (world.get((int) Math.floor(hx + ux * i), (int) Math.floor(hy + uy * i), (int) Math.floor(hz + uz * i))
+                == dev.lazuli.core.world.BlockKind.SOLID) solid++;
+        }
+        return n > 0 && solid * 10 >= n * 6;
+    }
+
+    /** Whether most of the straight line ahead (the next segment, at head height) is solid: digging all the way. */
+    private boolean solidAhead(double ux, double uz) {
+        int solid = 0, n = 0;
+        for (int i = 2; i <= SEGMENT; i += 2) {
+            int x = (int) Math.floor(Pos.x(player) + 0.5 + ux * i), z = (int) Math.floor(Pos.z(player) + 0.5 + uz * i);
+            n++;
+            if (world.get(x, Pos.y(player) + 1, z) == dev.lazuli.core.world.BlockKind.SOLID) solid++;
+        }
+        return solid * 2 > n;
     }
 
     /** Where a goal is (the nearest of several), or null for goals without a point (y levels, x/z). */
@@ -505,7 +578,7 @@ public final class PathingSession {
             return;
         }
         if (segment != null && Math.sqrt(sq(segment.x() - Pos.x(player)) + sq(segment.y() - Pos.y(player))
-            + sq(segment.z() - Pos.z(player))) <= HANDOFF
+            + sq(segment.z() - Pos.z(player))) <= handoff
             && graph.isNode(player)) {
             begin(); // the current path stays published while the next segment is planned
             return;
@@ -542,6 +615,10 @@ public final class PathingSession {
             }
         }
         planner = null;
+        if (!stale()) {
+            failure = r.status() == PlanResult.Status.NO_PATH ? Failure.UNREACHABLE : Failure.GAVE_UP;
+            failedTrip = tripId;
+        }
         publish(State.FAILED, List.of());
         if (!quiet && !stale()) messages.accept(Chat.err(r.status() == PlanResult.Status.NO_PATH ? "Goal unreachable" : "Gave up: search budget exceeded"));
     }
@@ -592,6 +669,13 @@ public final class PathingSession {
 
     private synchronized void publish(State state, List<Long> path) {
         if (stale()) return;
+        Snapshot was = snapshot;
+        if (was.state() == state && was.trip() == tripId && was.goal() == goal && was.path().equals(path)) {
+            // a repair that came back with the same path (a block mined along it): no new version, or whoever follows
+            // it starts over finding its place on it, mid-drop down the shaft
+            planning = false;
+            return;
+        }
         snapshot = new Snapshot(state, List.copyOf(path), goal, versions.incrementAndGet(), tripId);
         planning = false;
     }

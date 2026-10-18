@@ -94,6 +94,7 @@ public final class LazuliConfig implements WalksyLibApi {
             .category(Category.builder("Building")
                 .group(OptionGroup.builder("Placing")
                     .option(bool(s.allowPlace, "Bridge gaps and pillar up with throwaway blocks from the hotbar."))
+                    .option(bool(s.mineSneak, "Crouch while standing still to break blocks in the way (off: stand normally)."))
                     .option(bool(s.eagleBridge, "Eagle bridge: walk back without sneaking and only crouch at the edge to place (faster). Off: ninja bridge, sneaking the whole way."))
                     .option(idList("Throwaway blocks", s.throwawayBlocks, ListEntries.blocks(), "Blocks it may place for bridging and pillaring."))
                     .option(bool(s.keepCollected, "Never bridge or pillar with blocks it's collecting (what #mine mines, what #getitem needs); only with spares beyond that."))

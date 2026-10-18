@@ -84,6 +84,12 @@ public final class Builder {
      * the whole way (ninja bridging: slower, but the edge always holds).
      */
     private boolean eagle;
+    /** Crouch while standing still breaking a block (mineSneak); off: stand normally. */
+    private boolean mineSneak;
+
+    public void setMineSneak(boolean on) {
+        mineSneak = on;
+    }
 
     public void setEagle(boolean on) {
         eagle = on;
@@ -199,7 +205,7 @@ public final class Builder {
                 hands.mine(pos);
                 blind = 0;
             }
-            return new Controls(false, false, false, false, ang[0], ang[1], 0, true);
+            return new Controls(false, false, false, false, ang[0], ang[1], 0, mineSneak);
         }
         Raycast.Hit now = Raycast.cast(world, p.x(), eye, p.z(), p.yaw(), p.pitch(), Raycast.REACH);
         if (now != null && now.x() == x && now.y() == y && now.z() == z) {
@@ -207,7 +213,11 @@ public final class Builder {
             blind = 0;
         }
         float[] aim = aimAt(p.x(), eye, p.z(), x, y, z, -1);
-        return aim == null ? still(p, center(pos)) : new Controls(false, false, false, false, aim[0], aim[1], 0, true);
+        if (aim == null) {
+            Controls s = still(p, center(pos));
+            return new Controls(false, false, false, false, s.targetYaw(), s.targetPitch(), 0, mineSneak);
+        }
+        return new Controls(false, false, false, false, aim[0], aim[1], 0, mineSneak);
     }
 
     /**
