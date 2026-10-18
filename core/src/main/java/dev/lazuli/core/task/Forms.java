@@ -94,6 +94,19 @@ public final class Forms {
         add("jump", "Jump to label", Layout.LABEL);
         add("skip", "Skip rest of round", Layout.NONE);
         add("end", "End routine", Layout.NONE);
+        add("if", "If", Layout.RAW);
+        add("else", "Else / else if", Layout.RAW);
+        add("while", "While", Layout.RAW);
+        add("repeat", "Repeat", Layout.RAW);
+        add("setvar", "Set variable", Layout.RAW);
+        add("addvar", "Add to variable", Layout.RAW);
+        add("break", "Break (leave the loop)", Layout.NONE);
+        add("continue", "Continue (next turn)", Layout.NONE);
+    }
+
+    /** The picker words that make a block (an {@code if}, {@code while} or {@code repeat} with its {@code end}). */
+    public static boolean blockWord(String word) {
+        return word.equals("if") || word.equals("while") || word.equals("repeat");
     }
 
     /** The commands the picker offers, in order. */
@@ -110,7 +123,8 @@ public final class Forms {
     /** True for the words that aren't commands (wait, say, label...): they're written without the prefix. */
     public static boolean stepWord(String word) {
         return switch (word) {
-            case "wait", "say", "notify", "skip", "end", "label", "jump" -> true;
+            case "wait", "say", "notify", "skip", "end", "label", "jump", "if", "else", "while", "repeat", "setvar", "addvar",
+                 "break", "continue" -> true;
             default -> false;
         };
     }
@@ -129,6 +143,13 @@ public final class Forms {
             case "notify" -> "notify done";
             case "label" -> "label here";
             case "jump" -> "jump here";
+            case "if" -> "if night";
+            case "else" -> "else";
+            case "while" -> "while inv.free>0";
+            case "repeat" -> "repeat 3";
+            case "setvar" -> "set count = 0";
+            case "addvar" -> "add count 1";
+            case "break", "continue" -> word;
             default -> command(prefix, word, "");
         };
     }
