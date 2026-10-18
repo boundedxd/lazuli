@@ -44,6 +44,7 @@ public final class GetItemProcess implements Process {
     private final MineProcess mine;
     private final CraftProcess crafts;
     private final SmeltProcess smelts;
+    private SmithProcess smiths;
     private ContainerProcess containers;
     private java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests;
     private java.util.function.Function<Minecraft, String> dimension;
@@ -84,6 +85,11 @@ public final class GetItemProcess implements Process {
     }
 
         private HuntProcess hunt;
+
+    /** Upgrading at a smithing table (getItemSmith). */
+    public void useSmith(SmithProcess smiths) {
+        this.smiths = smiths;
+    }
 
     /** Hunting for mob drops (getItemHunt). */
     public void useHunt(HuntProcess hunt) {
@@ -190,6 +196,7 @@ public final class GetItemProcess implements Process {
                 case MINE -> mine.stop(false);
                 case CRAFT -> crafts.stop(false);
                 case SMELT -> smelts.stop(false);
+                case SMITH -> smiths.stop(false);
                 case KILL -> hunt.stop(false);
             }
         }
@@ -311,6 +318,7 @@ public final class GetItemProcess implements Process {
             case MINE -> mine.start(mc, drops.blocksFor(a.item(), a.count(), a.blocks()), a.blocks()); // 64 redstone: ~15 ores
             case CRAFT -> crafts.start(mc, List.of(new ItemCount(a.item(), a.count())), true);
             case SMELT -> smelts.start(mc, new ItemCount(a.item(), a.count()), true);
+            case SMITH -> smiths.start(mc, new ItemCount(a.item(), a.count()));
             case KILL -> hunt.start(mc, a.item(), count(p, a.item()) + a.count(), a.blocks());
         }
     }
@@ -401,7 +409,8 @@ public final class GetItemProcess implements Process {
     private ItemPlanner planner(Minecraft mc, Recipes recipes, Drops drops) {
         ItemPlanner planner = new ItemPlanner(recipes, drops, GetItemProcess::tier, SmeltProcess.burn(mc), smelts.fuels(),
             new ItemPlanner.Rules(settings.getItemMine.get(), settings.getItemSmelt.get(),
-                settings.craftPlaceTable.get() && settings.allowPlace.get(), settings.smeltPlaceFurnace.get() && settings.allowPlace.get()))
+                settings.craftPlaceTable.get() && settings.allowPlace.get(), settings.smeltPlaceFurnace.get() && settings.allowPlace.get(),
+                settings.getItemSmith.get()))
             .batching(settings.getItemBatch.get());
         if (settings.getItemNearby.get()) planner.nearby(Nearby.scan(mc, settings.antiXray.get()));
         if (hunt != null && settings.getItemHunt.get()) planner.mobs(RecipeData.mobDrops().getNow(null));
@@ -414,6 +423,7 @@ public final class GetItemProcess implements Process {
         // what it wants and already has counts worn or used too (armor it put on, a damaged pickaxe): never made again
         Map<String, Integer> have = new HashMap<>(Inventories.plainCounts(p));
         for (ItemCount w : wants) have.merge(w.item(), count(p, w.item()), Math::max);
+        planner.smithingTable(Station.nearest(mc, p, Blocks.SMITHING_TABLE, range) != null);
         return planner.plan(wants, have, pickTier(p),
             Station.nearest(mc, p, Blocks.CRAFTING_TABLE, range) != null, Station.nearest(mc, p, Blocks.FURNACE, range) != null);
     }
@@ -459,6 +469,12 @@ public final class GetItemProcess implements Process {
                 case CANCELLED -> Status.CANCELLED;
             };
             case SMELT -> switch (smelts.outcome()) {
+                case NONE -> Status.RUNNING;
+                case DONE -> Status.OK;
+                case FAILED -> Status.FAILED;
+                case CANCELLED -> Status.CANCELLED;
+            };
+            case SMITH -> switch (smiths.outcome()) {
                 case NONE -> Status.RUNNING;
                 case DONE -> Status.OK;
                 case FAILED -> Status.FAILED;
@@ -541,6 +557,7 @@ public final class GetItemProcess implements Process {
             case MINE -> "mine";
             case CRAFT -> "craft";
             case SMELT -> "smelt";
+            case SMITH -> "upgrade to";
             case KILL -> "hunt for";
         };
     }

@@ -113,6 +113,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private ContainerProcess containers;
 	private CraftProcess crafts;
 	private SmeltProcess smelts;
+	private dev.lazuli.mod.process.SmithProcess smiths;
 	private dev.lazuli.mod.process.BrewProcess brews;
 	private dev.lazuli.mod.process.EnchantProcess enchants;
 	private dev.lazuli.mod.process.ElytraProcess elytra;
@@ -182,6 +183,8 @@ public final class LazuliClient implements ClientModInitializer {
 		getItem.useChests(containers, this::chests, LazuliClient::dimension);
 		hunt = new dev.lazuli.mod.process.HuntProcess(session, settings, this::chat);
 		getItem.useHunt(hunt);
+		smiths = new dev.lazuli.mod.process.SmithProcess(session, settings, clicks, this::chat);
+		getItem.useSmith(smiths);
 		chestWatcher = new dev.lazuli.mod.inventory.ChestWatcher(settings.chestMemory::get, this::chests, LazuliClient::dimension);
 		trades = new dev.lazuli.mod.process.TradeProcess(session, settings, clicks, mine, crafts, smelts, containers, this::tradeMemory,
 			this::chests, LazuliClient::dimension, this::chat);
@@ -214,7 +217,7 @@ public final class LazuliClient implements ClientModInitializer {
 		recovery = new dev.lazuli.mod.process.DeathRecovery(session, settings, LazuliClient::dimension, this::chat);
 		iceboat = new dev.lazuli.mod.process.IceBoatProcess(settings, cache,
 			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("iceboat"), this::chat);
-		processes = java.util.List.of(iceboat, portals, strongholds, mine, follow, explore, tunnel, farm, breeds, fishing, containers, crafts, smelts, hunt, getItem,
+		processes = java.util.List.of(iceboat, portals, strongholds, mine, follow, explore, tunnel, farm, breeds, fishing, containers, crafts, smelts, smiths, hunt, getItem,
 			trades, brews, enchants, elytra, sorts, builds, sleeps, recovery, restock, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
 			@Override

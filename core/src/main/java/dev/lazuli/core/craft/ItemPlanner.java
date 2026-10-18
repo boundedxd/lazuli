@@ -17,7 +17,7 @@ import java.util.function.ToIntFunction;
  * first step and plans again from the real inventory, so the plan only has to be right, not exact.
  */
 public final class ItemPlanner {
-    public enum Kind { MINE, CRAFT, SMELT, KILL }
+    public enum Kind { MINE, CRAFT, SMELT, KILL, SMITH }
 
     /**
      * Mine {@code count} of {@code blocks} for {@code item}; craft or smelt {@code count} more of {@code item}; kill the
@@ -44,15 +44,20 @@ public final class ItemPlanner {
         }
     }
 
-    /** What it may do: mine, smelt, place a crafting table, place a furnace. */
-    public record Rules(boolean mine, boolean smelt, boolean placeTable, boolean placeFurnace) {
-        public static final Rules ALL = new Rules(true, true, true, true);
+    /** What it may do: mine, smelt, place a crafting table, place a furnace, upgrade at a smithing table. */
+    public record Rules(boolean mine, boolean smelt, boolean placeTable, boolean placeFurnace, boolean smith) {
+        public static final Rules ALL = new Rules(true, true, true, true, true);
+
+        public Rules(boolean mine, boolean smelt, boolean placeTable, boolean placeFurnace) {
+            this(mine, smelt, placeTable, placeFurnace, true);
+        }
     }
 
     /** Pickaxes by tier: 1 wood, 2 stone, 3 iron, 4 diamond. */
     static final String[] PICKS = {null, "minecraft:wooden_pickaxe", "minecraft:stone_pickaxe", "minecraft:iron_pickaxe",
         "minecraft:diamond_pickaxe"};
-    private static final String TABLE = "minecraft:crafting_table", FURNACE = "minecraft:furnace";
+    private static final String TABLE = "minecraft:crafting_table", FURNACE = "minecraft:furnace",
+        SMITHING_TABLE = "minecraft:smithing_table";
     private static final double INF = 1e12;
     private static final int DEPTH = 16;
 
@@ -61,7 +66,7 @@ public final class ItemPlanner {
     private final ToIntFunction<String> toolTier, burn;
     private final List<String> fuels;
     private final Rules rules;
-    private boolean batching;
+    private boolean batching, smithNear;
     private ToIntFunction<String> near;
     private MobDrops mobs;
 
@@ -95,6 +100,12 @@ public final class ItemPlanner {
      */
     public ItemPlanner nearby(ToIntFunction<String> near) {
         this.near = near;
+        return this;
+    }
+
+    /** Whether a smithing table is near (else it makes and places one for an upgrade). */
+    public ItemPlanner smithingTable(boolean near) {
+        smithNear = near;
         return this;
     }
 
@@ -170,6 +181,18 @@ public final class ItemPlanner {
                     inv.clear();
                     inv.putAll(left);
                 }
+                case SMITH -> {
+                    SmithRecipe sr = null;
+                    for (SmithRecipe r : recipes.smithing(a.item()))
+                        if (sr == null && has(inv, r.template(), a.count()) && has(inv, r.base(), a.count()) && has(inv, r.addition(), a.count())) sr = r;
+                    if (sr == null) return false;
+                    for (Set<String> g : List.of(sr.template(), sr.base(), sr.addition()))
+                        for (String o : g) if (inv.getOrDefault(o, 0) >= a.count()) {
+                            inv.merge(o, -a.count(), Integer::sum);
+                            break;
+                        }
+                    inv.merge(a.item(), a.count(), Integer::sum);
+                }
                 case SMELT -> {
                     String in = null;
                     for (SmeltRecipe r : recipes.smelting(a.item()))
@@ -185,6 +208,11 @@ public final class ItemPlanner {
         }
         for (ItemCount w : wants) if (inv.getOrDefault(w.item(), 0) < Math.max(1, w.count())) return false;
         return true;
+    }
+
+    private static boolean has(Map<String, Integer> inv, Set<String> any, int n) {
+        for (String o : any) if (inv.getOrDefault(o, 0) >= n) return true;
+        return false;
     }
 
     private static final class Stuck extends RuntimeException {
@@ -206,7 +234,7 @@ public final class ItemPlanner {
         final Set<String> making = new HashSet<>(), costing = new HashSet<>();
         final List<Action> actions = new ArrayList<>();
         int pickTier;
-        boolean tableNear, furnaceNear;
+        boolean tableNear, furnaceNear, smithNear = ItemPlanner.this.smithNear;
         /** While trying out alternatives (see getAny): plain gets inside, no trying out again. */
         int tryingOut;
 
@@ -236,12 +264,12 @@ public final class ItemPlanner {
             try {
                 // cheapest way first; one that comes back round to this item (raw iron from a raw iron block made of
                 // raw iron) or can't be done: the next way
-                double[] cost = {mineCost(item, 0), smeltCost(item, 0), craftCost(item, 0), killCost(item)};
-                Integer[] order = {0, 1, 2, 3};
+                double[] cost = {mineCost(item, 0), smeltCost(item, 0), craftCost(item, 0), killCost(item), smithCost(item, 0)};
+                Integer[] order = {0, 1, 2, 3, 4};
                 java.util.Arrays.sort(order, java.util.Comparator.comparingDouble(i -> cost[i]));
                 if (cost[order[0]] >= INF) throw new Stuck("No way to get " + name(item) + why(item));
                 Stuck first = null;
-                for (int k = 0; k < 4; k++) {
+                for (int k = 0; k < 5; k++) {
                     int way = order[k];
                     if (cost[way] >= INF) break;
                     Snap before = save();
@@ -250,9 +278,10 @@ public final class ItemPlanner {
                             case 0 -> mine(item, need, depth);
                             case 1 -> smelt(item, need, depth);
                             case 3 -> kill(item, need);
+                            case 4 -> smith(item, need, depth);
                             // only recipes cheaper than the next way (a few nuggets don't make digging for an iron block
                             // worth it over smelting)
-                            default -> craft(item, need, depth, k < 3 ? cost[order[k + 1]] : INF);
+                            default -> craft(item, need, depth, k < 4 ? cost[order[k + 1]] : INF);
                         }
                         return;
                     } catch (Stuck e) {
@@ -270,6 +299,12 @@ public final class ItemPlanner {
             for (SmeltRecipe r : recipes.smelting(item)) {
                 if (!rules.smelt()) return " (smelting is off)";
                 for (String in : r.input()) return " (it's smelted from " + name(in) + ", and there's no way to get that)";
+            }
+            if (rules.smith()) {
+                for (SmithRecipe r : recipes.smithing(item))
+                    for (Set<String> g : List.of(r.template(), r.base(), r.addition()))
+                        if (g.stream().allMatch(o -> cost(o, 1) >= INF))
+                            return " (the upgrade needs " + name(g.iterator().next()) + ", and there's no way to get that)";
             }
             if (!drops.blocksDropping(item).isEmpty() && !rules.mine()) return " (mining is off)";
             if (!tableNear && !rules.placeTable() && recipes.producing(item).stream().anyMatch(r -> !r.fits(2)))
@@ -361,6 +396,59 @@ public final class ItemPlanner {
             fuel.forEach((f, k) -> have.merge(f, -k, Integer::sum));
             have.merge(item, n, Integer::sum);
             actions.add(new Action(Kind.SMELT, item, n, List.of()));
+        }
+
+        /** Upgrades at a smithing table (one near, or made and placed) with the cheapest recipe that works. */
+        void smith(String item, int n, int depth) {
+            List<SmithRecipe> rs = new ArrayList<>(recipes.smithing(item));
+            rs.sort(java.util.Comparator.comparingDouble(r -> smithRecipeCost(r, depth)));
+            Stuck first = null;
+            for (SmithRecipe r : rs) {
+                if (smithRecipeCost(r, depth) >= INF) break;
+                Snap before = save();
+                try {
+                    Map<String, Integer> mine = new HashMap<>();
+                    for (Set<String> g : List.of(r.template(), r.base(), r.addition())) {
+                        String o = cheapest(g, n, depth);
+                        getAny(g, o, n, depth);
+                        reserve(o, n);
+                        mine.merge(o, n, Integer::sum);
+                    }
+                    if (!smithNear) station(SMITHING_TABLE, rules.placeTable(), "smithing table", depth);
+                    mine.forEach((o, k) -> {
+                        reserved.merge(o, -k, Integer::sum);
+                        have.merge(o, -k, Integer::sum);
+                    });
+                    have.merge(item, n, Integer::sum);
+                    actions.add(new Action(Kind.SMITH, item, n, List.of()));
+                    return;
+                } catch (Stuck e) {
+                    restore(before);
+                    if (first == null) first = e;
+                }
+            }
+            throw first != null ? first : new Stuck("No way to upgrade to " + name(item));
+        }
+
+        double smithRecipeCost(SmithRecipe r, int depth) {
+            double sum = 1;
+            for (Set<String> g : List.of(r.template(), r.base(), r.addition())) {
+                double c = INF;
+                for (String o : g) c = Math.min(c, cost(o, depth + 1));
+                sum += c;
+                if (sum >= INF) return INF;
+            }
+            if (!smithNear && startHave.getOrDefault(SMITHING_TABLE, 0) < 1) {
+                sum += rules.placeTable() ? cost(SMITHING_TABLE, depth + 1) : INF;
+            }
+            return sum;
+        }
+
+        double smithCost(String item, int depth) {
+            if (!rules.smith()) return INF;
+            double best = INF;
+            for (SmithRecipe r : recipes.smithing(item)) best = Math.min(best, smithRecipeCost(r, depth));
+            return best;
         }
 
         /** Crafts with the cheapest recipe that works, of those costing under {@code limit}. */
@@ -457,11 +545,11 @@ public final class ItemPlanner {
 
         /** Everything a plan changes, to try something and go back. */
         record Snap(Map<String, Integer> have, Map<String, Integer> reserved, List<Action> actions, Map<String, Double> costs,
-                    int pickTier, boolean tableNear, boolean furnaceNear, Map<String, Integer> keep) {}
+                    int pickTier, boolean tableNear, boolean furnaceNear, boolean smithNear, Map<String, Integer> keep) {}
 
         Snap save() {
             return new Snap(new HashMap<>(have), new HashMap<>(reserved), new ArrayList<>(actions), new HashMap<>(costs),
-                pickTier, tableNear, furnaceNear, new HashMap<>(keep));
+                pickTier, tableNear, furnaceNear, smithNear, new HashMap<>(keep));
         }
 
         void restore(Snap s) {
@@ -476,6 +564,7 @@ public final class ItemPlanner {
             pickTier = s.pickTier();
             tableNear = s.tableNear();
             furnaceNear = s.furnaceNear();
+            smithNear = s.smithNear();
             keep.clear();
             keep.putAll(s.keep());
         }
@@ -486,6 +575,7 @@ public final class ItemPlanner {
             get(block, 1, depth + 1);
             have.merge(block, -1, Integer::sum); // placed
             if (block.equals(TABLE)) tableNear = true;
+            else if (block.equals(SMITHING_TABLE)) smithNear = true;
             else furnaceNear = true;
         }
 
