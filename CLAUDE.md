@@ -138,6 +138,15 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
   `RoutineRunner` runs `Step`s through a `Host` (run/stop/world/say/notify); only steps with @retry/@onfail react to `failStep` (chat errors), plain ones behave as before; `@with`
   overrides settings for that step and restores them. `Routine.check` validates (`#routine check`); `#routine show|edit|insert|remove|rename|copy|check|status|help`.
   GUI editor: `mod/config/RoutineEditor` (step page list, per-step widgets; model helpers `core/task/Forms` + `CondForm`), tab `config/tabs/RoutinesTab`.
+- Routine control flow: steps stay a flat list; `core/task/Program` works out the blocks (`if <c>` / `else if <c>` / `else` / `while <c>` / `repeat <n>` closed by `end`, `break`, `continue`; a plain `end`
+  outside any block is still the old "end routine"). `Step.Kind` has IF ELSE WHILE REPEAT BREAK CONTINUE SET ADD (bare words only: `set x = 1` is a variable, `#set name value` the settings command;
+  `Step.isStepWord` decides prefixing). `Routine.compile` (errors say "step N:" = line), `Routine.check` also checks blocks + unknown `$vars`. `RoutineRunner` keeps loop `Frame`s, variables
+  (`set`, `add`, `$name` in args, builtins `$round $fails $loop`), last-step result (`last step failed|succeeded`), per-loop limit `routineLoopLimit` and yields every 5000 control steps per tick.
+  Expressions `core/task/Expr` (`+ - * / %`, brackets, `$vars`, numeric condition names). Conditions (`Cond`) accept natural wording (`free slots < 4`, `tool durability iron_pickaxe < 20`,
+  `distance to @home < 30`, `hostile nearby`, `random 30`, `weather == rain`...) normalized to dotted names; `Cond.World` has default methods for the new ones (`mod/RoutineGame` implements them).
+  Editor model (tested, pure): `core/task/RoutineModel` (rows, depth, collapse, block-aware move/duplicate/delete keep-children or delete-all, template add, add else, `reconcile` for the widget list);
+  `CondForm.Subject` lists every condition kind for the click builder; command options as widgets: `core/trade/TradeForm` (bare trade words, tri-state options via `no-<word>`), `Forms.splitExtras`
+  (`at x y z` for stations, `dry|deposit|then` for getitem). The editor reuses one condition builder for @if/@unless/@until and block conditions (`CondState` "block").
 - Targets: `#pick [name]` toggles pick mode (`mod/process/PickMode`: shift+right-click a block/entity saves it, vanilla click cancelled), `#target list|show|del|rename|clear|goto|near`;
   `core/target/Target`, `Targets` (per-server file `targets.txt`, names lower-case, modifier words reserved). `@name` anywhere in a typed command or a routine step is expanded when it runs
   (`Targets.expand`: `x y z`, `at x y z` for craft/smelt/brew..., `--with <uuid>` for a villager in #trade); `#routine`/`#queue` keep it raw. Drawn by `LazuliRenderer` (renderTargets),

@@ -1,7 +1,12 @@
 package dev.lazuli.mod;
 
 import dev.lazuli.core.storage.ChestMemory;
+import dev.lazuli.core.target.Target;
+import dev.lazuli.core.target.Targets;
 import dev.lazuli.core.task.Cond;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.player.Inventory;
@@ -16,11 +21,13 @@ final class RoutineGame implements Cond.World {
     private final Supplier<ChestMemory> chests;
     private final Supplier<String> dimension;
     private final BooleanSupplier busy;
+    private final Supplier<Targets> targets;
 
-    RoutineGame(Supplier<ChestMemory> chests, Supplier<String> dimension, BooleanSupplier busy) {
+    RoutineGame(Supplier<ChestMemory> chests, Supplier<String> dimension, BooleanSupplier busy, Supplier<Targets> targets) {
         this.chests = chests;
         this.dimension = dimension;
         this.busy = busy;
+        this.targets = targets;
     }
 
     /** "minecraft:Iron_Ingot" and "iron_ingot" are the same. */
@@ -95,5 +102,129 @@ final class RoutineGame implements Cond.World {
     @Override
     public boolean busy() {
         return busy.getAsBoolean();
+    }
+
+    @Override
+    public int anywhere(String item) {
+        return items(item) + chestItems(item);
+    }
+
+    private static double percentLeft(ItemStack s) {
+        if (!s.isDamageableItem() || s.getMaxDamage() <= 0) return 100;
+        return 100.0 * (s.getMaxDamage() - s.getDamageValue()) / s.getMaxDamage();
+    }
+
+    @Override
+    public double armorDurability() {
+        var p = Minecraft.getInstance().player;
+        if (p == null) return 100;
+        double worst = 100;
+        for (EquipmentSlot slot : new EquipmentSlot[]{EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET}) {
+            ItemStack s = p.getItemBySlot(slot);
+            if (!s.isEmpty()) worst = Math.min(worst, percentLeft(s));
+        }
+        return worst;
+    }
+
+    @Override
+    public double toolDurability(String item) {
+        var p = Minecraft.getInstance().player;
+        if (p == null) return 0;
+        String want = path(item);
+        double worst = -1;
+        Inventory inv = p.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack s = inv.getItem(i);
+            if (s.isEmpty() || !BuiltInRegistries.ITEM.getKey(s.getItem()).getPath().equals(want)) continue;
+            double left = percentLeft(s);
+            if (worst < 0 || left < worst) worst = left;
+        }
+        return worst < 0 ? 0 : worst;
+    }
+
+    @Override
+    public int xpLevel() {
+        var p = Minecraft.getInstance().player;
+        return p == null ? 0 : p.experienceLevel;
+    }
+
+    @Override
+    public int timeOfDay() {
+        var mc = Minecraft.getInstance();
+        return mc.level == null ? 0 : (int) (mc.level.getDayTime() % 24000);
+    }
+
+    @Override
+    public boolean raining() {
+        var mc = Minecraft.getInstance();
+        return mc.level != null && mc.level.isRaining();
+    }
+
+    @Override
+    public boolean thundering() {
+        var mc = Minecraft.getInstance();
+        return mc.level != null && mc.level.isThundering();
+    }
+
+    @Override
+    public int y() {
+        var p = Minecraft.getInstance().player;
+        return p == null ? 0 : p.getBlockY();
+    }
+
+    @Override
+    public double distanceTo(String where) {
+        var p = Minecraft.getInstance().player;
+        if (p == null) return 1e9;
+        if (where.startsWith("@")) {
+            Targets t = targets.get();
+            if (t == null) return 1e9;
+            Target found = t.get(where.substring(1));
+            if (found == null || !found.dim().equals(dimension.get())) return 1e9;
+            return Math.sqrt(found.distSq(p.getBlockX(), p.getBlockY(), p.getBlockZ()));
+        }
+        String[] c = where.split(",");
+        if (c.length != 3) return 1e9;
+        try {
+            double dx = Double.parseDouble(c[0]) - p.getX(), dy = Double.parseDouble(c[1]) - p.getY(), dz = Double.parseDouble(c[2]) - p.getZ();
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        } catch (NumberFormatException e) {
+            return 1e9;
+        }
+    }
+
+    @Override
+    public int playersNearby() {
+        var mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) return 0;
+        int n = 0;
+        for (var other : mc.level.players()) if (other != mc.player && other.distanceToSqr(mc.player) <= 32 * 32) n++;
+        return n;
+    }
+
+    @Override
+    public int hostilesNearby() {
+        var mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) return 0;
+        return mc.level.getEntitiesOfClass(LivingEntity.class, mc.player.getBoundingBox().inflate(16), e -> e instanceof Enemy && e.isAlive()).size();
+    }
+
+    @Override
+    public boolean holding(String item) {
+        var p = Minecraft.getInstance().player;
+        if (p == null) return false;
+        ItemStack s = p.getMainHandItem();
+        return !s.isEmpty() && BuiltInRegistries.ITEM.getKey(s.getItem()).getPath().equals(path(item));
+    }
+
+    @Override
+    public boolean hasEffect(String name) {
+        var p = Minecraft.getInstance().player;
+        if (p == null) return false;
+        String want = path(name);
+        for (var e : p.getActiveEffects()) {
+            if (BuiltInRegistries.MOB_EFFECT.getKey(e.getEffect().value()).getPath().equals(want)) return true;
+        }
+        return false;
     }
 }

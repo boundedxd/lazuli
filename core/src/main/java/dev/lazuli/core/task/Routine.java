@@ -188,7 +188,13 @@ public final class Routine {
             "@before <dur> / @after <dur>  wait before / after the step",
             "@if <cond> / @unless <cond>  only run when it holds / doesn't hold, else the step is skipped",
             "@with name=value ...  change settings for this step only (put back after)   @off  switch the step off",
-            "Conditions: inv.<item>>n  chest.<item>>n  inv.free>n  inv.full  has.<item>  health>n  hunger>n  day  night  time==day  dim==nether  busy; join with and, or, not, ( )",
+            "Conditions: inv.<item>>n  chest.<item>>n  anywhere.<item>>n  inv.free>n (or: free slots > n)  inv.full  has.<item>  holding <item>  health>n  hunger>n  "
+                + "armor durability<n  tool durability <item> < n  xp level>n  y level<n  time==day|night or time>=ticks  weather==rain|thunder|clear  dim==nether  "
+                + "distance to @target (or x,y,z) < n  players nearby  hostile nearby  has effect <name>  last step failed|succeeded  loop count  random <percent>  busy  $variable>n; "
+                + "compare with < <= > >= == !=, join with and, or, not, ( )",
+            "Blocks (one step per line, 'end' closes the block, they nest): if <cond> ... else if <cond> ... else ... end   while <cond> ... end   repeat <n> ... end   break   continue",
+            "Variables: set count = 0   set want = inv.iron_ingot * 2 - 5   add count (or add count 5); use $count in conditions and arguments (withdraw string $want); built in: $round $fails $loop. A plain 'end' outside blocks still ends the routine.",
+            "A loop that goes round more than routineLoopLimit times (default 100000) stops the routine; " + p + "stop always works at once. " + p + "routine check <name> reports unbalanced blocks, unknown names and variables, with the line.",
             "Step words: wait <dur>, say <text>, notify <text>, skip (rest of the round), end, label <name>, jump <name> (or goto :<name>)",
             "@name in a command is a saved target (" + p + "target list): withdraw string all @duper",
             p + "routine show|edit|insert|remove|rename|copy|check|status <name> ...");

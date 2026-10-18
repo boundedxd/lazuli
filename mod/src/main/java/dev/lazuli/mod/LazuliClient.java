@@ -1025,7 +1025,8 @@ public final class LazuliClient implements ClientModInitializer {
 	/** What the routine runner needs from the game. */
 	private final dev.lazuli.core.task.RoutineRunner.Host routineHost = new dev.lazuli.core.task.RoutineRunner.Host() {
 		private final RoutineGame game = new RoutineGame(() -> settings.chestMemory.get() ? chests(Minecraft.getInstance()) : null,
-			() -> dimension(Minecraft.getInstance()), LazuliClient.this::busy);
+			() -> dimension(Minecraft.getInstance()), LazuliClient.this::busy,
+			() -> Minecraft.getInstance().level == null ? null : LazuliClient.this.targets(Minecraft.getInstance()));
 
 		@Override
 		public boolean run(String line) {
@@ -1190,6 +1191,7 @@ public final class LazuliClient implements ClientModInitializer {
 		boolean full = mc.player != null && mc.player.getInventory().getFreeSlot() < 0;
 		routine.setIdlePolicy(settings.routineIdleWaitSeconds.get() * 20, settings.routineIdleRounds.get(), m -> chat(Chat.info(m)));
 		routine.setStepTimeout(settings.routineStepTimeoutMinutes.get() * 60 * 20);
+		routine.setLoopLimit(settings.routineLoopLimit.get());
 		String routineDone = routine.tick(busy(), full, routineHost);
 		if (routineDone != null) chat(Chat.ok(routineDone));
 		chestWatcher.tick(mc);
