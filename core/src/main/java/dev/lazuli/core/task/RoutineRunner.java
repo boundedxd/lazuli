@@ -59,6 +59,62 @@ public final class RoutineRunner {
         public boolean busy() { return false; }
     };
 
+    /** The turns of a while / repeat loop that's running: its header step, turns left (repeat) and turns started. */
+    private static final class Frame {
+        final int header;
+        int remaining;
+        long iter;
+
+        Frame(int header, int remaining) {
+            this.header = header;
+            this.remaining = remaining;
+        }
+    }
+
+    /** What conditions see while the routine runs: the game, plus the routine's variables, loop and last-step state. */
+    private final class Env implements Cond.World {
+        private final Cond.World base;
+
+        Env(Cond.World base) {
+            this.base = base;
+        }
+
+        public int items(String item) { return base.items(item); }
+        public int chestItems(String item) { return base.chestItems(item); }
+        public int freeSlots() { return base.freeSlots(); }
+        public double health() { return base.health(); }
+        public int hunger() { return base.hunger(); }
+        public boolean night() { return base.night(); }
+        public String dimension() { return base.dimension(); }
+        public boolean busy() { return base.busy(); }
+        public int anywhere(String item) { return base.anywhere(item); }
+        public double armorDurability() { return base.armorDurability(); }
+        public double toolDurability(String item) { return base.toolDurability(item); }
+        public int xpLevel() { return base.xpLevel(); }
+        public int timeOfDay() { return base.timeOfDay(); }
+        public boolean raining() { return base.raining(); }
+        public boolean thundering() { return base.thundering(); }
+        public int y() { return base.y(); }
+        public double distanceTo(String where) { return base.distanceTo(where); }
+        public int playersNearby() { return base.playersNearby(); }
+        public int hostilesNearby() { return base.hostilesNearby(); }
+        public boolean holding(String item) { return base.holding(item); }
+        public boolean hasEffect(String name) { return base.hasEffect(name); }
+        public boolean lastFailed() { return lastResult == Outcome.FAIL; }
+        public boolean lastSucceeded() { return lastResult == Outcome.OK; }
+        public int loopCount() { return frames.isEmpty() ? 0 : (int) Math.min(Integer.MAX_VALUE, frames.get(frames.size() - 1).iter); }
+        public boolean random(int percent) { return random.nextInt(100) < percent; }
+
+        public double variable(String name) {
+            return switch (name) {
+                case "round" -> round;
+                case "fails" -> fails;
+                case "loop" -> loopCount();
+                default -> vars.getOrDefault(name, 0.0);
+            };
+        }
+    }
+
     private enum Phase { NEXT, LAUNCH, RUN }
 
     private enum Outcome { NONE, OK, FAIL }
@@ -83,7 +139,33 @@ public final class RoutineRunner {
     private boolean handedOver, untilMet;
     private volatile String failReason = "";
     private int jumps;
+    private Program program = Program.of(List.of(), null);
+    private int[] lines;
+    private final List<Frame> frames = new ArrayList<>();
+    private final Map<String, Double> vars = new java.util.HashMap<>();
+    private final Map<Integer, Cond> blockConds = new java.util.HashMap<>();
+    private int fails;
+    private Outcome lastResult = Outcome.NONE;
+    /** Some step asks about the last step's result or the failure count, so every step's failure is noticed. */
+    private boolean tracksFailure;
+    private int loopLimit = 100000;
+    private java.util.Random random = new java.util.Random();
     private Settings settings;
+
+    /** Turns one while / repeat loop may take before the routine is stopped (the safety net against endless loops). */
+    public void setLoopLimit(int turns) {
+        this.loopLimit = Math.max(1, turns);
+    }
+
+    /** For tests: the dice behind {@code random <percent>}. */
+    public void setRandom(java.util.Random random) {
+        this.random = random;
+    }
+
+    /** A routine variable's value (0 when never set); for tests and the status line. */
+    public double variable(String name) {
+        return new Env(NO_WORLD).variable(name.toLowerCase(Locale.ROOT));
+    }
     private final Map<String, String> saved = new LinkedHashMap<>();
 
     /** What a forever routine does when a whole round did nothing: wait {@code waitTicks} (0: stop) and retry, up to {@code maxRounds} in a row. */
@@ -110,24 +192,33 @@ public final class RoutineRunner {
      * message says which step and why) when one doesn't parse or a jump has no label.
      */
     public void start(String name, List<String> lines, int times) {
-        List<Step> parsed = new ArrayList<>();
-        int n = 0;
-        for (String l : lines) {
-            n++;
-            if (l.isBlank()) continue;
-            try {
-                parsed.add(Step.parse(l));
-            } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException("step " + n + ": " + e.getMessage());
-            }
-        }
-        List<String> bad = Routine.labelProblems(parsed);
+        Routine.Compiled c = Routine.compile(lines);
+        List<String> bad = Routine.labelProblems(c.steps());
         if (!bad.isEmpty()) throw new IllegalArgumentException(bad.get(0));
-        startSteps(name, parsed, times);
+        bad = Routine.variableProblems(c.steps(), c.lines());
+        if (!bad.isEmpty()) throw new IllegalArgumentException(bad.get(0));
+        begin(name, c.steps(), c.program(), c.lines(), times);
     }
 
+    /** Throws IllegalArgumentException when the steps' blocks don't match up. */
     public void startSteps(String name, List<Step> steps, int times) {
+        begin(name, steps, Program.of(steps, null), null, times);
+    }
+
+    private void begin(String name, List<Step> steps, Program program, int[] lines, int times) {
         restoreSettings();
+        this.program = program;
+        this.lines = lines;
+        frames.clear();
+        vars.clear();
+        blockConds.clear();
+        fails = 0;
+        lastResult = Outcome.NONE;
+        tracksFailure = false;
+        for (Step s : steps) {
+            String t = Cond.normalize(s.text());
+            if (t.contains("last.failed") || t.contains("last.ok") || t.toLowerCase(Locale.ROOT).contains("$fails")) tracksFailure = true;
+        }
         this.name = name;
         this.steps = List.copyOf(steps);
         this.rounds = times <= 0 ? -1 : times;
@@ -146,6 +237,7 @@ public final class RoutineRunner {
     public void stop() {
         restoreSettings();
         steps = List.of();
+        frames.clear();
         step = -1;
         pause = 0;
     }
@@ -187,7 +279,7 @@ public final class RoutineRunner {
      */
     public void failStep(String why) {
         Step c = current();
-        if (phase == Phase.RUN && c != null && c.caresAboutFailure()) {
+        if (phase == Phase.RUN && c != null && cares(c)) {
             failReason = why == null ? "failed" : why;
             failRequested = true;
         }
@@ -272,7 +364,7 @@ public final class RoutineRunner {
             busy = false;
             handedOver = true;
         }
-        if (busy && s.untilCond() != null && !handedOver && s.untilCond().eval(host.world())) {
+        if (busy && s.untilCond() != null && !handedOver && s.untilCond().eval(env(host))) {
             host.stop();
             busy = false;
             untilMet = true;
@@ -307,7 +399,7 @@ public final class RoutineRunner {
             iter++;
             boolean again = false;
             if (!handedOver) {
-                if (s.untilCond() != null && !untilMet && !s.untilCond().eval(host.world())) {
+                if (s.untilCond() != null && !untilMet && !s.untilCond().eval(env(host))) {
                     again = true;
                     pause = POLL_TICKS;
                 } else if (s.untilCond() == null && iter < s.times()) {
@@ -320,6 +412,7 @@ public final class RoutineRunner {
                 return null;
             }
             restoreSettings();
+            lastResult = Outcome.OK;
             phase = Phase.NEXT;
             pause = s.afterTicks();
             return null;
@@ -335,6 +428,8 @@ public final class RoutineRunner {
             return null;
         }
         restoreSettings();
+        lastResult = Outcome.FAIL;
+        fails++;
         switch (s.onFail()) {
             case STOP -> {
                 String msg = who + " stopped: step " + (step + 1) + " '" + s.command() + "' " + why;
@@ -344,6 +439,7 @@ public final class RoutineRunner {
             case SKIP_REST -> {
                 notice.accept(who + ": '" + s.command() + "' " + why + "; skipping the rest of the round");
                 step = steps.size() - 1;
+                frames.clear();
             }
             case GOTO -> {
                 int at = indexOfLabel(s.failLabel());
@@ -354,6 +450,7 @@ public final class RoutineRunner {
                 }
                 notice.accept(who + ": '" + s.command() + "' " + why + "; going to " + s.failLabel());
                 step = at - 1;
+                pruneFrames(at);
             }
             default -> notice.accept(who + ": '" + s.command() + "' " + why + "; moving on");
         }
@@ -376,11 +473,11 @@ public final class RoutineRunner {
         phase = Phase.RUN;
         boolean ok;
         try {
-            ok = host.run(s.command());
+            ok = host.run(subst(s.command()));
         } catch (RuntimeException e) {
             ok = false;
         }
-        if (!ok && s.caresAboutFailure()) {
+        if (!ok && cares(s)) {
             failReason = "didn't start";
             failRequested = true;
         }
@@ -389,9 +486,17 @@ public final class RoutineRunner {
     /** Picks the next step to run (handling the step words, conditions, and the end of a round). */
     private String next(Host host) {
         String who = name == null ? "Queue" : name;
+        int spins = 0;
         while (true) {
+            if (!running()) return null;
+            if (++spins > SPINS_PER_TICK) {
+                // a loop of steps that run nothing: let the game have its tick, go on in the next
+                pause = 1;
+                return null;
+            }
             step++;
             if (step >= steps.size()) {
+                frames.clear();
                 if (!anyBusy && rounds < 0 && idleWaitTicks > 0) {
                     // forever, and nothing to do (an empty chest...): wait, then try the round again
                     if (++idleRounds >= idleLimit) {
@@ -424,8 +529,9 @@ public final class RoutineRunner {
             }
             Step s = steps.get(step);
             if (!s.enabled()) continue;
-            if (s.ifCond() != null && !s.ifCond().eval(host.world())) continue;
-            if (s.unlessCond() != null && s.unlessCond().eval(host.world())) continue;
+            Cond.World env = env(host);
+            if (s.ifCond() != null && !s.ifCond().eval(env)) continue;
+            if (s.unlessCond() != null && s.unlessCond().eval(env)) continue;
             switch (s.kind()) {
                 case LABEL -> {
                     continue;
@@ -439,24 +545,100 @@ public final class RoutineRunner {
                         return why;
                     }
                     step = at; // the label itself is skipped on the next pass
+                    pruneFrames(at);
                     continue;
                 }
                 case SKIP -> {
                     step = steps.size() - 1;
+                    frames.clear();
+                    continue;
+                }
+                case IF -> {
+                    if (blockCond(step).eval(env)) continue;
+                    int t = program.nextClause(step);
+                    // the else-if chain: the first clause that holds (or the plain else, or the end)
+                    while (t >= 0 && steps.get(t).kind() == Step.Kind.ELSE && !steps.get(t).args().isEmpty() && !blockCond(t).eval(env))
+                        t = program.nextClause(t);
+                    step = t < 0 ? steps.size() - 1 : t;
+                    continue;
+                }
+                case ELSE -> {
+                    // the branch before it ran: on to the end of the if
+                    step = program.endOf(step);
+                    continue;
+                }
+                case WHILE -> {
+                    Frame f = frameOf(step);
+                    if (f == null) {
+                        f = new Frame(step, 0);
+                        frames.add(f);
+                    }
+                    if (!blockCond(step).eval(env)) {
+                        frames.remove(f);
+                        step = program.endOf(step);
+                        continue;
+                    }
+                    String over = turn(f, who);
+                    if (over != null) return over;
+                    continue;
+                }
+                case REPEAT -> {
+                    Frame f = frameOf(step);
+                    if (f == null) {
+                        f = new Frame(step, (int) Math.max(0, Math.min(Integer.MAX_VALUE, Math.round(Expr.eval(s.expression(), env)))));
+                        frames.add(f);
+                    }
+                    if (f.remaining <= 0) {
+                        frames.remove(f);
+                        step = program.endOf(step);
+                        continue;
+                    }
+                    String over = turn(f, who);
+                    if (over != null) return over;
+                    continue;
+                }
+                case BREAK -> {
+                    int h = program.loopOf(step);
+                    while (!frames.isEmpty() && frames.get(frames.size() - 1).header >= h) frames.remove(frames.size() - 1);
+                    step = program.endOf(h);
+                    continue;
+                }
+                case CONTINUE -> {
+                    step = program.endOf(program.loopOf(step)) - 1; // the loop's end is next
+                    continue;
+                }
+                case SET -> {
+                    vars.put(s.variable(), Expr.eval(s.expression(), env));
+                    continue;
+                }
+                case ADD -> {
+                    vars.merge(s.variable(), Expr.eval(s.expression(), env), Double::sum);
                     continue;
                 }
                 case END -> {
+                    if (program.closes(step)) {
+                        int h = program.headOf(step);
+                        Step.Kind k = steps.get(h).kind();
+                        if (k == Step.Kind.WHILE) {
+                            step = h - 1; // the condition is looked at again
+                        } else if (k == Step.Kind.REPEAT) {
+                            Frame f = frameOf(h);
+                            if (f != null) f.remaining--;
+                            step = h - 1;
+                        }
+                        continue;
+                    }
                     String done = who + " done";
                     stop();
                     return done;
                 }
                 case SAY -> {
-                    host.say(s.args());
+                    host.say(subst(s.args()));
                     anyBusy = true;
                     continue;
                 }
                 case NOTIFY -> {
-                    host.notify(s.args());
+                    host.notify(subst(s.args()));
                     anyBusy = true;
                     continue;
                 }
@@ -477,6 +659,71 @@ public final class RoutineRunner {
                 }
             }
         }
+    }
+
+    private static final int SPINS_PER_TICK = 5000;
+    private static final java.util.regex.Pattern VAR = java.util.regex.Pattern.compile("\\$([A-Za-z_]\\w*)");
+
+    private Cond.World env(Host host) {
+        return new Env(host.world());
+    }
+
+    /** A step cares about failing when it asked to, or when the routine looks at how steps went. */
+    private boolean cares(Step s) {
+        return s.caresAboutFailure() || tracksFailure;
+    }
+
+    private Cond blockCond(int at) {
+        return blockConds.computeIfAbsent(at, k -> steps.get(k).blockCond());
+    }
+
+    /** The loop frame of the header at {@code header} when it's the innermost one running. */
+    private Frame frameOf(int header) {
+        if (frames.isEmpty()) return null;
+        Frame f = frames.get(frames.size() - 1);
+        return f.header == header ? f : null;
+    }
+
+    /** Starts a turn of a loop; a message (the routine stopped) when it has gone round too often. */
+    private String turn(Frame f, String who) {
+        if (++f.iter > loopLimit) {
+            int at = lines == null ? f.header + 1 : lines[f.header];
+            String why = who + " stopped: the loop at step " + at + " ('" + steps.get(f.header).text() + "') went round more than "
+                + loopLimit + " times (setting routineLoopLimit)";
+            stop();
+            return why;
+        }
+        return null;
+    }
+
+    /** Leaving by a jump: loops the target isn't inside are over. */
+    private void pruneFrames(int target) {
+        while (!frames.isEmpty()) {
+            Frame f = frames.get(frames.size() - 1);
+            int end = program.endOf(f.header);
+            if (target > f.header && target < end) break;
+            frames.remove(frames.size() - 1);
+        }
+    }
+
+    /** Puts the variables' values in for {@code $name} (a name that was never set stays as typed). */
+    private String subst(String text) {
+        if (text.indexOf('$') < 0) return text;
+        Cond.World env = new Env(NO_WORLD);
+        java.util.regex.Matcher m = VAR.matcher(text);
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            String n = m.group(1).toLowerCase(Locale.ROOT);
+            boolean known = vars.containsKey(n) || Step.BUILT_IN_VARIABLES.contains(n);
+            String rep = m.group();
+            if (known) {
+                double d = env.variable(n);
+                rep = d == Math.rint(d) && Math.abs(d) < 1e15 ? String.valueOf((long) d) : String.valueOf(d);
+            }
+            m.appendReplacement(out, java.util.regex.Matcher.quoteReplacement(rep));
+        }
+        m.appendTail(out);
+        return out.toString();
     }
 
     private int indexOfLabel(String label) {

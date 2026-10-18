@@ -656,10 +656,7 @@ public final class CommandHandler {
     private static String withPrefix(String step, String prefix) {
         String t = step.trim();
         if (t.startsWith(prefix)) return t;
-        String w = t.split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
-        boolean word = java.util.Set.of("wait", "say", "notify", "skip", "end", "label", "jump").contains(w)
-            || w.equals("goto") && t.matches("(?i)goto\\s+:.*");
-        return word ? t : prefix + t;
+        return dev.lazuli.core.task.Step.isStepWord(t) ? t : prefix + t;
     }
 
     /** Tells what's wrong with these steps, if anything; true when they're fine. */
@@ -832,7 +829,7 @@ public final class CommandHandler {
                     return;
                 }
                 String step = withPrefix(String.join(" ", Arrays.copyOfRange(args, 3, args.length)), prefix);
-                List<String> problems = new ArrayList<>(dev.lazuli.core.task.Routine.check(List.of(step), COMMANDS::contains, ctx.targetKnown()));
+                List<String> problems = new ArrayList<>(dev.lazuli.core.task.Routine.check(List.of(step), COMMANDS::contains, ctx.targetKnown(), false));
                 problems.removeIf(x -> x.contains("jumps to label") || x.contains("no such label"));
                 if (!problems.isEmpty()) {
                     for (String pr : problems) ctx.reply(Chat.err("{}", pr.replaceFirst("^step 1: ", "")));

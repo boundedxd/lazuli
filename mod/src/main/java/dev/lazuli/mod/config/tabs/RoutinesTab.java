@@ -35,7 +35,8 @@ public final class RoutinesTab {
             Ui.folded("Limits",
                 Ui.num(s.routineStepTimeoutMinutes, 0, 1440, 5, "A routine step that isn't endless and runs longer than this is stopped as failed. 0: no limit. (A step's own timeout wins.)"),
                 Ui.num(s.routineIdleWaitSeconds, 0, 3600, 5, "A forever routine whose whole round did nothing (an empty chest...) waits this long and tries again. 0: stops instead."),
-                Ui.num(s.routineIdleRounds, 1, 10000, 1, "A forever routine stops after this many idle rounds in a row.")));
+                Ui.num(s.routineIdleRounds, 1, 10000, 1, "A forever routine stops after this many idle rounds in a row."),
+                Ui.num(s.routineLoopLimit, 1, 100000000, 1000, "A while / repeat loop in a routine stops the routine after going round this many times, so a bad loop can't hang it. Stop always works at once.")));
     }
 
     private static List<String> names() {

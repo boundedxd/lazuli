@@ -44,7 +44,32 @@ public record Step(String command, int retry, int timeoutTicks, OnFail onFail, S
         }
     }
 
-    public enum Kind { COMMAND, WAIT, SAY, NOTIFY, SKIP, END, LABEL, JUMP }
+    public enum Kind {
+        COMMAND, WAIT, SAY, NOTIFY, SKIP, END, LABEL, JUMP,
+        /** Block statements: {@code if <cond>}, {@code else} / {@code else if <cond>}, {@code while <cond>}, {@code repeat <n>}; {@code end} closes one. */
+        IF, ELSE, WHILE, REPEAT, BREAK, CONTINUE,
+        /** {@code set name = <expr>}, {@code add name [<expr>]}. */
+        SET, ADD
+    }
+
+    private static final java.util.regex.Pattern SET_FORM = java.util.regex.Pattern.compile("(?is)set\\s+\\$?([A-Za-z_]\\w*)\\s*=\\s*(.*)");
+    private static final java.util.regex.Pattern ADD_FORM = java.util.regex.Pattern.compile("(?is)add\\s+\\$?([A-Za-z_]\\w*)(?:\\s+(.*))?");
+    /** Variable names Lazuli sets itself. */
+    public static final Set<String> BUILT_IN_VARIABLES = Set.of("round", "fails", "loop");
+
+    /** True when a line (as typed, no command prefix) is a step word rather than a command, so it never gets one. */
+    public static boolean isStepWord(String line) {
+        String t = line.trim();
+        if (t.isEmpty() || !Character.isLetter(t.charAt(0))) return false;
+        String w = t.split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
+        return switch (w) {
+            case "wait", "say", "notify", "skip", "end", "exit", "label", "jump", "if", "else", "while", "repeat", "break", "continue" -> true;
+            case "goto" -> t.matches("(?i)goto\\s+:.*");
+            case "set" -> SET_FORM.matcher(t).matches();
+            case "add" -> ADD_FORM.matcher(t).matches();
+            default -> false;
+        };
+    }
 
     /** The modifier words (anything else after the first of these is an error). */
     public static final List<String> MODIFIERS = List.of("retry", "timeout", "onfail", "times", "before", "after",
@@ -78,12 +103,41 @@ public record Step(String command, int retry, int timeoutTicks, OnFail onFail, S
 
     public Kind kind() {
         String w = word();
+        if (!command.isEmpty() && Character.isLetter(command.charAt(0))) {
+            switch (w) {
+                case "if" -> {
+                    return Kind.IF;
+                }
+                case "else" -> {
+                    return Kind.ELSE;
+                }
+                case "while" -> {
+                    return Kind.WHILE;
+                }
+                case "repeat" -> {
+                    return Kind.REPEAT;
+                }
+                case "break" -> {
+                    return Kind.BREAK;
+                }
+                case "continue" -> {
+                    return Kind.CONTINUE;
+                }
+                case "set" -> {
+                    if (SET_FORM.matcher(command).matches()) return Kind.SET;
+                }
+                case "add" -> {
+                    if (ADD_FORM.matcher(command).matches()) return Kind.ADD;
+                }
+                default -> { }
+            }
+        }
         return switch (w) {
             case "wait" -> Kind.WAIT;
             case "say" -> Kind.SAY;
             case "notify" -> Kind.NOTIFY;
             case "skip" -> Kind.SKIP;
-            case "end" -> Kind.END;
+            case "end", "exit" -> Kind.END;
             case "label" -> Kind.LABEL;
             case "jump" -> Kind.JUMP;
             default -> w.equals("goto") && args().startsWith(":") ? Kind.JUMP : Kind.COMMAND;
@@ -94,6 +148,42 @@ public record Step(String command, int retry, int timeoutTicks, OnFail onFail, S
     public String label() {
         String a = args();
         return a.startsWith(":") ? a.substring(1).trim() : a;
+    }
+
+    /** True for the steps that open or continue a block (they can't take modifiers). */
+    public boolean structural() {
+        Kind k = kind();
+        return k == Kind.IF || k == Kind.ELSE || k == Kind.WHILE || k == Kind.REPEAT;
+    }
+
+    /** The condition of an {@code if}, {@code else if} or {@code while}; null for a plain {@code else}. */
+    public Cond blockCond() {
+        String a = args();
+        if (kind() == Kind.ELSE) {
+            if (a.isEmpty()) return null;
+            a = a.replaceFirst("(?is)^if\\b\\s*", "");
+        }
+        return Cond.parse(a);
+    }
+
+    /** The variable a {@code set} or {@code add} step changes (lower case, no $). */
+    public String variable() {
+        var m = (kind() == Kind.SET ? SET_FORM : ADD_FORM).matcher(command);
+        return m.matches() ? m.group(1).toLowerCase(Locale.ROOT) : "";
+    }
+
+    /** The expression of a {@code set} / {@code add} step, or the count of {@code repeat} ({@code add x} alone: 1). */
+    public String expression() {
+        if (kind() == Kind.REPEAT) return args();
+        var m = (kind() == Kind.SET ? SET_FORM : ADD_FORM).matcher(command);
+        if (!m.matches()) return "";
+        String e = m.group(2) == null ? "" : m.group(2).trim();
+        return e.isEmpty() && kind() == Kind.ADD ? "1" : e;
+    }
+
+    /** True when the text has modifiers ({@code @retry...}) after the command. */
+    public boolean hasModifiers() {
+        return !text().equals(command);
     }
 
     /** True when the step cares about failing: retries or an on-fail other than going on. */
@@ -379,11 +469,54 @@ public record Step(String command, int retry, int timeoutTicks, OnFail onFail, S
                 String l = label();
                 if (l.isEmpty() || l.contains(" ")) throw new IllegalArgumentException(word() + " needs one label name, e.g. " + word() + " restock");
             }
-            case SKIP, END -> {
+            case SKIP, END, BREAK, CONTINUE -> {
                 if (!args().isEmpty()) throw new IllegalArgumentException(word() + " takes no arguments, got '" + args() + "'");
+            }
+            case IF, WHILE -> {
+                if (args().isEmpty()) throw new IllegalArgumentException(word() + " needs a condition, e.g. " + word() + " inv.free>4");
+                noModifiers();
+                try {
+                    blockCond();
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException(word() + ": " + e.getMessage());
+                }
+            }
+            case ELSE -> {
+                noModifiers();
+                if (!args().isEmpty() && !args().matches("(?is)if\\b.*"))
+                    throw new IllegalArgumentException("else takes nothing, or 'if <condition>' (else if ...), got '" + args() + "'");
+                if (!args().isEmpty() && args().replaceFirst("(?is)^if\\b\\s*", "").isEmpty())
+                    throw new IllegalArgumentException("else if needs a condition, e.g. else if inv.free>4");
+                try {
+                    blockCond();
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("else if: " + e.getMessage());
+                }
+            }
+            case REPEAT -> {
+                noModifiers();
+                if (args().isEmpty()) throw new IllegalArgumentException("repeat needs a number, e.g. repeat 5");
+                try {
+                    Expr.check(args());
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("repeat: " + e.getMessage());
+                }
+            }
+            case SET, ADD -> {
+                String v = variable();
+                if (BUILT_IN_VARIABLES.contains(v)) throw new IllegalArgumentException("$" + v + " is Lazuli's own, pick another name");
+                try {
+                    Expr.check(expression());
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException(word() + " " + v + ": " + e.getMessage());
+                }
             }
             default -> { }
         }
+    }
+
+    private void noModifiers() {
+        if (hasModifiers()) throw new IllegalArgumentException(word() + " can't take @modifiers (put them on the steps inside)");
     }
 
     /** Ticks a WAIT step waits. */

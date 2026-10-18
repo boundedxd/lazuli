@@ -76,6 +76,8 @@ public final class Settings {
     public final Setting<Integer> routineIdleWaitSeconds = integer("routineIdleWaitSeconds", 30, 0, 3600);
     /** A forever routine stops after this many idle rounds in a row. */
     public final Setting<Integer> routineIdleRounds = integer("routineIdleRounds", 20, 1, 10000);
+    /** A routine's while / repeat loop stops the routine when it has gone round this many times (a safety net against endless loops). */
+    public final Setting<Integer> routineLoopLimit = integer("routineLoopLimit", 100000, 1, 100000000);
     /** #farm works this far (blocks, horizontally) around where it started. */
     public final Setting<Integer> farmRange = integer("farmRange", 32, 4, 128);
     /** #farm sprints between crops (it still never hops onto farmland). */

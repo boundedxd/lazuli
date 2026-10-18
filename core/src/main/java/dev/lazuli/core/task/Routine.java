@@ -32,6 +32,50 @@ public final class Routine {
         return out;
     }
 
+    /** Parsed steps, the line each came from, and how their blocks nest. */
+    public record Compiled(List<Step> steps, int[] lines, Program program) {
+    }
+
+    /** Parses the lines and checks their blocks; throws IllegalArgumentException ("step N: why", N the line) on the first problem. */
+    public static Compiled compile(List<String> lines) {
+        List<Step> out = new ArrayList<>();
+        List<Integer> at = new ArrayList<>();
+        int n = 0;
+        for (String l : lines) {
+            n++;
+            if (l.isBlank()) continue;
+            try {
+                out.add(Step.parse(l));
+                at.add(n);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("step " + n + ": " + e.getMessage());
+            }
+        }
+        int[] nums = at.stream().mapToInt(Integer::intValue).toArray();
+        return new Compiled(out, nums, Program.of(out, nums));
+    }
+
+    private static final Pattern VARIABLE = Pattern.compile("\\$([A-Za-z_]\\w*)");
+
+    /** Variables used but never set (set or add), as problems with the line of the first use. */
+    static List<String> variableProblems(List<Step> steps, int[] lines) {
+        java.util.Set<String> known = new java.util.HashSet<>(Step.BUILT_IN_VARIABLES);
+        for (Step s : steps) if (s.kind() == Step.Kind.SET || s.kind() == Step.Kind.ADD) known.add(s.variable());
+        List<String> out = new ArrayList<>();
+        java.util.Set<String> told = new java.util.HashSet<>();
+        for (int i = 0; i < steps.size(); i++) {
+            Step s = steps.get(i);
+            String text = s.kind() == Step.Kind.SET || s.kind() == Step.Kind.ADD ? s.expression() : s.text();
+            Matcher m = VARIABLE.matcher(text);
+            while (m.find()) {
+                String v = m.group(1).toLowerCase(Locale.ROOT);
+                if (known.contains(v) || !told.add(v)) continue;
+                out.add("step " + (lines == null ? i + 1 : lines[i]) + ": unknown variable $" + v + " (give it a value first: set " + v + " = 0)");
+            }
+        }
+        return out;
+    }
+
     /** Problems with labels: duplicates, jumps and on-fail gotos to ones that don't exist. */
     public static List<String> labelProblems(List<Step> steps) {
         List<String> out = new ArrayList<>();
@@ -66,8 +110,14 @@ public final class Routine {
      * @param knownTarget  whether a target name exists (null: not checked)
      */
     public static List<String> check(List<String> lines, Predicate<String> knownCommand, Predicate<String> knownTarget) {
+        return check(lines, knownCommand, knownTarget, true);
+    }
+
+    /** {@code whole} false: just step by step (one edited line), without the block and variable checks that need the whole routine. */
+    public static List<String> check(List<String> lines, Predicate<String> knownCommand, Predicate<String> knownTarget, boolean whole) {
         List<String> out = new ArrayList<>();
         List<Step> steps = new ArrayList<>();
+        List<Integer> at = new ArrayList<>();
         int n = 0;
         Settings scratch = new Settings();
         for (String l : lines) {
@@ -81,6 +131,7 @@ public final class Routine {
                 continue;
             }
             steps.add(s);
+            at.add(n);
             if (s.kind() == Step.Kind.COMMAND && knownCommand != null) {
                 String w = s.word();
                 if (!w.isEmpty() && !knownCommand.test(w)) out.add("step " + n + ": unknown command '" + w + "'");
@@ -105,7 +156,11 @@ public final class Routine {
                 }
             }
         }
+        if (!whole) return out;
         out.addAll(labelProblems(steps));
+        int[] nums = at.stream().mapToInt(Integer::intValue).toArray();
+        Program.build(steps, nums, out);
+        out.addAll(variableProblems(steps, nums));
         return out;
     }
 
