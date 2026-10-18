@@ -157,7 +157,11 @@ public final class Guard implements Process {
             }
             case LOW_HP -> {
                 if (p.getHealth() >= p.getMaxHealth() - 1 || since > HEAL_TICKS) {
-                    if (since > HEAL_TICKS) chat.accept(Chat.warn("Not healing (no food?); carrying on at {} HP", (int) p.getHealth()));
+                    if (since > HEAL_TICKS) {
+                        chat.accept(Chat.warn("Not healing (no food?); carrying on at {} HP", (int) p.getHealth()));
+                        healGaveUpAt = p.tickCount;
+                        healGaveUpHp = p.getHealth();
+                    }
                     trip.cancel();
                     release();
                     return;
@@ -212,13 +216,21 @@ public final class Guard implements Process {
             dev.lazuli.mod.control.Melee.bestDamage(p));
     }
 
+    /** When a heal last timed out (tick, -1: never) and at what HP; how long before trying again. */
+    private int healGaveUpAt = -1;
+    private float healGaveUpHp;
+    private static final int HEAL_COOLDOWN = 20 * 60 * 5;
+
     private Danger spot(Minecraft mc, LocalPlayer p) {
         if (settings.dodgeCreepers.get()) {
             for (LivingEntity e : creepers(mc, p, CREEPER_NEAR)) {
                 if (((Creeper) e).getSwellDir() > 0 || ((Creeper) e).getSwelling(0f) > 0) return Danger.CREEPER;
             }
         }
-        if (settings.lowHpRetreat.get() && p.getHealth() <= settings.retreatHealth.get()) return Danger.LOW_HP;
+        // after a heal that didn't work: not again for a while, unless it gets worse
+        boolean gaveUp = healGaveUpAt >= 0 && p.tickCount - healGaveUpAt < HEAL_COOLDOWN && p.tickCount >= healGaveUpAt
+            && p.getHealth() > healGaveUpHp - 3;
+        if (settings.lowHpRetreat.get() && p.getHealth() <= settings.retreatHealth.get() && !gaveUp) return Danger.LOW_HP;
         if (settings.fightOrFlee.get() && nearestFoe(mc, p, 8) != null && outmatched(mc, p)) return Danger.OUTMATCHED;
         if (settings.defend.get() && nearestFoe(mc, p, FIGHT_NEAR) != null) return Danger.FIGHT;
         if (Combat.canShoot(p, settings) && Combat.rangedFoe(mc, p, BOW_RANGE) != null) return Danger.FIGHT;

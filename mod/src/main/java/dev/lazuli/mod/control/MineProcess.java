@@ -179,6 +179,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         }
         stop(false);
         cancelled = false;
+        failed = false;
         targets = Set.copyOf(blocks);
         hidden = blocks.stream().filter(b -> dev.lazuli.core.mine.OreDepth.isOre(BuiltInRegistries.BLOCK.getKey(b).toString()))
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
@@ -549,6 +550,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             release();
             return;
         }
+        if (breakTicks == 0 && !canTake(mc, player)) return;
         if (++breakTicks > BREAK_TIMEOUT) {
             blacklist.add(Pos.pack(breaking.getX(), breaking.getY(), breaking.getZ()));
             phase = Phase.TRAVEL;
@@ -574,6 +576,53 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         float pitch = pitch0 + Math.max(-maxTurn, Math.min(maxTurn, aim[1] - pitch0));
         input.apply(mc, new Controls(false, false, false, false, aim[0], aim[1], 0, false), yaw, pitch, settings.freeLook.get());
         driving = true;
+    }
+
+    /**
+     * Before breaking: a tool that gets the block's drop (iron ore by hand gives nothing) and room for it. False (and
+     * finished, saying why) when not.
+     */
+    private boolean canTake(Minecraft mc, LocalPlayer player) {
+        var state = mc.level.getBlockState(breaking);
+        var inv = player.getInventory();
+        if (state.requiresCorrectToolForDrops()) {
+            boolean tool = false;
+            for (int i = 0; i < 36 && !tool; i++) tool = inv.getItem(i).isCorrectToolForDrops(state);
+            if (!tool) {
+                finish(Chat.err("No tool that gets anything from {} ({} mined)", state.getBlock().getName().getString(), mined));
+                failed = true;
+                return false;
+            }
+        }
+        if (inv.getFreeSlot() < 0) {
+            net.minecraft.world.item.Item drop = state.getBlock().asItem();
+            boolean room = false;
+            for (int i = 0; i < 36 && !room; i++) {
+                var st = inv.getItem(i);
+                room = st.getCount() < st.getMaxStackSize() && (st.is(drop) || dropsInto(state, st));
+            }
+            if (!room) {
+                finish(Chat.err("Inventory full ({} mined)", mined));
+                failed = true;
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Ores drop something else (raw iron, diamonds...): a stack of that with room counts too. */
+    private static boolean dropsInto(net.minecraft.world.level.block.state.BlockState state, net.minecraft.world.item.ItemStack st) {
+        String block = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
+        String item = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(st.getItem()).getPath();
+        String ore = block.replace("deepslate_", "").replace("nether_", "").replace("_ore", "");
+        return block.endsWith("_ore") && (item.equals(ore) || item.equals("raw_" + ore) || item.startsWith(ore));
+    }
+
+    /** The last run ended on something it can't get round (no tool, full inventory). */
+    private boolean failed;
+
+    public boolean failed() {
+        return failed;
     }
 
     private void pickupTick(Minecraft mc, LocalPlayer player) {

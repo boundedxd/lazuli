@@ -125,7 +125,7 @@ final class Station {
             case FIND -> {
                 if (pos != null && !test(mc, pos)) pos = null; // broken meanwhile
                 if (pos == null && !placeOnly) {
-                    pos = nearest(mc, p, block, settings.stationRange.get(), skip);
+                    pos = nearest(mc, p, s -> block.test(s), settings.stationRange.get(), skip, avoid);
                     // carrying one: placing it beats a long walk to another
                     if (pos != null && mayPlace && has(p) && pos.distSqr(p.blockPosition()) > NEAR * NEAR) pos = null;
                 }
@@ -160,7 +160,9 @@ final class Station {
             }
             case OPEN -> {
                 if (p.tickCount - phaseStart > OPEN_TICKS) return fail("The " + name + " wouldn't open");
-                if (!acted) acted = Aim.useOn(mc, p, pos, null, input, settings);
+                // no screen a second after the click (missed, or lag): click again
+                if (acted && p.tickCount - clickedAt > REOPEN_TICKS) acted = false;
+                if (!acted && (acted = Aim.useOn(mc, p, pos, null, input, settings))) clickedAt = p.tickCount;
             }
             case PLACE -> {
                 return place(mc, p);
@@ -171,6 +173,9 @@ final class Station {
         }
         return State.WORKING;
     }
+
+    private static final int REOPEN_TICKS = 20;
+    private int clickedAt;
 
     private State place(Minecraft mc, LocalPlayer p) {
         if (spot != null && test(mc, at(spot))) {
@@ -355,9 +360,26 @@ final class Station {
 
     private static BlockPos nearest(Minecraft mc, LocalPlayer p, Predicate<net.minecraft.world.level.block.state.BlockState> test,
                                     int r, BlockPos skip) {
+        return nearest(mc, p, test, r, skip, java.util.Set.of());
+    }
+
+    private static BlockPos nearest(Minecraft mc, LocalPlayer p, Predicate<net.minecraft.world.level.block.state.BlockState> test,
+                                    int r, BlockPos skip, java.util.Set<BlockPos> avoid) {
         BlockPos feet = p.blockPosition();
         // only the chunk sections that can hold one are looked through
         return dev.lazuli.mod.world.BlockSearch.best(mc.level, feet.getX() - r, feet.getY() - r / 2, feet.getZ() - r,
-            feet.getX() + r, feet.getY() + r / 2, feet.getZ() + r, test, at -> at.equals(skip) ? Double.MAX_VALUE : at.distSqr(feet));
+            feet.getX() + r, feet.getY() + r / 2, feet.getZ() + r, test,
+            at -> at.equals(skip) || avoid.contains(at) ? Double.MAX_VALUE : at.distSqr(feet));
+    }
+
+    /** Stations not to use (busy with someone else's things), until {@link #clearAvoid}. */
+    private final java.util.Set<BlockPos> avoid = new java.util.HashSet<>();
+
+    void avoid(BlockPos at) {
+        avoid.add(at.immutable());
+    }
+
+    void clearAvoid() {
+        avoid.clear();
     }
 }

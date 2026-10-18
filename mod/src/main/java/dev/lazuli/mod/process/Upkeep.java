@@ -22,7 +22,8 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * Looking after the player while Lazuli is busy: eats from the hotbar when hungry (movement pauses meanwhile) and
+ * Looking after the player while Lazuli is busy: eats when hungry (food from anywhere in the inventory; rotten flesh and
+ * the like only when starving) (movement pauses meanwhile) and
  * puts on better armor from the inventory.
  */
 public final class Upkeep {
@@ -107,8 +108,20 @@ public final class Upkeep {
             return;
         }
         if (!busy || !settings.autoEat.get() || food > (Guard.healing() ? 19 : settings.autoEatHunger.get()) || mc.screen != null || p.isUsingItem()) return;
-        int slot = bestFood(p);
-        if (slot < 0) return;
+        int slot = bestFood(p, food <= DESPERATE);
+        if (slot < 0) {
+            if (!warnedNoFood) chat.accept(Chat.warn("Hungry and no food to eat"));
+            warnedNoFood = true;
+            return;
+        }
+        warnedNoFood = false;
+        if (slot >= 9) {
+            // in the main inventory: into the hand's hotbar slot first
+            var clicks = dev.lazuli.mod.inventory.ClickDriver.get();
+            if (!clicks.busy()) clicks.add(p.inventoryMenu.containerId,
+                java.util.List.of(dev.lazuli.core.inventory.Click.swap(slot, p.getInventory().getSelectedSlot())));
+            return;
+        }
         prevSlot = p.getInventory().getSelectedSlot();
         p.getInventory().setSelectedSlot(slot);
         if (!mc.gameMode.useItem(p, InteractionHand.MAIN_HAND).consumesAction()) {
@@ -123,15 +136,23 @@ public final class Upkeep {
         chat.accept(Chat.info("Eating {}", p.getInventory().getItem(slot).getHoverName().getString()));
     }
 
-    /** Hotbar slot of the most filling food worth eating, or -1. */
-    private static int bestFood(LocalPlayer p) {
+    /** Hunger at or under which the foods usually avoided (rotten flesh, raw chicken...) are eaten too. */
+    private static final int DESPERATE = 6;
+    /** Never eaten on the way, however hungry: too good, or too harmful. */
+    private static final Set<String> NEVER = Set.of("golden_apple", "enchanted_golden_apple", "pufferfish", "poisonous_potato",
+        "chorus_fruit", "suspicious_stew");
+    private boolean warnedNoFood;
+
+    /** Inventory slot (hotbar first) of the most filling food worth eating, or -1. */
+    private static int bestFood(LocalPlayer p, boolean desperate) {
         int best = -1;
         float bestValue = 0;
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < 36; i++) {
             ItemStack s = p.getInventory().getItem(i);
             FoodProperties f = s.get(DataComponents.FOOD);
-            if (f == null || AVOID.contains(BuiltInRegistries.ITEM.getKey(s.getItem()).getPath())) continue;
-            float v = f.nutrition() + f.saturation();
+            String id = BuiltInRegistries.ITEM.getKey(s.getItem()).getPath();
+            if (f == null || NEVER.contains(id) || !desperate && AVOID.contains(id)) continue;
+            float v = f.nutrition() + f.saturation() - (AVOID.contains(id) ? 10 : 0) + (i < 9 ? 0.5f : 0);
             if (v > bestValue) {
                 bestValue = v;
                 best = i;

@@ -108,8 +108,12 @@ public final class SmeltProcess implements Process {
     }
 
     /** @param wait stay until it's all done (else load it and leave) */
+    /** Starting again after a busy furnace: the furnaces to avoid stay. */
+    private boolean retrying;
+
     public void start(Minecraft mc, ItemCount item, boolean wait) {
         stop(false);
+        if (!retrying) station.clearAvoid();
         this.wait = wait;
         outcome = Outcome.NONE;
         LocalPlayer p = mc.player;
@@ -269,12 +273,19 @@ public final class SmeltProcess implements Process {
             return;
         }
         ItemStack in = fm.slots.get(0).getItem(), fuel = fm.slots.get(1).getItem(), out = fm.slots.get(2).getItem();
-        if (!out.isEmpty() && !Inventories.key(out).equals(job.result)) {
-            fail("The " + name(job.furnace) + " has someone else's " + short_(Inventories.key(out)) + " in it");
-            return;
-        }
-        if (!in.isEmpty() && !Inventories.key(in).equals(job.input)) {
-            fail("The " + name(job.furnace) + " is busy with " + short_(Inventories.key(in)));
+        boolean othersOut = !out.isEmpty() && !Inventories.key(out).equals(job.result);
+        if (othersOut || !in.isEmpty() && !Inventories.key(in).equals(job.input)) {
+            // someone else's: another furnace (or a new one), this one left alone
+            chat.accept(Chat.info("The {} at {} is busy; using another", name(job.furnace), job.pos.toShortString()));
+            station.avoid(job.pos);
+            p.closeContainer();
+            phase = Phase.IDLE;
+            retrying = true;
+            try {
+                start(mc, asked, wait);
+            } finally {
+                retrying = false;
+            }
             return;
         }
         int[] mine = Inventories.slots(fm, p, true);

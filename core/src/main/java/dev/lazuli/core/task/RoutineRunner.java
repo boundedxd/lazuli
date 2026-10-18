@@ -102,14 +102,14 @@ public final class RoutineRunner {
         return null;
     }
 
-    /** A job that doesn't end on its own: #farm, #tunnel, #explore, and #mine / #fish with no count. */
+    /** A job that does not end on its own: #farm, #tunnel, #explore, #follow, and #mine / #fish with no count. */
     public static boolean endless(String line) {
         String[] w = line.trim().replaceFirst("^[^a-zA-Z]+", "").split("\\s+");
         String cmd = w[0].toLowerCase(java.util.Locale.ROOT);
         boolean counted = false;
         for (int i = 1; i < w.length; i++) counted |= w[i].matches("[0-9]+");
         return switch (cmd) {
-            case "farm", "tunnel", "explore" -> true;
+            case "farm", "tunnel", "explore", "follow" -> true;
             case "mine", "fish" -> !counted;
             default -> false;
         };

@@ -50,6 +50,14 @@ public final class SortPlan {
                 free.merge(b.id(), -stacks(fit, stack), Integer::sum);
                 left -= fit;
             }
+            // what fits nowhere stays where it is (else it'd be taken out with nowhere to go, again and again)
+            for (Box b : order) {
+                if (left <= 0) break;
+                int stay = Math.min(left, b.items().getOrDefault(item, 0) - to.getOrDefault(b.id(), 0));
+                if (stay <= 0) continue;
+                to.merge(b.id(), stay, Integer::sum);
+                left -= stay;
+            }
             p.alloc.put(item, to);
         }
         return p;

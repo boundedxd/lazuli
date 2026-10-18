@@ -48,7 +48,9 @@ public final class StrongholdProcess implements Process {
 
     private Phase phase = Phase.IDLE;
     private Triangulation.Throw first, last;
-    private int throwsDone, since, tries;
+    private int throwsDone, since, tries, refines;
+    /** Throws again near the crossing when the portal room isn't in sight, at most this often. */
+    private static final int REFINES = 2;
     private EyeOfEnder eye;
     private Vec3 eyeStart, eyeEnd, from;
     /** Where it thinks the stronghold is; the portal frame block it found. */
@@ -82,13 +84,17 @@ public final class StrongholdProcess implements Process {
         stop(false);
         LocalPlayer p = mc.player;
         if (p == null) return;
+        if (!mc.level.dimension().equals(net.minecraft.world.level.Level.OVERWORLD)) {
+            chat.accept(Chat.err("Strongholds are in the overworld; eyes of ender don't lead anywhere here"));
+            return;
+        }
         int eyes = Hands.count(p, s -> s.is(Items.ENDER_EYE));
         if (eyes < 2) {
             chat.accept(Chat.err("#stronghold takes at least 2 eyes of ender (have {})", eyes));
             return;
         }
         first = last = null;
-        throwsDone = tries = 0;
+        throwsDone = tries = refines = 0;
         target = room = null;
         trip.clear();
         chat.accept(Chat.info("Finding the stronghold ({} eyes)", eyes));
@@ -267,6 +273,14 @@ public final class StrongholdProcess implements Process {
             tries = 0;
             chat.accept(Chat.ok("End portal room at {}", f.toShortString()));
             enter(Phase.TO_ROOM, p);
+            return;
+        }
+        if (age > SEARCH_TICKS && refines < REFINES && Hands.has(p, s -> s.is(Items.ENDER_EYE))) {
+            // not in sight: throw again from here, much nearer, for a better crossing
+            refines++;
+            target = null;
+            chat.accept(Chat.info("No portal in sight; throwing again from here"));
+            enter(Phase.THROW, p);
             return;
         }
         if (age > SEARCH_TICKS) end(Chat.warn("No end portal frame in sight round {} {}: it's underground near there (waypoint 'stronghold')",

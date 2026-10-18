@@ -62,6 +62,7 @@ public final class BreedProcess implements Process {
         this.kinds = List.copyOf(kinds);
         this.wanted = pairs;
         this.pairs = 0;
+        fed.clear();
         center = mc.player.blockPosition();
         target = null;
         pairKind = null;
@@ -130,6 +131,11 @@ public final class BreedProcess implements Process {
         Animal a = target;
         if (!Hands.hold(p, ClickDriver.get(), a::isFood)) {
             if (!Hands.has(p, a::isFood)) target = null; // ran out of its food: another kind, or done
+            return;
+        }
+        if (!a.canFallInLove()) {
+            fed.put(a.getUUID(), p.tickCount); // in love already, or a baby/cooling down: not this one
+            target = null;
             return;
         }
         if (Melee.face(mc, p, a, input, settings, 2.0) && dist <= Melee.REACH) {

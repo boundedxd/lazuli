@@ -100,6 +100,7 @@ public final class SortProcess implements Process {
         slots.clear();
         carried.clear();
         toScan.clear();
+        boxesRead.clear();
         runs = moved = scanned = 0;
         LocalPlayer p = mc.player;
         find(mc, p, range);

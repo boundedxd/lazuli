@@ -36,6 +36,15 @@ class SortPlanTest {
     }
 
     @Test
+    void whatFitsNowhereElseStaysWhereItIs() {
+        // a counted as full (a deposit there failed), b one slot taken by cobblestone: the dirt has nowhere to go
+        var plan = SortPlan.of(List.of(
+            new SortPlan.Box("a", 0, Map.of("dirt", 10)),
+            new SortPlan.Box("b", 1, Map.of("cobblestone", 64))), SortPlanTest::stack);
+        assertTrue(plan.sorted(), "nowhere to go: " + plan.misplaced("a") + " " + plan.misplaced("b"));
+    }
+
+    @Test
     void anAlreadySortedRoomHasNothingToMove() {
         var plan = SortPlan.of(List.of(
             new SortPlan.Box("a", 27, Map.of("dirt", 64)),

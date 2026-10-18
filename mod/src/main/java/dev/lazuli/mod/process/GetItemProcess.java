@@ -163,6 +163,7 @@ public final class GetItemProcess implements Process {
         done = planned = 0;
         trading = null;
         noTrade.clear();
+        noChest.clear();
         chat.accept(Chat.ok("Getting {}", describe(wants)));
     }
 
@@ -217,7 +218,18 @@ public final class GetItemProcess implements Process {
                     end(Outcome.CANCELLED, null);
                     return;
                 }
-                case DONE -> done++;
+                case DONE -> {
+                    if (take.got(p) > 0) {
+                        done++;
+                    } else {
+                        // nothing came out (full inventory, chest emptied by someone): not that way again this run
+                        noChest.add(withdrawItem);
+                        if (p.getInventory().getFreeSlot() < 0) {
+                            end(Outcome.FAILED, Chat.err("Inventory full: can't take {} from the chest", name(withdrawItem)));
+                            return;
+                        }
+                    }
+                }
             }
         }
         if (trading != null) {
@@ -296,7 +308,7 @@ public final class GetItemProcess implements Process {
         current = a;
         planned = plan.actions().size();
         switch (a.kind()) {
-            case MINE -> mine.start(mc, a.count(), a.blocks());
+            case MINE -> mine.start(mc, drops.blocksFor(a.item(), a.count(), a.blocks()), a.blocks()); // 64 redstone: ~15 ores
             case CRAFT -> crafts.start(mc, List.of(new ItemCount(a.item(), a.count())), true);
             case SMELT -> smelts.start(mc, new ItemCount(a.item(), a.count()), true);
             case KILL -> hunt.start(mc, a.item(), count(p, a.item()) + a.count(), a.blocks());
@@ -374,9 +386,13 @@ public final class GetItemProcess implements Process {
      * Starts taking {@code n} of {@code item} from the nearest remembered chest holding some; false if there's none.
      * @param finished whether it's the thing asked for (chestFinal) rather than something to make it with (chestIngredients)
      */
+    /** Items a chest take got none of this run: not tried again. */
+    private final java.util.Set<String> noChest = new java.util.HashSet<>();
+
     private boolean withdraw(Minecraft mc, LocalPlayer p, String item, int n, boolean finished) {
         if (take == null || !(finished ? settings.chestFinal.get() : settings.chestIngredients.get())) return false;
         String id = Inventories.id(item);
+        if (noChest.contains(id)) return false;
         withdrawItem = id;
         return take.start(mc, p, id, n, pl -> count(pl, id));
     }
@@ -435,7 +451,7 @@ public final class GetItemProcess implements Process {
     private Status status(ItemPlanner.Action a) {
         return switch (a.kind()) {
             case MINE -> mine.active() ? Status.RUNNING : mine.cancelled() ? Status.CANCELLED
-                : mine.mined() > 0 ? Status.OK : Status.FAILED;
+                : mine.mined() > 0 && !mine.failed() ? Status.OK : Status.FAILED;
             case CRAFT -> switch (crafts.outcome()) {
                 case NONE -> Status.RUNNING;
                 case DONE -> Status.OK;

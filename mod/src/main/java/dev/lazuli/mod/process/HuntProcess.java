@@ -44,6 +44,10 @@ public final class HuntProcess implements Process {
     private BlockPos goal;
     /** Drops it couldn't get to in time: left alone. */
     private final java.util.Set<Integer> skipDrops = new java.util.HashSet<>();
+    /** Mobs it couldn't get to within {@link #PREY_TICKS}: left alone this run. */
+    private final java.util.Set<Integer> skipPrey = new java.util.HashSet<>();
+    private static final int PREY_TICKS = 20 * 30;
+    private int preyId = -1, preyTicks;
     private int dropId = -1, dropTicks;
     private static final int DROP_TICKS = 200;
 
@@ -62,6 +66,8 @@ public final class HuntProcess implements Process {
         startTick = mc.player.tickCount;
         kills = wanders = 0;
         skipDrops.clear();
+        skipPrey.clear();
+        preyId = -1;
         dropId = -1;
         prey = null;
         goal = null;
@@ -132,11 +138,23 @@ public final class HuntProcess implements Process {
             }
             return;
         }
+        if (prey.getId() != preyId) {
+            preyId = prey.getId();
+            preyTicks = 0;
+        }
         if (p.distanceTo(prey) > Melee.REACH + 1.5 || !p.hasLineOfSight(prey)) {
+            if (++preyTicks > PREY_TICKS) {
+                skipPrey.add(preyId); // can't get to it (across water, behind a fence): another one
+                prey = null;
+                trip.cancel();
+                input.release();
+                return;
+            }
             input.release();
             walk(p, prey.blockPosition(), 1);
             return;
         }
+        preyTicks = 0;
         // in reach: stand and fight (no trip pulling the other way)
         if (trip.running()) trip.cancel();
         goal = null;
@@ -156,7 +174,7 @@ public final class HuntProcess implements Process {
         double bestScore = Double.MAX_VALUE;
         for (LivingEntity e : mc.level.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(RANGE), LivingEntity::isAlive)) {
             int rank = mobs.indexOf(BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).toString());
-            if (rank < 0 || e.isBaby()) continue;
+            if (rank < 0 || e.isBaby() || skipPrey.contains(e.getId())) continue;
             double score = p.distanceTo(e) + rank * 8;
             if (score < bestScore) {
                 bestScore = score;

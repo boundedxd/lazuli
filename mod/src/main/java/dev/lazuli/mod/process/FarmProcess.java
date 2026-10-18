@@ -139,6 +139,13 @@ public final class FarmProcess implements Process {
             }
             case HARVEST -> {
                 if (trip.running()) return;
+                if (player.getInventory().getFreeSlot() < 0) {
+                    stop(false);
+                    chat.accept(Chat.warn("Inventory full: stopped farming ({} harvested)", harvested));
+                    return;
+                }
+                Block crop = mc.level.getBlockState(job.pos()).getBlock();
+                if (crop instanceof CropBlock || crop instanceof NetherWartBlock) lastCrop = crop;
                 Aim.Result r = Aim.breakTick(mc, player, job.pos(), input, settings);
                 driving = true;
                 if (r == Aim.Result.DONE) {
@@ -255,19 +262,25 @@ public final class FarmProcess implements Process {
     }
 
     /** Hotbar slot with something to plant: nether wart for soul sand, otherwise crop seeds; -1 if none. */
-    private static int seedSlot(LocalPlayer player, boolean soulSand) {
+    private int seedSlot(LocalPlayer player, boolean soulSand) {
         return seedSlot(player, soulSand, 9);
     }
 
+    /** The crop last harvested: replanted with the same seed when there is some. */
+    private Block lastCrop;
+
     /** @param slots 9: the hotbar; 36: the main inventory too (slots 9-35) */
-    private static int seedSlot(LocalPlayer player, boolean soulSand, int slots) {
+    private int seedSlot(LocalPlayer player, boolean soulSand, int slots) {
+        int any = -1;
         for (int i = 0; i < slots; i++) {
             ItemStack s = player.getInventory().getItem(i);
             if (!(s.getItem() instanceof BlockItem bi)) continue;
             Block b = bi.getBlock();
-            if (soulSand ? b instanceof NetherWartBlock : b instanceof CropBlock) return i;
+            if (!(soulSand ? b instanceof NetherWartBlock : b instanceof CropBlock)) continue;
+            if (b == lastCrop) return i;
+            if (any < 0) any = i;
         }
-        return -1;
+        return any;
     }
 
     private void release() {

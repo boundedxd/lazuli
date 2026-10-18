@@ -345,8 +345,12 @@ public final class CommandHandler {
             case "kill" -> ctx.kill();
             case "set" -> set(args);
             case "settings" -> {
-                ctx.reply(Chat.info("Settings ({}set <name> <value> to change):", prefix));
-                for (Setting<?> s : ctx.settings().all()) ctx.reply(Chat.pair(s.name(), s.get()));
+                // #settings trade: only the ones with "trade" in the name
+                String filter = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : "";
+                ctx.reply(Chat.info("Settings{} ({}set <name> <value> to change):", filter.isEmpty() ? "" : " matching " + filter, prefix));
+                for (Setting<?> s : ctx.settings().all()) {
+                    if (s.name().toLowerCase(Locale.ROOT).contains(filter)) ctx.reply(Chat.pair(s.name(), s.get()));
+                }
             }
             case "record" -> record(args);
             case "config" -> ctx.openConfig();
@@ -658,7 +662,8 @@ public final class CommandHandler {
     /** Commands a "then" after #getitem runs (anything else there is a waypoint to bring it to). */
     private static final java.util.Set<String> CHAINED = java.util.Set.of("goto", "mine", "smelt", "craft", "farm", "fish",
         "tunnel", "explore", "follow", "build", "breed", "trade", "brew", "enchant", "repair", "sort", "sleep", "come",
-        "drop", "withdraw", "getitem", "get", "portal", "stronghold", "wp", "home", "set", "stop");
+        "drop", "withdraw", "getitem", "get", "portal", "stronghold", "wp", "set", "stop", "fly", "iceboat", "find", "sel", "kill",
+        "deposit", "back");
 
     /** getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit] */
     private void getItem(String[] args) {
@@ -967,7 +972,11 @@ public final class CommandHandler {
             }
             case "forget", "clear" -> {
                 var mem = ctx.trades();
-                if (mem != null) mem.clear();
+                if (mem == null) {
+                    ctx.reply(Chat.err("Trade memory is off"));
+                    return;
+                }
+                mem.clear();
                 ctx.reply(Chat.ok("Forgot every villager's trades"));
             }
             case "list" -> {
@@ -1080,7 +1089,7 @@ public final class CommandHandler {
     }
 
     private void set(String[] args) {
-        if (args.length == 0 || args.length > 2) {
+        if (args.length == 0) {
             ctx.reply(Chat.err("Usage: set <name> [value]"));
             return;
         }
@@ -1090,8 +1099,14 @@ public final class CommandHandler {
             return;
         }
         Setting<?> s = found.get();
-        if (args.length == 2) {
-            s.parse(args[1]);
+        if (args.length >= 2) {
+            // the rest is the value, spaces and all ("food:16, torch:32")
+            try {
+                s.parse(String.join(" ", Arrays.copyOfRange(args, 1, args.length)));
+            } catch (IllegalArgumentException e) {
+                ctx.reply(Chat.err("Bad value for {}: {}", s.name(), e.getMessage()));
+                return;
+            }
             ctx.settingsChanged();
         }
         ctx.reply(Chat.pair(s.name(), s.get()));
