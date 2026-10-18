@@ -246,6 +246,7 @@ public final class Settings {
         s -> s.replace(" ", "")));
     /** #getitem may smelt for what it needs. */
     public final Setting<Boolean> getItemSmelt = bool("getItemSmelt", true);
+    /** #getitem may upgrade at a smithing table (netherite gear: template + diamond item + netherite ingot). */
     public final Setting<Boolean> getItemSmith = bool("getItemSmith", true);
     /** #smelt waits at the furnace until it's done; off: loads it, leaves, and #smelt collect goes back. */
     public final Setting<Boolean> smeltWait = bool("smeltWait", true);

@@ -190,17 +190,20 @@ public final class MoveGraph implements Graph {
     @Override
     public double optimisticCost(long u, long v) {
         // repairs re-price the same edges many times over; the world can't change without invalidate()
+        // the mobs' part is added fresh each time: they move all the time, the blocks don't (so it's never cached)
         double c = costCache.get(u, v, Double.NaN);
-        if (!Double.isNaN(c)) return c;
-        c = computeOptimistic(u, v);
-        costCache.put(u, v, c);
-        return c;
+        if (Double.isNaN(c)) {
+            c = computeOptimistic(u, v);
+            costCache.put(u, v, c);
+        }
+        return c < INF && !hazards.isEmpty() ? c + hazards.cost(Pos.x(v), Pos.y(v), Pos.z(v)) : c;
     }
 
+    /** The cost from the blocks alone (moving there, lava beside it): what the cache keeps. */
     private double computeOptimistic(long u, long v) {
         double c = baseCost(u, v);
         if (c >= INF && dig.enabled()) c = Math.min(c, dig.cost(u, v, flat, maxFall));
-        return c < INF ? c + danger(v) : c;
+        return c < INF ? c + lavaDanger(v) : c;
     }
 
     /** Mobs near enough to be avoided, and how much a cell next to lava costs (0: not avoided). */
@@ -224,8 +227,13 @@ public final class MoveGraph implements Graph {
 
     /** Extra cost of standing at v: near a mob, or right beside lava (one slip and it's in). */
     private double danger(long v) {
+        return hazards.cost(Pos.x(v), Pos.y(v), Pos.z(v)) + lavaDanger(v);
+    }
+
+    /** Extra cost of standing right beside lava. */
+    private double lavaDanger(long v) {
         int x = Pos.x(v), y = Pos.y(v), z = Pos.z(v);
-        double c = hazards.cost(x, y, z);
+        double c = 0;
         if (lavaEdge > 0) {
             for (int[] d : DIRS) {
                 if (d[0] != 0 && d[1] != 0) continue;

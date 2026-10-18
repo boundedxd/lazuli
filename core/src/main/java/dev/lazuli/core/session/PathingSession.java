@@ -195,6 +195,7 @@ public final class PathingSession {
         cancelSearch();
         replanQueued.set(false);
         dirtyQueued.set(false);
+        hazardQueued.set(false);
         dirty.clear();
         planning = true;
         MoveGraph g = newGraph();
@@ -240,15 +241,23 @@ public final class PathingSession {
         if (old.sameAs(h)) return;
         hazards = h;
         if (!settings.avoidMobs.get()) return;
+        // one update queued at a time, applying the latest mobs when it runs: they move every few ticks, and a queue
+        // of them all is work the planner never catches up on
+        if (!hazardQueued.compareAndSet(false, true)) return;
         worker.execute(() -> {
+            hazardQueued.set(false);
             if (graph == null || planner == null) return;
-            Hazards before = graph.hazards();
-            graph.setHazards(h);
+            Hazards before = graph.hazards(), now = hazards;
+            if (before.sameAs(now)) return;
+            graph.setHazards(now);
             List<int[]> boxes = new ArrayList<>(before.boxes());
-            boxes.addAll(h.boxes());
-            if (!boxes.isEmpty() && planner.regionsChanged(boxes) > 0) scheduleReplan();
+            boxes.addAll(now.boxes());
+            // only what stepping there costs changed, not the blocks
+            if (!boxes.isEmpty() && planner.costsChanged(boxes) > 0) scheduleReplan();
         });
     }
+
+    private final AtomicBoolean hazardQueued = new AtomicBoolean();
 
     private volatile int clutchFall;
 
@@ -291,6 +300,7 @@ public final class PathingSession {
         stop(true);
         replanQueued.set(false);
         dirtyQueued.set(false);
+        hazardQueued.set(false);
         dirty.clear();
         long gen = generation.get();
         worker.execute(() -> {
@@ -490,7 +500,7 @@ public final class PathingSession {
         if (goal.isGoal(Pos.x(player), Pos.y(player), Pos.z(player))) {
             planner = null;
             publish(State.ARRIVED, List.of());
-            if (!quiet) messages.accept(Chat.ok("Arrived at {}", goal.describe()));
+            if (!quiet && !stale()) messages.accept(Chat.ok("Arrived at {}", goal.describe()));
             return;
         }
         if (segment != null && Math.sqrt(sq(segment.x() - Pos.x(player)) + sq(segment.y() - Pos.y(player))
@@ -532,7 +542,7 @@ public final class PathingSession {
         }
         planner = null;
         publish(State.FAILED, List.of());
-        if (!quiet) messages.accept(Chat.err(r.status() == PlanResult.Status.NO_PATH ? "Goal unreachable" : "Gave up: search budget exceeded"));
+        if (!quiet && !stale()) messages.accept(Chat.err(r.status() == PlanResult.Status.NO_PATH ? "Goal unreachable" : "Gave up: search budget exceeded"));
     }
 
     /**

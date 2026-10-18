@@ -124,7 +124,8 @@ public final class LazyDStarLite {
         List<int[]> wide = new ArrayList<>();
         for (int[] b : boxes) wide.add(new int[]{b[0] - hr, b[1] - vr, b[2] - hr, b[3] + hr, b[4] + vr, b[5] + hr});
         graph.invalidate(wide);
-        List<Long> affected = new ArrayList<>();
+        // a set: the boxes of a few blocks mined together overlap, and each vertex is repaired once
+        java.util.Set<Long> affected = new java.util.LinkedHashSet<>();
         for (int[] b : wide) {
             for (int cx = b[0] >> 4; cx <= b[3] >> 4; cx++) {
                 for (int cz = b[2] >> 4; cz <= b[5] >> 4; cz++) {
@@ -137,15 +138,75 @@ public final class LazyDStarLite {
                 }
             }
         }
+        // Only edges near the change can have changed, and the box is widened by the longest edge: every vertex with
+        // such an edge out of it is in it. So each of those gets its rhs again from its successors (an edge may be
+        // dearer now), and each of their predecessors just takes a cheaper way through it, if there is one now (a
+        // vertex that only now became a node gets its first rhs that way). Recomputing every predecessor from all its
+        // successors instead was ~700x700 cost lookups per vertex: seconds per chunk or mob update, the planner fell
+        // behind for good and only #kill got it back.
+        for (long v : affected) evaluated.remove(v);
+        for (long v : affected) recompute(v);
         for (long v : affected) {
-            evaluated.remove(v);
-            recompute(v);
-            graph.predecessors(v, u -> {
-                evaluated.remove(u);
-                recompute(u);
+            Node vn = nodes.get(v);
+            double gv = vn == null ? INF : vn.g;
+            graph.predecessors(v, p -> {
+                Map<Long, Double> fromP = evaluated.get(p);
+                if (fromP != null) fromP.remove(v);
+                if (gv == INF || p == GOAL) return;
+                Node pn = nodes.get(p);
+                if (pn != null && pn.rhs <= gv) return; // nothing through v can beat it
+                double c = cost(p, v);
+                if (c == INF) return;
+                if (pn == null) pn = node(p);
+                if (c + gv < pn.rhs) {
+                    pn.rhs = c + gv;
+                    updateVertex(p, pn);
+                }
             });
         }
         return affected.size();
+    }
+
+    /**
+     * The cost of stepping onto cells inside these boxes changed (mobs moved), the blocks didn't: only edges into
+     * them, so only their predecessors get their rhs again (each once), and the cached block work stays.
+     *
+     * @return how many vertices the search had touched there
+     */
+    public int costsChanged(List<int[]> boxes) {
+        java.util.Set<Long> redo = new java.util.HashSet<>();
+        int touched = 0;
+        for (int[] b : boxes) {
+            for (int cx = b[0] >> 4; cx <= b[3] >> 4; cx++) {
+                for (int cz = b[2] >> 4; cz <= b[5] >> 4; cz++) {
+                    List<Long> inChunk = nodesByChunk.get(((long) cx << 32) | (cz & 0xFFFFFFFFL));
+                    if (inChunk == null) continue;
+                    for (long v : inChunk) {
+                        int x = Pos.x(v), y = Pos.y(v), z = Pos.z(v);
+                        if (x < b[0] || x > b[3] || y < b[1] || y > b[4] || z < b[2] || z > b[5]) continue;
+                        touched++;
+                        double gv = g(v);
+                        graph.predecessors(v, p -> {
+                            if (p == GOAL) return;
+                            Map<Long, Double> fromP = evaluated.get(p);
+                            if (fromP != null) fromP.remove(v); // its exact cost had the old danger in it
+                            if (nodes.get(p) != null) {
+                                redo.add(p);
+                            } else if (gv < INF) {
+                                double c = cost(p, v); // never touched: maybe a way through v now
+                                if (c < INF) {
+                                    Node pn = node(p);
+                                    pn.rhs = c + gv;
+                                    updateVertex(p, pn);
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        for (long p : redo) recompute(p);
+        return touched;
     }
 
     /**
