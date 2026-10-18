@@ -14,7 +14,7 @@ public final class Routine {
     private Routine() {
     }
 
-    private static final Pattern TARGET = Pattern.compile("(?<![\\w@])@([A-Za-z][\\w-]*)");
+    private static final Pattern TARGET = Pattern.compile("(?<![\\w@])@([A-Za-z0-9_][A-Za-z0-9_.-]*)");
 
     /** Parses every line; null for blank ones. Throws IllegalArgumentException (step number, reason) on the first bad one. */
     public static List<Step> parseAll(List<String> lines) {

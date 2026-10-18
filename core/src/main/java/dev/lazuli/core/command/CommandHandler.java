@@ -132,7 +132,18 @@ public final class CommandHandler {
 
         /** Whether a saved target by that name exists (null: targets aren't checked here). */
         default java.util.function.Predicate<String> targetKnown() {
+            var t = targets();
+            return t == null ? null : n -> t.get(n) != null;
+        }
+
+        /** The saved targets (named chests, villagers, stations...), null when there are none here. */
+        default dev.lazuli.core.target.Targets targets() {
             return null;
+        }
+
+        /** #pick: pick mode on or off ({@code name}: what the next pick is called, null: toggle / auto name). */
+        default void pick(String name) {
+            reply(Chat.err("Picking isn't available here"));
         }
 
         /** Fishes at the nearest open water; minutes 0: until stopped. */
@@ -367,6 +378,13 @@ public final class CommandHandler {
             return true;
         }
         try {
+            var targets = ctx.targets();
+            if (targets != null && body.indexOf('@') >= 0 && !cmd.matches("queue|routines?|r|target|targets|pick|say")) {
+                // "withdraw string all @duper": the target's position goes in (a routine step is expanded when it runs)
+                String expanded = targets.expand(body);
+                String[] again = expanded.split("\\s+");
+                args = Arrays.copyOfRange(again, Math.min(1, again.length), again.length);
+            }
             run(cmd, args, prefix);
         } catch (IllegalArgumentException e) {
             ctx.reply(Chat.err(e.getMessage()));
@@ -492,6 +510,8 @@ public final class CommandHandler {
                 else if (valid(steps)) ctx.runRoutine(null, steps, 1);
             }
             case "routine", "routines", "r" -> routine(args, prefix);
+            case "pick" -> ctx.pick(args.length == 0 ? null : args[0]);
+            case "target", "targets" -> target(args, prefix);
             case "fish" -> {
                 if (args.length == 0) ctx.fish(0);
                 else if (args.length == 1) ctx.fish(count(args[0], 0));
@@ -584,6 +604,9 @@ public final class CommandHandler {
             "save a chain of commands and run it again and again"));
         ctx.reply(Chat.usage(p + "routine show|check|status [name] | edit <name> <n> <step> | insert <name> <n> <step> | remove <name> <n> | rename <a> <b> | copy <a> <b> | help",
             "look at and change steps; steps take modifiers (@retry 3 @timeout 5m @onfail continue @if inv.free>4 @with name=value): " + p + "routine help"));
+        ctx.reply(Chat.usage(p + "pick [name]", "pick mode: shift+right-click a chest, villager, furnace, brewing stand... to save it as a target (the name is for the next one)"));
+        ctx.reply(Chat.usage(p + "target list [kind] | show <n> | del <n> | rename <a> <b> | clear | goto <n> | near [kind]",
+            "saved targets; write @name in any command or routine step: " + p + "withdraw string all @duper, " + p + "trade sell string @fisher"));
         ctx.reply(Chat.usage(p + "fish [minutes]", "fish at the nearest open water (until stopped without minutes)"));
         ctx.reply(Chat.usage(p + "drop <item|all> [count] [item [count]...]", "throw items out of the inventory (all of them without a count)"));
         ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
@@ -644,6 +667,85 @@ public final class CommandHandler {
         List<String> problems = dev.lazuli.core.task.Routine.check(steps, COMMANDS::contains, ctx.targetKnown());
         for (String p : problems) ctx.reply(Chat.err("{}", p));
         return problems.isEmpty();
+    }
+
+    /** target list [kind] | show <name> | del <name> | rename <a> <b> | clear | goto <name> | near [kind] */
+    private void target(String[] args, String prefix) {
+        String usage = "Usage: target list [kind] | show <name> | del <name> | rename <a> <b> | clear | goto <name> | near [kind]";
+        var store = ctx.targets();
+        if (store == null) {
+            ctx.reply(Chat.err("Targets aren't available here"));
+            return;
+        }
+        String sub = args.length == 0 ? "list" : args[0].toLowerCase(Locale.ROOT);
+        int[] f = ctx.playerFeet();
+        switch (sub) {
+            case "list" -> {
+                dev.lazuli.core.target.Target.Kind kind = args.length > 1 ? targetKind(args[1]) : null;
+                var all = kind == null ? store.all() : store.byKind(kind);
+                if (all.isEmpty()) ctx.reply(Chat.info("No targets yet: {}pick, then shift+right-click a chest, villager, furnace...", prefix));
+                for (var t : all) ctx.reply(describeTarget(t, f));
+            }
+            case "show" -> {
+                var t = args.length == 2 ? store.get(args[1]) : null;
+                if (args.length != 2) ctx.reply(Chat.err("Usage: target show <name>"));
+                else if (t == null) ctx.reply(Chat.err("No target {} (did you mean {}?)", args[1], String.join(", ", store.close(args[1]))));
+                else ctx.reply(describeTarget(t, f));
+            }
+            case "del", "delete", "remove" -> {
+                if (args.length != 2) ctx.reply(Chat.err("Usage: target del <name>"));
+                else if (store.remove(args[1])) ctx.reply(Chat.ok("Deleted target {}", args[1]));
+                else ctx.reply(Chat.err("No target {}", args[1]));
+            }
+            case "rename" -> {
+                if (args.length != 3) {
+                    ctx.reply(Chat.err("Usage: target rename <name> <new name>"));
+                    return;
+                }
+                if (store.rename(args[1], args[2])) ctx.reply(Chat.ok("Renamed {} to {}", args[1], dev.lazuli.core.target.Targets.clean(args[2])));
+                else ctx.reply(Chat.err("No target {}, or {} is taken", args[1], args[2]));
+            }
+            case "clear" -> {
+                int n = store.size();
+                store.clear();
+                ctx.reply(Chat.ok("Forgot {} targets", n));
+            }
+            case "goto", "go" -> {
+                var t = args.length == 2 ? store.get(args[1]) : null;
+                if (args.length != 2) ctx.reply(Chat.err("Usage: target goto <name>"));
+                else if (t == null) ctx.reply(Chat.err("No target {} (did you mean {}?)", args[1], String.join(", ", store.close(args[1]))));
+                else if (!t.dim().equals(ctx.dimension())) ctx.reply(Chat.err("{} is in the {}", t.name(), t.dim()));
+                else {
+                    ctx.stopProcesses();
+                    goTo(t.isEntity() ? new dev.lazuli.core.goal.GoalNear(t.x(), t.y(), t.z(), 2)
+                        : new dev.lazuli.core.goal.GoalAdjacent(t.x(), t.y(), t.z()), true);
+                }
+            }
+            case "near", "nearest" -> {
+                dev.lazuli.core.target.Target.Kind kind = args.length > 1 ? targetKind(args[1]) : null;
+                var t = store.nearest(ctx.dimension(), f[0], f[1], f[2], kind);
+                if (t == null) ctx.reply(Chat.info("No target here"));
+                else ctx.reply(describeTarget(t, f));
+            }
+            default -> ctx.reply(Chat.err(usage));
+        }
+    }
+
+    private static dev.lazuli.core.target.Target.Kind targetKind(String word) {
+        String w = word.toLowerCase(Locale.ROOT);
+        for (var k : dev.lazuli.core.target.Target.Kind.values()) {
+            if (k.prefix().equals(w) || k.name().toLowerCase(Locale.ROOT).equals(w)) return k;
+        }
+        if (w.equals("chests") || w.equals("container")) return dev.lazuli.core.target.Target.Kind.CONTAINER;
+        if (w.equals("villagers")) return dev.lazuli.core.target.Target.Kind.VILLAGER;
+        if (w.equals("stations")) return dev.lazuli.core.target.Target.Kind.STATION;
+        throw new IllegalArgumentException("Unknown kind " + word + " (chest, villager, station, block, entity)");
+    }
+
+    private static String describeTarget(dev.lazuli.core.target.Target t, int[] f) {
+        String what = t.block() != null ? t.block().replace("minecraft:", "") : t.label();
+        return Chat.pair("@" + t.name() + "  " + t.kind().prefix() + (what == null || what.isEmpty() ? "" : " (" + what + ")") + "  "
+            + t.coords() + (t.dim().equals("overworld") ? "" : " [" + t.dim() + "]"), (int) Math.sqrt(t.distSq(f[0], f[1], f[2])) + "m");
     }
 
     /** routine add <name> <cmd ; cmd> | <name> [times|forever] | run <name> [...] | list | del <name> | stop */
@@ -904,7 +1006,7 @@ public final class CommandHandler {
         "freecam", "mine", "follow", "explore", "tunnel", "farm", "breed", "stronghold", "eye", "portal", "portals", "iceboat",
         "race", "build", "schematic", "schem", "queue", "routine", "routines", "r", "fish", "drop", "deposit", "withdraw",
         "getitem", "get", "smelt", "brew", "enchant", "repair", "combine", "fly", "sel", "sort", "craft", "bucket", "hunt",
-        "smith", "help");
+        "smith", "pick", "target", "targets", "help");
 
     /** Whether a command word exists (routine checks and the routine editor use it). */
     public static boolean isCommand(String word) {

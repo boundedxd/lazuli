@@ -25,6 +25,7 @@ class CommandTest {
     private Settings settings;
     private PathingSession session;
     private final dev.lazuli.core.waypoint.Waypoints waypoints = new dev.lazuli.core.waypoint.Waypoints(null);
+    private final dev.lazuli.core.target.Targets targetStore = new dev.lazuli.core.target.Targets(null);
     private final dev.lazuli.core.storage.ChestMemory chests = new dev.lazuli.core.storage.ChestMemory(null);
 
     private CommandHandler handler() {
@@ -79,6 +80,8 @@ class CommandTest {
             }
             private final dev.lazuli.core.task.Routines store = new dev.lazuli.core.task.Routines(null);
             public dev.lazuli.core.task.Routines routines() { return store; }
+            public dev.lazuli.core.target.Targets targets() { return targetStore; }
+            public void pick(String name) { mined.add("pick " + name); }
             public void runRoutine(String name, List<String> steps, int times) {
                 mined.add("run " + name + " " + steps + " x" + times);
             }
@@ -517,6 +520,54 @@ class CommandTest {
         assertTrue(mined.isEmpty(), mined.toString());
         h.handle("#queue farm @retry 2 ; wait 5s ; deposit all");
         assertEquals(List.of("run null [#farm @retry 2, wait 5s, #deposit all] x1"), mined);
+    }
+
+    @Test
+    void targetsExpandInCommandsAndStayRawInRoutines() {
+        CommandHandler h = handler();
+        targetStore.pick("duper", dev.lazuli.core.target.Target.Kind.CONTAINER, "overworld", 10, 64, -20, null, "minecraft:chest", "", null);
+        h.handle("#withdraw string all @duper");
+        assertEquals(List.of("withdraw [string -1] at 10 64 -20"), mined.stream().map(x -> x.replace("[string -1, all -1]", "[string -1]")).toList());
+        mined.clear();
+        // a routine keeps @duper as written: it's looked up when the step runs
+        h.handle("#routine add grind withdraw string all @duper @retry 2");
+        replies.clear();
+        h.handle("#routine show grind");
+        assertEquals(List.of("1. #withdraw string all @duper @retry 2"), replies);
+        replies.clear();
+        h.handle("#routine check grind");
+        assertTrue(replies.get(0).contains("no problems"), replies.toString());
+        h.handle("#withdraw string all @nothere");
+        assertTrue(replies.get(replies.size() - 1).contains("No target @nothere"), replies.toString());
+        replies.clear();
+        h.handle("#routine add bad withdraw string all @nothere");
+        assertTrue(replies.get(0).contains("no target called @nothere"), replies.toString());
+    }
+
+    @Test
+    void targetCommands() {
+        CommandHandler h = handler();
+        targetStore.pick("duper", dev.lazuli.core.target.Target.Kind.CONTAINER, "overworld", 10, 64, -20, null, "minecraft:chest", "", null);
+        targetStore.pick(null, dev.lazuli.core.target.Target.Kind.VILLAGER, "overworld", 5, 64, 5, "u-1", null, "librarian", null);
+        h.handle("#target list");
+        assertEquals(2, replies.size(), replies.toString());
+        replies.clear();
+        h.handle("#target rename duper storage");
+        h.handle("#target show storage");
+        h.handle("#target near villager");
+        h.handle("#target del villager1");
+        h.handle("#target del nothing");
+        h.handle("#pick");
+        h.handle("#pick home");
+        assertTrue(replies.get(0).contains("Renamed duper to storage"), replies.toString());
+        assertTrue(replies.get(1).contains("@storage"), replies.toString());
+        assertTrue(replies.get(2).contains("@villager1"), replies.toString());
+        assertTrue(replies.get(3).contains("Deleted target"), replies.toString());
+        assertTrue(replies.get(4).contains("No target nothing"), replies.toString());
+        assertEquals(List.of("pick null", "pick home"), mined);
+        replies.clear();
+        h.handle("#target rename storage retry");
+        assertTrue(replies.get(0).contains("Bad target name"), replies.toString());
     }
 
     @Test
