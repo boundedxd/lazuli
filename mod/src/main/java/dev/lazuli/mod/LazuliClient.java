@@ -898,6 +898,7 @@ public final class LazuliClient implements ClientModInitializer {
 		ticks++;
 		tasks.tick();
 		boolean full = mc.player != null && mc.player.getInventory().getFreeSlot() < 0;
+		routine.setIdlePolicy(settings.routineIdleWaitSeconds.get() * 20, settings.routineIdleRounds.get(), m -> chat(Chat.info(m)));
 		String routineDone = routine.tick(busy(), full, line -> {
 			// a step's own command (#come, #stop inside a routine) mustn't end the routine running it
 			runningRoutineStep = true;

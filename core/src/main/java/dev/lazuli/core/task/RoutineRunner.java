@@ -21,6 +21,16 @@ public final class RoutineRunner {
     private boolean started;
     /** Some step of this round kept Lazuli busy. */
     private boolean anyBusy;
+    /** A forever routine's idle rounds: ticks left to wait, rounds in a row, wait length, limit, where to tell the player. */
+    private int idleWait, idleRounds, idleWaitTicks, idleLimit = 20;
+    private Consumer<String> notice = m -> {};
+
+    /** What a forever routine does when a whole round did nothing: wait {@code waitTicks} (0: stop) and retry, up to {@code maxRounds} in a row. */
+    public void setIdlePolicy(int waitTicks, int maxRounds, Consumer<String> notice) {
+        this.idleWaitTicks = waitTicks;
+        this.idleLimit = Math.max(1, maxRounds);
+        this.notice = notice == null ? m -> {} : notice;
+    }
 
     /** Starts {@code steps}, {@code times} times over (0 or less: forever). */
     public void start(String name, List<String> steps, int times) {
@@ -31,6 +41,8 @@ public final class RoutineRunner {
         this.round = 1;
         this.started = false;
         this.anyBusy = false;
+        this.idleWait = 0;
+        this.idleRounds = 0;
     }
 
     public void stop() {
@@ -66,6 +78,10 @@ public final class RoutineRunner {
      */
     public String tick(boolean busy, boolean full, Consumer<String> run, Runnable stopStep) {
         if (!running()) return null;
+        if (idleWait > 0) {
+            idleWait--;
+            return null;
+        }
         if (step >= 0) {
             if (busy && full && steps.size() > 1 && endless(steps.get(step))) {
                 stopStep.run();
@@ -81,6 +97,21 @@ public final class RoutineRunner {
         // on to the next step (or the next round)
         step++;
         if (step >= steps.size()) {
+            String who = name == null ? "Queue" : name;
+            if (!anyBusy && rounds < 0 && idleWaitTicks > 0) {
+                // forever, and nothing to do (an empty chest...): wait, then try the round again
+                if (++idleRounds >= idleLimit) {
+                    String why = who + " stopped: nothing to do for " + idleRounds + " rounds";
+                    stop();
+                    return why;
+                }
+                if (idleRounds == 1) notice.accept(who + ": nothing to do, waiting " + Math.max(1, idleWaitTicks / 20) + " s");
+                idleWait = idleWaitTicks;
+                step = -1;
+                round++;
+                return null;
+            }
+            if (anyBusy) idleRounds = 0;
             if (!anyBusy && (rounds < 0 || rounds > 1)) {
                 // a whole round where no step got going (each failed straight away): don't spin through it again
                 String why = (name == null ? "Queue" : name) + " stopped: none of its steps did anything";

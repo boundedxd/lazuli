@@ -140,6 +140,64 @@ class RoutineTest {
     }
 
     @Test
+    void aForeverRoutineWaitsWhenARoundDidNothingThenRetriesAndStopsAfterTheLimit() {
+        RoutineRunner r = new RoutineRunner();
+        List<String> notes = new ArrayList<>();
+        r.setIdlePolicy(100, 3, notes::add);
+        r.start("stringtrade", List.of("withdraw", "sell"), 0);
+        List<String> msgs = new ArrayList<>();
+        List<String> ran = drive(r, 0, 2000, msgs);
+        assertEquals(List.of("withdraw", "sell", "withdraw", "sell", "withdraw", "sell"), ran);
+        assertEquals(List.of("stringtrade: nothing to do, waiting 5 s"), notes);
+        assertEquals(List.of("stringtrade stopped: nothing to do for 3 rounds"), msgs);
+    }
+
+    @Test
+    void theIdleWaitIsCountedInTicks() {
+        RoutineRunner r = new RoutineRunner();
+        r.setIdlePolicy(100, 50, m -> {});
+        r.start("x", List.of("a"), 0);
+        int[] runs = {0};
+        int t = 0;
+        while (runs[0] < 2 && t < 1000) {
+            r.tick(false, c -> runs[0]++);
+            t++;
+        }
+        // first run at tick 1, instant step done after START_TICKS, then 100 ticks of waiting
+        assertTrue(t > 100 + RoutineRunner.START_TICKS, "waited, took " + t);
+        assertTrue(t < 130, "but not much longer, took " + t);
+    }
+
+    @Test
+    void aBusyRoundResetsTheIdleCount() {
+        RoutineRunner r = new RoutineRunner();
+        r.setIdlePolicy(20, 2, m -> {});
+        r.start("x", List.of("a"), 0);
+        // busy for 30 ticks after every 3rd run, idle otherwise: never two idle rounds in a row
+        int[] runs = {0}, busyLeft = {0};
+        String done = null;
+        for (int t = 0; t < 3000 && done == null; t++) {
+            boolean busy = busyLeft[0] > 0;
+            if (busy) busyLeft[0]--;
+            done = r.tick(busy, c -> {
+                if (++runs[0] % 2 == 0) busyLeft[0] = 30;
+            });
+        }
+        assertNull(done);
+        assertTrue(runs[0] > 10);
+    }
+
+    @Test
+    void withoutAWaitAForeverRoutineStopsLikeBefore() {
+        RoutineRunner r = new RoutineRunner();
+        r.setIdlePolicy(0, 20, m -> {});
+        r.start("x", List.of("a"), 0);
+        List<String> msgs = new ArrayList<>();
+        drive(r, 0, 100, msgs);
+        assertEquals(List.of("x stopped: none of its steps did anything"), msgs);
+    }
+
+    @Test
     void aForeverRoutineWhoseStepsAllFailStops() {
         RoutineRunner r = new RoutineRunner();
         r.start("broken", List.of("#mine nothing", "#deposit"), 0);

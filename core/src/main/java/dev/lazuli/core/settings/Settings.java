@@ -54,6 +54,10 @@ public final class Settings {
     public final Setting<Boolean> mineDropJunk = bool("mineDropJunk", true);
     /** #follow stops this many blocks from whoever it follows. */
     public final Setting<Integer> followRadius = integer("followRadius", 3, 1, 32);
+    /** A forever routine whose whole round did nothing waits this many seconds and tries again (0: stops). */
+    public final Setting<Integer> routineIdleWaitSeconds = integer("routineIdleWaitSeconds", 30, 0, 3600);
+    /** A forever routine stops after this many idle rounds in a row. */
+    public final Setting<Integer> routineIdleRounds = integer("routineIdleRounds", 20, 1, 10000);
     /** #farm works this far (blocks, horizontally) around where it started. */
     public final Setting<Integer> farmRange = integer("farmRange", 32, 4, 128);
     /** #farm sprints between crops (it still never hops onto farmland). */
