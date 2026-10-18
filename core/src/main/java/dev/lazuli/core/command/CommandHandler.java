@@ -276,6 +276,26 @@ public final class CommandHandler {
             return null;
         }
 
+        /** Pathing or any job/process running (for #stop to say "Stopped" only when it stopped something). */
+        default boolean busy() {
+            return session().snapshot().state() == PathingSession.State.PATHING || session().planning();
+        }
+
+        /** #bucket: {@code item} water_bucket, lava_bucket, milk_bucket (filled from empty buckets) or obsidian (cast); {@code n} more. */
+        default void bucket(String item, int n) {
+            reply(Chat.err("Buckets aren't available here"));
+        }
+
+        /** #hunt: kills the mobs dropping {@code item} until the inventory holds {@code count} of it. */
+        default void hunt(String item, int count) {
+            reply(Chat.err("Hunting isn't available here"));
+        }
+
+        /** #smith: upgrades at a smithing table (netherite_pickaxe...); template, base and addition must be in the inventory. */
+        default void smith(ItemCount item) {
+            reply(Chat.err("Smithing isn't available here"));
+        }
+
         /** Detaches the camera to fly around (or puts it back). */
         default void toggleFreecam() {
             reply(Chat.err("Freecam isn't available here"));
@@ -339,8 +359,10 @@ public final class CommandHandler {
             case "trade", "trades" -> trade(args);
             case "back" -> goToWaypoint(dev.lazuli.core.waypoint.Waypoints.DEATH);
             case "stop", "cancel" -> {
+                boolean any = ctx.busy();
                 ctx.stopProcesses();
-                ctx.session().stop();
+                ctx.session().stop(true);
+                ctx.reply(any ? Chat.warn("Stopped") : Chat.info("Nothing is running"));
             }
             case "kill" -> ctx.kill();
             case "set" -> set(args);
@@ -365,7 +387,10 @@ public final class CommandHandler {
             case "follow" -> follow(args);
             case "explore" -> {
                 if (args.length == 0) ctx.explore(null);
-                else if (args.length == 2) ctx.explore(new int[]{integer(args[0]), integer(args[1])});
+                else if (args.length == 2) {
+                    int[] xz = coords(args, 0, 2, ctx.playerFeet());
+                    ctx.explore(new int[]{xz[0], xz[1]});
+                }
                 else ctx.reply(Chat.err("Usage: explore [x z]"));
             }
             case "tunnel" -> {
@@ -378,14 +403,14 @@ public final class CommandHandler {
             }
             case "farm" -> {
                 if (args.length == 0) ctx.farm(0);
-                else if (args.length == 1) ctx.farm(Math.max(1, integer(args[0])));
+                else if (args.length == 1) ctx.farm(count(args[0], 1));
                 else ctx.reply(Chat.err("Usage: farm [range]"));
             }
             case "breed" -> {
                 List<String> kinds = new ArrayList<>();
                 int n = 0;
                 for (String a : args) {
-                    if (a.matches("[0-9]+")) n = Integer.parseInt(a);
+                    if (a.matches("[0-9]+")) n = count(a, 0);
                     else kinds.add(a.contains(":") ? a.toLowerCase(Locale.ROOT) : "minecraft:" + a.toLowerCase(Locale.ROOT));
                 }
                 ctx.breed(kinds, n);
@@ -400,7 +425,7 @@ public final class CommandHandler {
                 else if (args[0].equalsIgnoreCase("materials") && args.length == 2) ctx.schematic("materials", args[1], null);
                 else if (args.length == 1) ctx.schematic("build", args[0], null);
                 else if (args.length == 4 && coordinate(args[1]) && coordinate(args[2]) && coordinate(args[3])) {
-                    ctx.schematic("build", args[0], new int[]{coord(args[1], f[0]), coord(args[2], f[1]), coord(args[3], f[2])});
+                    ctx.schematic("build", args[0], coords(args, 1, 3, f));
                 } else ctx.reply(Chat.err("Usage: build <file> [x y z] | list | materials <file>"));
             }
             case "queue" -> {
@@ -411,7 +436,7 @@ public final class CommandHandler {
             case "routine", "routines", "r" -> routine(args, prefix);
             case "fish" -> {
                 if (args.length == 0) ctx.fish(0);
-                else if (args.length == 1 && args[0].matches("[0-9]+")) ctx.fish(Integer.parseInt(args[0]));
+                else if (args.length == 1) ctx.fish(count(args[0], 0));
                 else ctx.reply(Chat.err("Usage: fish [minutes]"));
             }
             case "drop" -> {
@@ -432,7 +457,7 @@ public final class CommandHandler {
                 if (args.length < 1 || args.length > 3) {
                     ctx.reply(Chat.err("Usage: enchant <item> [count] [1|2|3]"));
                 } else {
-                    int count = args.length > 1 ? Math.max(1, integer(args[1])) : 1;
+                    int count = args.length > 1 ? count(args[1], 1) : 1;
                     int option = args.length > 2 ? integer(args[2]) : 0;
                     if (option < 0 || option > 3) ctx.reply(Chat.err("The option is 1, 2 or 3 (top to bottom)"));
                     else ctx.enchant(args[0], count, option);
@@ -458,6 +483,17 @@ public final class CommandHandler {
                 if (items == null) ctx.reply(Chat.err("Usage: craft <item> [count] [item [count]...]"));
                 else ctx.craft(items);
             }
+            case "bucket" -> bucket(args);
+            case "hunt" -> {
+                List<ItemCount> items = items(args, 0, args.length);
+                if (items == null || items.size() != 1) ctx.reply(Chat.err("Usage: hunt <item> [count]  (kills the mobs that drop it, e.g. hunt string 20)"));
+                else ctx.hunt(items.get(0).item(), Math.max(1, items.get(0).count()));
+            }
+            case "smith" -> {
+                List<ItemCount> items = items(args, 0, args.length);
+                if (items == null || items.size() != 1) ctx.reply(Chat.err("Usage: smith <item> [count]  (netherite_pickaxe...; template, base and addition in the inventory)"));
+                else ctx.smith(new ItemCount(items.get(0).item(), Math.max(1, items.get(0).count())));
+            }
             case "help" -> help(prefix);
             default -> ctx.reply(Chat.err("Unknown command: {}. Try {}help", cmd, prefix));
         }
@@ -480,40 +516,43 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "tunnel [height width depth]", "dig straight ahead (default 2x1, no end)"));
         ctx.reply(Chat.usage(p + "farm [range]", "harvest and replant crops around here"));
         ctx.reply(Chat.usage(p + "breed [animal...] [pairs]", "feed animals two at a time so they breed (any kind it has food for)"));
-        ctx.reply(Chat.usage(p + "iceboat <x z | x y z> | lap [n] | record [name] | line [name|off]",
+        ctx.reply(Chat.usage(p + "iceboat (alias race) <x z | x y z> | lap [n] | record [name] | line [name|off]",
             "race the boat you're in: to a point or laps round the track (worked out from the blocks), or along a line you drove"));
-        ctx.reply(Chat.usage(p + "build <file> [x y z] | list | materials <file>",
+        ctx.reply(Chat.usage(p + "build (alias schem) <file> [x y z] | list | materials <file>",
             "build a schematic (.litematic, .schem, .nbt from config/lazuli/schematics or schematics/), its lowest corner at x y z (here)"));
         ctx.reply(Chat.usage(p + "queue <command> ; <command> ; ...", "run commands one after another (each once the last is done)"));
         ctx.reply(Chat.usage("<command> then <command> ...", "the same; a job with no end (" + p + "farm then deposit) hands over when the inventory is full, then starts again"));
-        ctx.reply(Chat.usage(p + "routine add <name> <command> ; <command> ... | <name> [times|forever] | list | del <name> | stop",
+        ctx.reply(Chat.usage(p + "routine (alias r) add <name> <command> ; <command> ... | <name> [times|forever] | list | del <name> | stop",
             "save a chain of commands and run it again and again"));
         ctx.reply(Chat.usage(p + "fish [minutes]", "fish at the nearest open water (until stopped without minutes)"));
         ctx.reply(Chat.usage(p + "drop <item|all> [count] [item [count]...]", "throw items out of the inventory (all of them without a count)"));
         ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
         ctx.reply(Chat.usage(p + "withdraw <item|all> [count] [item [count]...] [x y z]", "take items out of a container"));
         ctx.reply(Chat.usage(p + "craft <item> [count] [item [count]...]", "craft items, making the ingredients too (logs into planks...)"));
-        ctx.reply(Chat.usage(p + "getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit]",
+        ctx.reply(Chat.usage(p + "getitem (alias get) <item> [count] [item [count]...] [then back|<waypoint>] [deposit]",
             "get items from scratch: mines, crafts and smelts what it takes (until you have count); iron_tools, diamond_armor, iron_gear too"));
         ctx.reply(Chat.usage(p + "getitem <item> [count]... dry", "show the steps it would take and about how long, without doing them"));
         ctx.reply(Chat.usage(p + "smelt <item> [count]", "cook items in a furnace (iron_ingot or raw_iron; blast furnace/smoker when there's one)"));
         ctx.reply(Chat.usage(p + "smelt collect", "go back for what it left cooking"));
         ctx.reply(Chat.usage(p + "brew <potion> [count] [splash|lingering]", "brew potions (fire_resistance, long_swiftness...); fills bottles, gets what's missing"));
+        ctx.reply(Chat.usage(p + "bucket water|lava|milk|obsidian [count]", "fill empty buckets from a source or a cow, or cast obsidian (water on lava)"));
+        ctx.reply(Chat.usage(p + "hunt <item> [count]", "kill the mobs that drop it until you have count, e.g. " + p + "hunt string 20"));
+        ctx.reply(Chat.usage(p + "smith <item> [count]", "upgrade at a smithing table (netherite_pickaxe...); template, base and addition in the inventory"));
         ctx.reply(Chat.usage(p + "enchant <item> [count] [1|2|3]", "enchant at an enchanting table (the best it can pay for)"));
         ctx.reply(Chat.usage(p + "sel pos1|pos2 [x y z] | fill <block> | clear | reset", "select a box, then fill it with a block or clear it out"));
         ctx.reply(Chat.usage(p + "sort [range]", "sort the chests and barrels around (default 16 blocks): each item into as few as it fits"));
         ctx.reply(Chat.usage(p + "repair <item>", "repair at an anvil with its material or another one"));
         ctx.reply(Chat.usage(p + "combine <item> <with>", "put two things together at an anvil (an enchanted_book...)"));
-        ctx.reply(Chat.usage(p + "stronghold", "find the stronghold with two eye of ender throws and go to its end portal"));
-        ctx.reply(Chat.usage(p + "portal [list]", "go through the nearest known nether portal (or build one here) | the ones known here"));
+        ctx.reply(Chat.usage(p + "stronghold (alias eye)", "find the stronghold with two eye of ender throws and go to its end portal"));
+        ctx.reply(Chat.usage(p + "portal (alias portals) [list]", "go through the nearest known nether portal (or build one here) | the ones known here"));
         ctx.reply(Chat.usage(p + "fly <x z | x y z | waypoint>", "fly there with an elytra and rockets (far #goto does too: elytraGoto)"));
         ctx.reply(Chat.usage(p + "find <item>", "which chests (opened before) hold an item"));
         ctx.reply(Chat.usage(p + "trade <enchant [level]|item [count]>...", "trade with villagers, e.g. " + p + "trade sharpness 5 (sells string, sticks... for emeralds first if need be)"));
         ctx.reply(Chat.usage(p + "trade list | scan | forget", "the trades seen so far | go look at the villagers around | forget them"));
         ctx.reply(Chat.usage(p + "trade sell <item> [count|all] | find <enchant [level]|item>", "sell for emeralds | who sells it, cheapest first"));
         ctx.reply(Chat.usage(p + "sleep", "sleep in the nearest bed (or one from the hotbar) until morning"));
-        ctx.reply(Chat.usage(p + "stop", "stop pathing and whatever it's doing"));
-        ctx.reply(Chat.usage(p + "kill", "when something's stuck: reset everything (planner thread, keys, jobs), then any command works again"));
+        ctx.reply(Chat.usage(p + "stop (alias cancel)", "stop pathing and whatever it's doing"));
+        ctx.reply(Chat.usage(p + "kill", "hard reset for when " + p + "stop isn't enough: every job, the planner thread, held keys and the view; then any command works again"));
         ctx.reply(Chat.usage(p + "set <name> [value]", "show or change a setting"));
         ctx.reply(Chat.usage(p + "settings", "list every setting"));
         ctx.reply(Chat.usage(p + "config", "open the settings screen"));
@@ -590,16 +629,17 @@ public final class CommandHandler {
         if (args.length == 0) {
             ctx.iceboat("line", null, 1, null);
         } else if (args[0].equalsIgnoreCase("lap") || args[0].equalsIgnoreCase("laps")) {
-            ctx.iceboat("lap", null, args.length > 1 && number(args[1]) ? Math.max(1, integer(args[1])) : 1, null);
+            ctx.iceboat("lap", null, args.length > 1 ? count(args[1], 1) : 1, null);
         } else if (args[0].equalsIgnoreCase("record")) {
             ctx.iceboat("record", null, 0, args.length > 1 ? args[1] : null);
         } else if (args[0].equalsIgnoreCase("line")) {
             if (args.length > 1) ctx.iceboat("use", null, 0, args[1]);
             else ctx.iceboat("line", null, 1, null);
         } else if (args.length == 2 && coordinate(args[0]) && coordinate(args[1])) {
-            ctx.iceboat("goal", new int[]{coord(args[0], f[0]), Integer.MIN_VALUE, coord(args[1], f[2])}, 0, null);
+            int[] xz = coords(args, 0, 2, f);
+            ctx.iceboat("goal", new int[]{xz[0], Integer.MIN_VALUE, xz[1]}, 0, null);
         } else if (args.length == 3 && coordinate(args[0]) && coordinate(args[1]) && coordinate(args[2])) {
-            ctx.iceboat("goal", new int[]{coord(args[0], f[0]), coord(args[1], f[1]), coord(args[2], f[2])}, 0, null);
+            ctx.iceboat("goal", coords(args, 0, 3, f), 0, null);
         } else {
             ctx.reply(Chat.err("Usage: iceboat <x z | x y z> | lap [n] | record [name] | line [name|off]"));
         }
@@ -610,7 +650,7 @@ public final class CommandHandler {
         // a number last: how close to keep (else followRadius)
         int distance = 0;
         if (args.length > 1 && args[args.length - 1].matches("\\d{1,3}")) {
-            distance = Integer.parseInt(args[args.length - 1]);
+            distance = count(args[args.length - 1], 0);
             args = Arrays.copyOf(args, args.length - 1);
         }
         int d = distance;
@@ -637,7 +677,7 @@ public final class CommandHandler {
         // items are never numbers, so three trailing coordinates can't be a count
         if (n >= 4 && coordinate(args[n - 3]) && coordinate(args[n - 2]) && coordinate(args[n - 1])) {
             int[] f = ctx.playerFeet();
-            at = new int[]{coord(args[n - 3], f[0]), coord(args[n - 2], f[1]), coord(args[n - 1], f[2])};
+            at = coords(args, n - 3, 3, f);
             n -= 3;
         }
         List<ItemCount> items = items(args, 0, n);
@@ -656,14 +696,19 @@ public final class CommandHandler {
         var wps = ctx.waypoints();
         if (wps != null && wps.get(where, ctx.dimension()) != null) return true;
         String prefix = ctx.settings().prefix.get();
-        return !CHAINED.contains(where.startsWith(prefix) ? where.substring(prefix.length()) : where);
+        return !COMMANDS.contains(where.startsWith(prefix) ? where.substring(prefix.length()) : where);
     }
 
-    /** Commands a "then" after #getitem runs (anything else there is a waypoint to bring it to). */
-    private static final java.util.Set<String> CHAINED = java.util.Set.of("goto", "mine", "smelt", "craft", "farm", "fish",
-        "tunnel", "explore", "follow", "build", "breed", "trade", "brew", "enchant", "repair", "sort", "sleep", "come",
-        "drop", "withdraw", "getitem", "get", "portal", "stronghold", "wp", "set", "stop", "fly", "iceboat", "find", "sel", "kill",
-        "deposit", "back");
+    /**
+     * Every command word {@code run} knows, aliases too (kept equal to its case labels by CommandTest): after
+     * "getitem ... then" one of these is a chained command, anything else a waypoint to bring the items to.
+     */
+    static final java.util.Set<String> COMMANDS = java.util.Set.of("goal", "path", "goto", "wp", "waypoint", "waypoints", "sleep",
+        "find", "trade", "trades", "back", "stop", "cancel", "kill", "set", "settings", "record", "config", "click", "come",
+        "freecam", "mine", "follow", "explore", "tunnel", "farm", "breed", "stronghold", "eye", "portal", "portals", "iceboat",
+        "race", "build", "schematic", "schem", "queue", "routine", "routines", "r", "fish", "drop", "deposit", "withdraw",
+        "getitem", "get", "smelt", "brew", "enchant", "repair", "combine", "fly", "sel", "sort", "craft", "bucket", "hunt",
+        "smith", "help");
 
     /** getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit] */
     private void getItem(String[] args) {
@@ -742,6 +787,26 @@ public final class CommandHandler {
         return integer(s);
     }
 
+    /** bucket water|lava|milk|obsidian [count] */
+    private void bucket(String[] args) {
+        String usage = "Usage: bucket water|lava|milk|obsidian [count]";
+        if (args.length < 1 || args.length > 2) {
+            ctx.reply(Chat.err(usage));
+            return;
+        }
+        String what = args[0].toLowerCase(Locale.ROOT).replace("minecraft:", "").replace("_bucket", "");
+        String item = switch (what) {
+            case "water", "lava", "milk" -> "minecraft:" + what + "_bucket";
+            case "obsidian", "cast" -> "minecraft:obsidian";
+            default -> null;
+        };
+        if (item == null) {
+            ctx.reply(Chat.err(usage));
+            return;
+        }
+        ctx.bucket(item, args.length == 2 ? count(args[1], 1) : 1);
+    }
+
     /** brew <potion> [count] [splash|lingering] */
     private void brew(String[] args) {
         if (args.length < 1 || args.length > 3) {
@@ -754,7 +819,7 @@ public final class CommandHandler {
             String a = args[i].toLowerCase(java.util.Locale.ROOT);
             if (a.equals("splash")) form = dev.lazuli.core.craft.Brewing.Form.SPLASH;
             else if (a.equals("lingering")) form = dev.lazuli.core.craft.Brewing.Form.LINGERING;
-            else count = Math.max(1, integer(a));
+            else count = count(a, 1);
         }
         if (!dev.lazuli.core.craft.Brewing.known(args[0])) {
             ctx.reply(Chat.err("Unknown potion: {} (like fire_resistance, long_swiftness, strong_healing)", args[0]));
@@ -781,7 +846,10 @@ public final class CommandHandler {
                 int which = a.endsWith("1") ? 1 : 2;
                 int[] f = ctx.playerFeet();
                 if (args.length == 1) selection.set(which, f[0], f[1], f[2]);
-                else if (args.length == 4) selection.set(which, coord(args[1], f[0]), coord(args[2], f[1]), coord(args[3], f[2]));
+                else if (args.length == 4) {
+                    int[] c = coords(args, 1, 3, f);
+                    selection.set(which, c[0], c[1], c[2]);
+                }
                 else {
                     ctx.reply(Chat.err(usage));
                     return;
@@ -822,9 +890,11 @@ public final class CommandHandler {
             if (w == null) ctx.reply(Chat.err("No waypoint {} in this dimension", args[0]));
             else ctx.fly(w.x(), w.y(), w.z());
         } else if (args.length == 2) {
-            ctx.fly(coord(args[0], f[0]), null, coord(args[1], f[2]));
+            int[] xz = coords(args, 0, 2, f);
+            ctx.fly(xz[0], null, xz[1]);
         } else if (args.length == 3) {
-            ctx.fly(coord(args[0], f[0]), coord(args[1], f[1]), coord(args[2], f[2]));
+            int[] c = coords(args, 0, 3, f);
+            ctx.fly(c[0], c[1], c[2]);
         } else {
             ctx.reply(Chat.err("Usage: fly <x z | x y z | waypoint>"));
         }
@@ -834,8 +904,23 @@ public final class CommandHandler {
         try {
             return Integer.parseInt(s);
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Not a number: " + s);
+            throw new IllegalArgumentException("'" + s + "' must be a number");
         }
+    }
+
+    /** A count of at least {@code min}. */
+    private static int count(String s, int min) {
+        return Math.max(min, integer(s));
+    }
+
+    /**
+     * {@code n} coordinates from {@code args[from...]}, each a number or ~ / ~n relative to {@code here} {x, y, z}; with
+     * n = 2 they are x and z.
+     */
+    private static int[] coords(String[] args, int from, int n, int[] here) {
+        int[] out = new int[n];
+        for (int i = 0; i < n; i++) out[i] = coord(args[from + i], here[n == 2 && i == 1 ? 2 : i]);
+        return out;
     }
 
     /** Baritone's form: mine [quantity] <block> [block...]. */
@@ -843,7 +928,7 @@ public final class CommandHandler {
         int quantity = 0;
         int from = 0;
         if (args.length > 0 && args[0].matches("\\d+")) {
-            quantity = Integer.parseInt(args[0]);
+            quantity = count(args[0], 0);
             from = 1;
         }
         if (from >= args.length) {
@@ -900,7 +985,7 @@ public final class CommandHandler {
                     return;
                 }
                 int[] f = ctx.playerFeet();
-                int[] at = args.length == 5 ? new int[]{coord(args[2], f[0]), coord(args[3], f[1]), coord(args[4], f[2])} : f;
+                int[] at = args.length == 5 ? coords(args, 2, 3, f) : f;
                 wps.set(args[1], dim, at[0], at[1], at[2]);
                 ctx.reply(Chat.ok("Waypoint {} at {}", args[1].toLowerCase(Locale.ROOT), at[0] + " " + at[1] + " " + at[2]));
             }
@@ -940,12 +1025,7 @@ public final class CommandHandler {
                 id = id.contains(":") ? id : "minecraft:" + id;
                 int count = -1;
                 if (args.length == 3 && !args[2].equalsIgnoreCase("all")) {
-                    try {
-                        count = Integer.parseInt(args[2]);
-                    } catch (NumberFormatException e) {
-                        ctx.reply(Chat.err("Usage: trade sell <item> [count|all]  (sell emerald [n|all]: sell what you have for emeralds)"));
-                        return;
-                    }
+                    count = count(args[2], 1);
                 }
                 ctx.tradeSell(id, count);
             }

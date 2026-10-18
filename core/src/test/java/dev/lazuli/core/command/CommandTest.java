@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class CommandTest {
     private final List<String> replies = new ArrayList<>();
     private int saved;
+    private boolean busy;
     private final List<String> mined = new ArrayList<>();
     private Settings settings;
     private PathingSession session;
@@ -98,6 +99,10 @@ class CommandTest {
             public String dimension() { return "overworld"; }
             public dev.lazuli.core.storage.ChestMemory chests() { return chests; }
             public void sort(int range) { mined.add("sort " + range); }
+            public void bucket(String item, int n) { mined.add("bucket " + item + " " + n); }
+            public void hunt(String item, int count) { mined.add("hunt " + item + " " + count); }
+            public void smith(ItemCount item) { mined.add("smith " + item); }
+            public boolean busy() { return busy; }
             public void selClear(dev.lazuli.core.area.Selection.Box b) { mined.add("clear " + b); }
             public void selFill(dev.lazuli.core.area.Selection.Box b, String block) { mined.add("fill " + b + " " + block); }
         });
@@ -465,5 +470,61 @@ class CommandTest {
         CommandHandler h = handler();
         for (String c : new String[]{"#build house", "#build house 10 ~ -5", "#build list", "#build materials house"}) h.handle(c);
         assertEquals(List.of("schem build house", "schem build house [10, 1, -5]", "schem list null", "schem materials house"), mined);
+    }
+
+    @Test
+    void bucketHuntAndSmithParse() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#bucket water", "#bucket lava 3", "#bucket milk 2", "#bucket obsidian 4", "#bucket sand",
+            "#hunt string 20", "#hunt bone", "#hunt", "#smith netherite_pickaxe", "#smith netherite_sword 2"}) h.handle(c);
+        assertEquals(List.of("bucket minecraft:water_bucket 1", "bucket minecraft:lava_bucket 3", "bucket minecraft:milk_bucket 2",
+            "bucket minecraft:obsidian 4", "hunt string 20", "hunt bone 1", "smith netherite_pickaxe 1", "smith netherite_sword 2"),
+            mined.stream().map(m -> m.replace("ItemCount[item=", "").replace(", count=", " ").replace("]", "")).toList());
+        assertTrue(replies.stream().anyMatch(r -> r.contains("Usage: bucket")), replies.toString());
+        assertTrue(replies.stream().anyMatch(r -> r.contains("Usage: hunt")), replies.toString());
+    }
+
+    @Test
+    void numbersAreCheckedTheSameEverywhere() {
+        CommandHandler h = handler();
+        for (String c : new String[]{"#explore a b", "#tunnel x 1 1", "#fly 1 q", "#iceboat lap z", "#fish soon", "#farm big"}) {
+            replies.clear();
+            h.handle(c);
+            assertTrue(replies.get(0).contains("must be a number") || replies.get(0).contains("Usage"), c + ": " + replies);
+        }
+        replies.clear();
+        h.handle("#explore a b");
+        assertTrue(replies.get(0).contains("'a' must be a number"), replies.toString());
+        mined.clear();
+        h.handle("#explore ~5 ~-3");
+        h.handle("#fish 5");
+        h.handle("#fish");
+        assertEquals(List.of("explore 5 -3", "fish 5", "fish 0"), mined);
+    }
+
+    @Test
+    void stopSaysStoppedOnceOnlyWhenSomethingRan() {
+        CommandHandler h = handler();
+        busy = true;
+        h.handle("#stop");
+        assertEquals(1, replies.stream().filter(r -> r.contains("Stopped")).count(), replies.toString());
+        replies.clear();
+        busy = false;
+        h.handle("#cancel");
+        assertTrue(replies.stream().noneMatch(r -> r.contains("Stopped")), replies.toString());
+    }
+
+    @Test
+    void thenKnowsEveryCommandWord() throws Exception {
+        String src = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/dev/lazuli/core/command/CommandHandler.java"));
+        String run = src.substring(src.indexOf("private void run("), src.indexOf("private void help("));
+        var labels = new java.util.TreeSet<String>();
+        var m = java.util.regex.Pattern.compile("(?m)^            case ((?:\"[a-z]+\"(?:, )?)+) ->").matcher(run);
+        while (m.find()) {
+            var w = java.util.regex.Pattern.compile("\"([a-z]+)\"").matcher(m.group(1));
+            while (w.find()) labels.add(w.group(1));
+        }
+        assertFalse(labels.isEmpty());
+        assertEquals(labels, new java.util.TreeSet<>(CommandHandler.COMMANDS));
     }
 }
