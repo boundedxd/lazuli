@@ -191,7 +191,7 @@ public class InteractionCourseTest {
                 : s.onGround ? Standing.nodeUnder(w, s.x, s.y, s.z)
                 : Pos.pack((int) Math.floor(s.x), (int) Math.floor(s.y + 1e-9), (int) Math.floor(s.z));
             List<Long> path = snap.path();
-            if (snap.version() != shownVersion && log.length() < 30000) {
+            if (snap.version() != shownVersion && log.length() < 400000) {
                 shownVersion = snap.version();
                 log.append("path v").append(shownVersion).append(' ').append(path.stream().map(Pos::toString).toList()).append(System.lineSeparator());
             }
@@ -249,7 +249,7 @@ public class InteractionCourseTest {
             under = wet ? under + 1 : 0;
             lastUnderwater = Math.max(lastUnderwater, under);
             t++;
-            if (log.length() < 30000) {
+            if (log.length() < 400000) {
                 log.append(String.format("t=%d pos=(%.2f,%.2f,%.2f) g=%s idx=%d/%d in=%d%s%s%s block=%s path0=%s %s%n", t, s.x, s.y, s.z,
                     s.onGround, idx, path.size(), c.impulse(), c.jump() ? "J" : "", c.sneak() ? "S" : "", building ? " build" : "",
                     Pos.toString(block), path.isEmpty() ? "-" : Pos.toString(path.get(0)), who));

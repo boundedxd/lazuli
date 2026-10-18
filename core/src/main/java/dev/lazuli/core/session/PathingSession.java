@@ -444,6 +444,9 @@ public final class PathingSession {
 
     /** How far one leg dug through solid ground goes (along the straight line, any direction). */
     static final int ROCK_LEG = 24;
+    /** Farthest sideways a mostly-vertical rock leg takes in one go, and how loosely it must end around its point. */
+    static final int COLUMN_LEG_MAX = 32;
+    static final int COLUMN_RADIUS = 1;
 
     /**
      * The goal is far and the straight line to it is mostly solid: a tunnel or shaft the whole way, every block dug.
@@ -458,6 +461,23 @@ public final class PathingSession {
         double dx = p[0] - Pos.x(player), dy = p[1] - Pos.y(player), dz = p[2] - Pos.z(player);
         double d = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (d <= ROCK_LEG + 4 || !solidLine(dx / d, dy / d, dz / d, d)) return false;
+        double hd = Math.sqrt(dx * dx + dz * dz);
+        if (hd <= COLUMN_LEG_MAX && hd <= Math.abs(dy)) {
+            // Mostly down (or up): sideways in rock is a two-block tunnel for every step, on the surface it is a walk.
+            // A leg ending on the line leaves the sideways part for later, at depth, and the path shown goes down,
+            // then across; so the leg takes all of it now (walked in the open, or dug where there is no open) and
+            // the rest of its length straight down the target's own column, and legs after it go straight on.
+            segment = new GoalNear(p[0], Pos.y(player) + (int) Math.round(Math.signum(dy) * Math.min(Math.abs(dy), ROCK_LEG)),
+                p[2], COLUMN_RADIUS);
+            createPlanner();
+            PlanResult r = search(SEGMENT_NANOS);
+            if (stale()) return true;
+            if (r.status() == PlanResult.Status.FOUND) {
+                handoff = Math.max(4, ROCK_LEG / 3);
+                publish(State.PATHING, r.path());
+                return true;
+            }
+        }
         for (double len : new double[]{ROCK_LEG, ROCK_LEG / 2.0}) {
             segment = new GoalNear((int) Math.round(Pos.x(player) + dx / d * len), (int) Math.round(Pos.y(player) + dy / d * len),
                 (int) Math.round(Pos.z(player) + dz / d * len), SEGMENT_RADIUS);
