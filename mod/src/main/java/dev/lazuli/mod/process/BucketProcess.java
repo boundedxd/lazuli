@@ -61,7 +61,30 @@ public final class BucketProcess implements Process {
     private Direction pourFace;
     private Animal cow;
     private boolean wandering;
-    private final Set<BlockPos> skip = new HashSet<>();
+    /** Targets given up on and the tick each was: left alone for {@link #SKIP_TICKS}, then tried again. */
+    private final java.util.Map<BlockPos, Integer> skip = new java.util.HashMap<>();
+    private static final int SKIP_TICKS = 20 * 60;
+    private int tickNow;
+    private net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> startDim;
+    /** Done or failed, but the poured water is still down: scooping it back first, then this is how it ends. */
+    private boolean returning;
+    private Outcome pendingOutcome = Outcome.NONE;
+    private String pendingMsg;
+    private int returnStart;
+
+    private boolean skipped(BlockPos at) {
+        Integer t = skip.get(at);
+        if (t == null) return false;
+        if (settings.retrySkippedSeconds.get() > 0 && tickNow - t > SKIP_TICKS) {
+            skip.remove(at);
+            return false;
+        }
+        return true;
+    }
+
+    private void giveUp(BlockPos at) {
+        skip.put(at.immutable(), tickNow);
+    }
 
     public BucketProcess(PathingSession session, Settings settings, Consumer<String> chat) {
         this.settings = settings;
@@ -86,6 +109,9 @@ public final class BucketProcess implements Process {
         idle = closeTries = 0;
         usedAt = -100;
         skip.clear();
+        returning = false;
+        startDim = mc.level.dimension();
+        tickNow = p.tickCount;
         trip.clear();
         if (!settings.getItemBuckets.get()) {
             fail("Buckets are off (getItemBuckets)");
@@ -130,7 +156,17 @@ public final class BucketProcess implements Process {
         if (!active) return;
         LocalPlayer p = mc.player;
         if (p == null || mc.level == null) return;
+        tickNow = p.tickCount;
+        if (mc.level.dimension() != startDim) {
+            waterAt = null; // another world: nothing to scoop back
+            fail("Changed dimension; stopped");
+            return;
+        }
         if (p.containerMenu != p.inventoryMenu) return;
+        if (returning) {
+            scoopBack(mc, p);
+            return;
+        }
         if (p.tickCount - startTick > TOTAL_TICKS) {
             fail("Took too long");
             return;
@@ -155,7 +191,7 @@ public final class BucketProcess implements Process {
             end(Outcome.DONE, Chat.ok("Filled {}", name(item)));
             return;
         }
-        if (target != null && (skip.contains(target) || !source(mc.level.getBlockState(target), f))) target = null;
+        if (target != null && (skipped(target) || !source(mc.level.getBlockState(target), f))) target = null;
         if (target == null && p.tickCount % 10 == 0) {
             target = nearestSource(mc, p, f, p.blockPosition(), settings.bucketRange.get());
             targetSince = p.tickCount;
@@ -170,7 +206,7 @@ public final class BucketProcess implements Process {
             return;
         }
         if (p.tickCount - targetSince > TARGET_TICKS) {
-            skip.add(target);
+            giveUp(target);
             target = null;
             return;
         }
@@ -181,7 +217,7 @@ public final class BucketProcess implements Process {
                 return;
             }
             if (scoop(mc, p, target) && ++closeTries > 6) { // clicked a few times and still empty: not a real source
-                skip.add(target);
+                giveUp(target);
                 target = null;
             }
         } else {
@@ -208,7 +244,7 @@ public final class BucketProcess implements Process {
         BlockSearch.forEach(mc.level, around.getX() - r, around.getY() - 24, around.getZ() - r, around.getX() + r, around.getY() + 24,
             around.getZ() + r, s -> source(s, f), at -> {
                 double d = at.distSqr(p.blockPosition());
-                if (d < bestD[0] && !skip.contains(at)) {
+                if (d < bestD[0] && !skipped(at)) {
                     bestD[0] = d;
                     best[0] = at.immutable();
                 }
@@ -237,7 +273,7 @@ public final class BucketProcess implements Process {
             return;
         }
         if (p.tickCount - targetSince > TARGET_TICKS) {
-            skip.add(cow.blockPosition());
+            giveUp(cow.blockPosition());
             cow = null;
             return;
         }
@@ -265,7 +301,7 @@ public final class BucketProcess implements Process {
         Animal best = null;
         for (Animal a : mc.level.getEntitiesOfClass(Animal.class, p.getBoundingBox().inflate(r), e -> e.isAlive() && !e.isBaby())) {
             String id = BuiltInRegistries.ENTITY_TYPE.getKey(a.getType()).getPath();
-            if (!id.equals("cow") && !id.equals("mooshroom") || skip.contains(a.blockPosition())) continue;
+            if (!id.equals("cow") && !id.equals("mooshroom") || skipped(a.blockPosition())) continue;
             if (best == null || p.distanceToSqr(a) < p.distanceToSqr(best)) best = a;
         }
         return best;
@@ -291,7 +327,7 @@ public final class BucketProcess implements Process {
                 if (trip.running()) trip.cancel();
                 input.release();
                 Aim.Result r = Aim.breakTick(mc, p, ob, input, settings);
-                if (r == Aim.Result.BLOCKED) skip.add(ob);
+                if (r == Aim.Result.BLOCKED) giveUp(ob);
             } else {
                 goNear(p, ob, 2);
             }
@@ -330,14 +366,14 @@ public final class BucketProcess implements Process {
                 if (Hands.has(p, s -> s.is(Items.BUCKET)) && !Hands.has(p, s -> s.is(Items.WATER_BUCKET))) {
                     fail("The water didn't stay (evaporated?)");
                 } else if (target != null) {
-                    skip.add(target);
+                    giveUp(target);
                     target = null;
                     pourFrom = null;
                 }
             }
             return;
         }
-        if (target != null && (skip.contains(target) || !source(mc.level.getBlockState(target), Fluids.LAVA))) {
+        if (target != null && (skipped(target) || !source(mc.level.getBlockState(target), Fluids.LAVA))) {
             target = null;
             pourFrom = null;
         }
@@ -356,7 +392,7 @@ public final class BucketProcess implements Process {
             return;
         }
         if (p.tickCount - targetSince > TARGET_TICKS) {
-            skip.add(target);
+            giveUp(target);
             target = null;
             return;
         }
@@ -373,7 +409,7 @@ public final class BucketProcess implements Process {
                 }
             }
             if (pourFrom == null && ++closeTries > 40) { // can't be clicked from anywhere it can stand
-                skip.add(target);
+                giveUp(target);
                 target = null;
                 return;
             }
@@ -440,7 +476,7 @@ public final class BucketProcess implements Process {
         BlockSearch.forEach(mc.level, z.getX() - 8, z.getY() - 6, z.getZ() - 8, z.getX() + 8, z.getY() + 6, z.getZ() + 8,
             s -> s.is(Blocks.OBSIDIAN), at -> {
                 double d = at.distSqr(p.blockPosition());
-                if (d >= bestD[0] || skip.contains(at)) return;
+                if (d >= bestD[0] || skipped(at)) return;
                 for (Direction dir : Direction.values()) { // part of a portal: leave it
                     if (mc.level.getBlockState(at.relative(dir)).is(Blocks.NETHER_PORTAL)) return;
                 }
@@ -453,7 +489,7 @@ public final class BucketProcess implements Process {
     private ItemEntity nearestDrop(Minecraft mc, LocalPlayer p) {
         ItemEntity best = null;
         for (ItemEntity e : mc.level.getEntitiesOfClass(ItemEntity.class, p.getBoundingBox().inflate(12), e -> e.getItem().is(Items.OBSIDIAN) && !e.isRemoved())) {
-            if (skip.contains(e.blockPosition())) continue;
+            if (skipped(e.blockPosition())) continue;
             if (best == null || p.distanceToSqr(e) < p.distanceToSqr(best)) best = e;
         }
         return best;
@@ -519,7 +555,37 @@ public final class BucketProcess implements Process {
         end(Outcome.FAILED, Chat.err("{}", msg));
     }
 
+    /** One tick of taking the poured water back before the run really ends. */
+    private void scoopBack(Minecraft mc, LocalPlayer p) {
+        if (waterAt != null && !source(mc.level.getBlockState(waterAt), Fluids.WATER)) waterAt = null;
+        if (waterAt == null || p.tickCount - returnStart > 20 * 20) {
+            if (waterAt != null) chat.accept(Chat.warn("Couldn't get the water back: it's at {} {} {}", waterAt.getX(), waterAt.getY(), waterAt.getZ()));
+            waterAt = null;
+            returning = false;
+            end(pendingOutcome, pendingMsg);
+            return;
+        }
+        scoopWater(mc, p);
+    }
+
     private void end(Outcome how, String msg) {
+        LocalPlayer me = Minecraft.getInstance().player;
+        if (waterAt != null && me != null && me.level().dimension() == startDim && !returning) {
+            BlockPos w = waterAt;
+            if (how != Outcome.CANCELLED && settings.bucketScoopBack.get() && Math.sqrt(me.blockPosition().distSqr(w)) <= 24
+                && Hands.has(me, s -> s.is(Items.BUCKET))) {
+                pendingOutcome = how; // pick the water up first
+                pendingMsg = msg;
+                returning = true;
+                returnStart = me.tickCount;
+                idle = 0;
+                trip.cancel();
+                return;
+            }
+            chat.accept(Chat.warn("Water left running at {} {} {}", w.getX(), w.getY(), w.getZ()));
+        }
+        returning = false;
+        waterAt = null;
         active = false;
         outcome = how;
         trip.cancel();

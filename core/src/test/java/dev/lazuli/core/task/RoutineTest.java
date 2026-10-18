@@ -207,4 +207,47 @@ class RoutineTest {
         assertEquals(List.of("broken stopped: none of its steps did anything"), msgs);
         assertFalse(r.running());
     }
+
+    @Test
+    void aHungStepIsStoppedAfterTheTimeoutAndTheNextRuns() {
+        RoutineRunner r = new RoutineRunner();
+        List<String> notes = new ArrayList<>();
+        r.setIdlePolicy(0, 20, notes::add);
+        r.setStepTimeout(200);
+        r.start("job", List.of("#goto 1 2 3", "#deposit all"), 1);
+        List<String> ran = new ArrayList<>();
+        boolean[] busy = {false};
+        int[] stops = {0};
+        String done = null;
+        for (int t = 0; t < 1000 && done == null; t++) {
+            done = r.tick(busy[0], false, cmd -> {
+                ran.add(cmd);
+                busy[0] = cmd.startsWith("#goto"); // the goto never ends
+            }, () -> {
+                stops[0]++;
+                busy[0] = false;
+            });
+        }
+        assertEquals(List.of("#goto 1 2 3", "#deposit all"), ran);
+        assertEquals(1, stops[0]);
+        assertEquals("job done", done);
+        assertEquals(1, notes.size());
+        assertTrue(notes.get(0).contains("took too long"));
+    }
+
+    @Test
+    void withoutATimeoutAHungStepWaitsAndAnEndlessOneIsNeverTimedOut() {
+        RoutineRunner r = new RoutineRunner();
+        r.setStepTimeout(0);
+        r.start("job", List.of("#goto 1 2 3", "#deposit all"), 1);
+        List<String> ran = new ArrayList<>();
+        for (int t = 0; t < 5000; t++) r.tick(true, false, ran::add, () -> {});
+        assertEquals(List.of("#goto 1 2 3"), ran);
+        RoutineRunner e = new RoutineRunner();
+        e.setStepTimeout(50);
+        e.start("farm", List.of("#farm", "#deposit all"), 1);
+        List<String> ran2 = new ArrayList<>();
+        for (int t = 0; t < 500; t++) e.tick(true, false, ran2::add, () -> {});
+        assertEquals(List.of("#farm"), ran2);
+    }
 }

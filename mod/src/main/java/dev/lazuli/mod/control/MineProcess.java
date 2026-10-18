@@ -115,7 +115,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
 
     public MineProcess(PathingSession session, Settings settings, BlockView world, Consumer<String> chat) {
         this.tunnel = new dev.lazuli.mod.process.TunnelProcess(session, settings, m -> {});
-        this.explore = new dev.lazuli.mod.process.ExploreProcess(session, m -> {});
+        this.explore = new dev.lazuli.mod.process.ExploreProcess(session, settings, m -> {});
         this.searchTrip = new dev.lazuli.mod.process.Trip(session);
         this.session = session;
         this.settings = settings;

@@ -167,7 +167,7 @@ public final class LazuliClient implements ClientModInitializer {
 		mine = new MineProcess(session, settings, cache, this::chat);
 		mine.useOreIndex(ores);
 		follow = new FollowProcess(session, settings, this::chat);
-		explore = new ExploreProcess(session, this::chat);
+		explore = new ExploreProcess(session, settings, this::chat);
 		tunnel = new TunnelProcess(session, settings, this::chat);
 		farm = new FarmProcess(session, settings, this::chat);
 		sleeps = new SleepProcess(session, settings, this::chat);
@@ -1038,6 +1038,7 @@ public final class LazuliClient implements ClientModInitializer {
 		tasks.tick();
 		boolean full = mc.player != null && mc.player.getInventory().getFreeSlot() < 0;
 		routine.setIdlePolicy(settings.routineIdleWaitSeconds.get() * 20, settings.routineIdleRounds.get(), m -> chat(Chat.info(m)));
+		routine.setStepTimeout(settings.routineStepTimeoutMinutes.get() * 60 * 20);
 		String routineDone = routine.tick(busy(), full, line -> {
 			// a step's own command (#come, #stop inside a routine) mustn't end the routine running it
 			runningRoutineStep = true;

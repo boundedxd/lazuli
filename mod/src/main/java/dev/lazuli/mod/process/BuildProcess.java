@@ -58,6 +58,8 @@ public final class BuildProcess implements Process {
     private BlockPos target;
     private int tries, since, usedAt, done, total, refills;
     private final Set<BlockPos> skipped = new HashSet<>();
+    /** The skipped spots have had their one more go. */
+    private boolean retriedSkips;
 
     public BuildProcess(PathingSession session, Settings settings, ClickDriver clicks, Consumer<String> chat) {
         this.settings = settings;
@@ -114,6 +116,7 @@ public final class BuildProcess implements Process {
         target = null;
         done = refills = 0;
         skipped.clear();
+        retriedSkips = false;
         total = 0;
         for (List<BlockPos> l : layers) for (BlockPos b : l) if (todo(mc, b)) total++;
         if (total == 0) {
@@ -161,6 +164,7 @@ public final class BuildProcess implements Process {
         target = null;
         done = refills = 0;
         skipped.clear();
+        retriedSkips = false;
         total = 0;
         for (List<BlockPos> l : layers) for (BlockPos b : l) if (todo(mc, b)) total++;
         if (total == 0) {
@@ -337,6 +341,14 @@ public final class BuildProcess implements Process {
                 return true;
             }
             layer++;
+            if (layer >= layers.size() && !skipped.isEmpty() && !retriedSkips && settings.retrySkippedSeconds.get() > 0) {
+                // everything else is done: the spots it gave up on get one more go (a chest refilled, a gap closed)
+                retriedSkips = true;
+                chat.accept(Chat.info("Trying the {} skipped spots once more", skipped.size()));
+                skipped.clear();
+                layer = 0;
+                tries = 0;
+            }
         }
         end(skipped.isEmpty() ? Chat.ok("{} done: {} blocks", plan != null ? planName : block == null ? "Clearing" : "Filling", done)
             : Chat.warn("Done: {} blocks, {} skipped (couldn't get to them)", done, skipped.size()));

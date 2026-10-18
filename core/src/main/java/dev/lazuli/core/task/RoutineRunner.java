@@ -32,6 +32,13 @@ public final class RoutineRunner {
         this.notice = notice == null ? m -> {} : notice;
     }
 
+    /** Ticks a step that isn't endless may stay busy before it's stopped and the routine moves on (0: no limit). */
+    private int stepTimeout, stepTicks;
+
+    public void setStepTimeout(int ticks) {
+        this.stepTimeout = Math.max(0, ticks);
+    }
+
     /** Starts {@code steps}, {@code times} times over (0 or less: forever). */
     public void start(String name, List<String> steps, int times) {
         this.name = name;
@@ -87,6 +94,13 @@ public final class RoutineRunner {
                 stopStep.run();
                 busy = false;
             }
+            if (busy && stepTimeout > 0 && !endless(steps.get(step)) && ++stepTicks > stepTimeout) {
+                // hung (a trip that never ends, a process waiting on something): give up on it, on to the next
+                notice.accept((name == null ? "Queue" : name) + ": '" + steps.get(step) + "' took too long; moving on");
+                stopStep.run();
+                busy = false;
+                started = true;
+            }
             if (busy) {
                 started = true;
                 anyBusy = true;
@@ -129,6 +143,7 @@ public final class RoutineRunner {
         }
         started = false;
         waited = 0;
+        stepTicks = 0;
         run.accept(steps.get(step));
         return null;
     }
