@@ -214,6 +214,8 @@ public final class Settings {
     public final Setting<Boolean> buildEnabled = bool("buildEnabled", true);
     /** #build out of a block (none in the chests either): leave those spots and build the rest (off: stop). */
     public final Setting<Boolean> buildSkipMissing = bool("buildSkipMissing", false);
+    /** #build places stairs, slabs, logs, doors... facing the way the schematic has them (and fixes ones that don't). */
+    public final Setting<Boolean> buildExactStates = bool("buildExactStates", true);
     /** #iceboat's search: runs kept each round (more: better lines, more time). */
     public final Setting<Integer> iceboatBeam = integer("iceboatBeam", 64, 8, 512);
     /** #iceboat's search: milliseconds per tick it may think (a tick is 50). */

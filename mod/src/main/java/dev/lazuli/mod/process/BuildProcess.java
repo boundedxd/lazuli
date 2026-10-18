@@ -5,6 +5,7 @@ import dev.lazuli.core.chat.Chat;
 import dev.lazuli.core.goal.GoalBlock;
 import dev.lazuli.core.goal.GoalNear;
 import dev.lazuli.core.inventory.Click;
+import dev.lazuli.core.schematic.Orient;
 import dev.lazuli.core.session.PathingSession;
 import dev.lazuli.core.settings.Settings;
 import dev.lazuli.mod.control.Aim;
@@ -29,7 +30,9 @@ import java.util.function.Consumer;
  * there is broken first, then the right one placed, bottom layer first. Within the layer it works on the spot
  * nearest the player, walking closer when it's out of reach; spots it can't get to are skipped and counted.
  * <p>
- * A schematic's blocks are matched by kind: a stair or log placed facing another way than drawn still counts.
+ * With buildExactStates a schematic's stairs, slabs, logs, doors... are placed turned the way they're drawn (the face
+ * clicked, the half hit and the way the player looks, by {@link Orient}), and ones turned wrong are broken and placed
+ * again; off, blocks are matched by kind only.
  */
 public final class BuildProcess implements Process {
     private static final int TRIES = 3, ACT_TICKS = 100, PLACE_WAIT = 6;
@@ -45,6 +48,8 @@ public final class BuildProcess implements Process {
     private String block;
     /** #build: the block wanted at each spot (null for #sel), and the schematic's name. */
     private java.util.Map<BlockPos, net.minecraft.world.level.block.state.BlockState> plan;
+    /** #build: how to place each spot's block turned the right way (spots missing: any way will do). */
+    private final java.util.Map<BlockPos, Orient.Rule> rules = new java.util.HashMap<>();
     private String planName;
     private boolean running;
     /** Spots still to do, by layer in working order. */
@@ -128,7 +133,9 @@ public final class BuildProcess implements Process {
         stop(false);
         LocalPlayer p = mc.player;
         plan = new java.util.HashMap<>();
+        rules.clear();
         java.util.Map<String, net.minecraft.world.level.block.state.BlockState> parsed = new java.util.HashMap<>();
+        java.util.Map<net.minecraft.world.level.block.state.BlockState, java.util.Optional<Orient.Rule>> ruleOf = new java.util.HashMap<>();
         int unknown = 0;
         for (var b : s.blocks()) {
             var st = parsed.computeIfAbsent(b.state(), BuildProcess::parse);
@@ -136,7 +143,11 @@ public final class BuildProcess implements Process {
                 unknown++;
                 continue;
             }
-            plan.put(origin.offset(b.x(), b.y(), b.z()), st);
+            BlockPos at = origin.offset(b.x(), b.y(), b.z());
+            plan.put(at, st);
+            ruleOf.computeIfAbsent(st, x -> java.util.Optional.ofNullable(
+                Orient.rule(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(x.getBlock()).toString(), props(x))))
+                .ifPresent(rule -> rules.put(at, rule));
         }
         planName = name;
         block = null;
@@ -173,6 +184,37 @@ public final class BuildProcess implements Process {
         }
     }
 
+    /** A block state's properties by name ("facing" -> "east"). */
+    private static java.util.Map<String, String> props(net.minecraft.world.level.block.state.BlockState s) {
+        java.util.Map<String, String> m = new java.util.HashMap<>();
+        for (var p : s.getProperties()) m.put(p.getName(), value(s, p));
+        return m;
+    }
+
+    private static <T extends Comparable<T>> String value(net.minecraft.world.level.block.state.BlockState s,
+                                                           net.minecraft.world.level.block.state.properties.Property<T> p) {
+        return p.getName(s.getValue(p));
+    }
+
+    /** The placing rule for {@code b}, if buildExactStates is on and its block has one. */
+    private Orient.Rule rule(BlockPos b) {
+        return plan != null && settings.buildExactStates.get() ? rules.get(b) : null;
+    }
+
+    /** The schematic's block is at {@code b} but turned the wrong way. */
+    private boolean turnedWrong(Minecraft mc, BlockPos b) {
+        Orient.Rule rule = rule(b);
+        if (rule == null) return false;
+        var s = mc.level.getBlockState(b);
+        return s.getBlock() == plan.get(b).getBlock() && !rule.fits(props(s));
+    }
+
+    /** A single slab where a double one is wanted: finished by placing the other half, not by breaking it. */
+    private boolean placeOnto(Minecraft mc, BlockPos b) {
+        Orient.Rule rule = rule(b);
+        return rule != null && rule.placeOnto(props(mc.level.getBlockState(b)));
+    }
+
     /** The item placed at {@code b}: the schematic's block there, or the fill block. */
     private String itemFor(BlockPos b) {
         if (plan == null) return block;
@@ -185,7 +227,8 @@ public final class BuildProcess implements Process {
         if (plan == null) return block == null || plant(mc, b);
         var s = mc.level.getBlockState(b);
         var want = plan.get(b);
-        return want != null && !s.canBeReplaced() && s.getBlock() != want.getBlock();
+        if (want == null || s.canBeReplaced()) return false;
+        return s.getBlock() != want.getBlock() || turnedWrong(mc, b) && !placeOnto(mc, b);
     }
 
     @Override
@@ -200,7 +243,8 @@ public final class BuildProcess implements Process {
         var s = mc.level.getBlockState(b);
         if (plan != null) {
             var want = plan.get(b);
-            if (want == null || s.getBlock() == want.getBlock()) return false;
+            if (want == null) return false;
+            if (s.getBlock() == want.getBlock()) return turnedWrong(mc, b) && (placeOnto(mc, b) || s.getDestroySpeed(mc.level, b) >= 0);
             return s.canBeReplaced() || s.getDestroySpeed(mc.level, b) >= 0;
         }
         if (block == null) {
@@ -311,19 +355,33 @@ public final class BuildProcess implements Process {
             target = null; // walked into it: another spot first
             return;
         }
-        BlockPos a = against(mc, target);
-        if (a == null) {
+        List<BlockPos> ns = neighbours(mc, target);
+        if (ns.isEmpty()) {
             target = null;
             return;
         }
-        Direction face = Direction.getApproximateNearest(target.getX() - a.getX(), target.getY() - a.getY(), target.getZ() - a.getZ());
-        if (Aim.at(mc, p, a, face) == null) {
-            approach(p);
+        Orient.Rule rule = rule(target);
+        Aim.Check check = rule == null ? null : (yaw, pitch, hit) -> rule.ok(Orient.Dir.valueOf(hit.getDirection().name()),
+            hit.getLocation().y - hit.getBlockPos().getY(), yaw, pitch);
+        // the first neighbour that can be clicked from here (the right way, when it matters)
+        BlockPos a = null;
+        Direction face = null;
+        for (BlockPos n : ns) {
+            Direction f = Direction.getApproximateNearest(target.getX() - n.getX(), target.getY() - n.getY(), target.getZ() - n.getZ());
+            if (Aim.at(mc, p, p.getEyePosition(), n, f, check) != null) {
+                a = n;
+                face = f;
+                break;
+            }
+        }
+        if (a == null) {
+            Orient.Dir side = rule == null ? null : rule.standSide();
+            approach(p, side == null ? target : target.relative(Direction.valueOf(side.name()), 2));
             return;
         }
         if (trip.running()) trip.cancel();
         if (p.tickCount - usedAt < PLACE_WAIT) return;
-        if (Aim.useOn(mc, p, a, face, input, settings)) usedAt = p.tickCount;
+        if (Aim.useOn(mc, p, a, face, check, input, settings)) usedAt = p.tickCount;
     }
 
     /** The block in hand, swapped in (or refilled from a chest); false while that's happening. */
@@ -387,12 +445,17 @@ public final class BuildProcess implements Process {
 
     /** Out of reach or sight: walk closer (a few times, then skip it). */
     private void approach(LocalPlayer p) {
+        approach(p, target);
+    }
+
+    /** {@link #approach} toward {@code near} (a spot beside the target, to look at it the way a block's facing needs). */
+    private void approach(LocalPlayer p, BlockPos near) {
         if (trip.running()) return;
         if (tries++ >= TRIES) {
             skip(p);
             return;
         }
-        trip.go(new GoalNear(target.getX(), target.getY(), target.getZ(), 2), p, true);
+        trip.go(new GoalNear(near.getX(), near.getY(), near.getZ(), near.equals(target) ? 2 : 1), p, true);
     }
 
     private void skip(LocalPlayer p) {
@@ -403,10 +466,21 @@ public final class BuildProcess implements Process {
     }
 
     /** A solid neighbour to place {@code b} against (below first), not one that opens when clicked; or null. */
-    private static BlockPos against(Minecraft mc, BlockPos b) {
-        if (solid(mc, b.below())) return b.below();
-        for (Direction d : Direction.values()) if (solid(mc, b.relative(d))) return b.relative(d);
-        return null;
+    private BlockPos against(Minecraft mc, BlockPos b) {
+        List<BlockPos> n = neighbours(mc, b);
+        return n.isEmpty() ? null : n.get(0);
+    }
+
+    /** Every solid neighbour {@code b} can be placed against (below first), on a face that can give the state wanted. */
+    private List<BlockPos> neighbours(Minecraft mc, BlockPos b) {
+        Orient.Rule rule = rule(b);
+        List<BlockPos> out = new ArrayList<>();
+        for (Direction d : Direction.values()) { // DOWN first
+            BlockPos n = b.relative(d);
+            // the face of n that gets clicked points back at b
+            if (solid(mc, n) && (rule == null || rule.canClick(Orient.Dir.valueOf(d.getOpposite().name())))) out.add(n);
+        }
+        return out;
     }
 
     /** A flower, leaf litter or the like: nothing can go there until it's broken (at once). */
@@ -445,6 +519,7 @@ public final class BuildProcess implements Process {
     private void end(String msg) {
         running = false;
         plan = null;
+        rules.clear();
         target = null;
         trip.cancel();
         input.release();

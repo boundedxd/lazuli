@@ -24,6 +24,11 @@ public final class Aim {
 
     public enum Result { WORKING, DONE, BLOCKED }
 
+    /** An extra condition on a look: the rotation and where it hits (e.g. a stair needs a facing and a half). */
+    public interface Check {
+        boolean ok(float yaw, float pitch, BlockHitResult hit);
+    }
+
     private Aim() {}
 
     /** Yaw and pitch putting the crosshair on {@code bp} (on {@code face}, if not null) within reach, or null. */
@@ -33,6 +38,11 @@ public final class Aim {
 
     /** {@link #at} from an eye somewhere else (where the player could stand). */
     public static float[] at(Minecraft mc, LocalPlayer player, Vec3 eye, BlockPos bp, Direction face) {
+        return at(mc, player, eye, bp, face, null);
+    }
+
+    /** {@link #at} with only looks that pass {@code check} (null: any). */
+    public static float[] at(Minecraft mc, LocalPlayer player, Vec3 eye, BlockPos bp, Direction face, Check check) {
         double reach = player.blockInteractionRange();
         for (double[] q : POINTS) {
             double qx = q[0], qy = q[1], qz = q[2];
@@ -48,7 +58,8 @@ public final class Aim {
             float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
             float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)));
             BlockHitResult h = crosshair(mc, player, eye, yaw, pitch);
-            if (h != null && h.getBlockPos().equals(bp) && (face == null || h.getDirection() == face)) return new float[]{yaw, pitch};
+            if (h != null && h.getBlockPos().equals(bp) && (face == null || h.getDirection() == face)
+                && (check == null || check.ok(yaw, pitch, h))) return new float[]{yaw, pitch};
         }
         return null;
     }
@@ -99,11 +110,17 @@ public final class Aim {
      * once used, false while turning (or if it can't be seen, see {@link #at}).
      */
     public static boolean useOn(Minecraft mc, LocalPlayer player, BlockPos against, Direction face, InputDriver input, Settings settings) {
-        float[] aim = at(mc, player, against, face);
+        return useOn(mc, player, against, face, null, input, settings);
+    }
+
+    /** {@link #useOn} that only clicks with a look passing {@code check} (null: any). */
+    public static boolean useOn(Minecraft mc, LocalPlayer player, BlockPos against, Direction face, Check check, InputDriver input, Settings settings) {
+        float[] aim = at(mc, player, player.getEyePosition(), against, face, check);
         if (aim == null) return false;
         BlockHitResult hit = current(mc, player);
         turn(mc, player, input, aim, settings);
         if (hit == null || !hit.getBlockPos().equals(against) || face != null && hit.getDirection() != face) return false;
+        if (check != null && !check.ok(RotationDriver.yaw(player), RotationDriver.pitch(player), hit)) return false;
         if (mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit).consumesAction()) {
             player.swing(InteractionHand.MAIN_HAND);
             return true;
