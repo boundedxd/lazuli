@@ -224,6 +224,19 @@ public final class Settings {
     public final Setting<Integer> tradeRange = integer("tradeRange", 96, 16, 512);
     /** #trade with what it wants sold out: buys what's left, then waits up to this many minutes for a restock (0: no wait). */
     public final Setting<Integer> tradeRestockMinutes = integer("tradeRestockMinutes", 10, 0, 60);
+    /** #trade never sells these for emeralds (comma list; #trade sell <item> still does when asked by name). */
+    public final Setting<String> tradeNeverSell = register(new Setting<>("tradeNeverSell",
+        "minecraft:diamond,minecraft:netherite_ingot,minecraft:ancient_debris,minecraft:emerald_block,minecraft:enchanted_book,minecraft:totem_of_undying",
+        s -> s.replace(" ", "").toLowerCase(java.util.Locale.ROOT)));
+    /** When set: the only things #trade sells for emeralds (comma list). */
+    public final Setting<String> tradeSellOnly = register(new Setting<>("tradeSellOnly", "",
+        s -> s.replace(" ", "").toLowerCase(java.util.Locale.ROOT)));
+    /** #trade skips buying trades that cost more emeralds than this. */
+    public final Setting<Integer> tradeMaxEmeralds = integer("tradeMaxEmeralds", 64, 1, 64);
+    /** #trade looks at villagers it has not seen yet when the known ones cannot do it. */
+    public final Setting<Boolean> tradeScanUnknown = bool("tradeScanUnknown", true);
+    /** #trade keeps a villager screen open for the next trade with the same villager (off: closes after each). */
+    public final Setting<Boolean> tradeStayOpen = bool("tradeStayOpen", true);
     /** Lets the players in chatControlPlayers run commands by saying them in chat (or whispering). */
     public final Setting<Boolean> chatControl = bool("chatControl", false);
     /** Who may (names, comma separated). */

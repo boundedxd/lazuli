@@ -161,8 +161,11 @@ public final class TradeProcess implements Process {
     /** Sells {@code count} of {@code item} (negative: all of it) to the best-paying villagers around. */
     public void sell(Minecraft mc, String item, int count) {
         if (item.equals(TradePlanner.EMERALD)) {
-            // "sell for emeralds": whatever on hand the villagers take
-            start(mc, List.of(new Want(item, null, 0, Inventories.plainCounts(mc.player).getOrDefault(item, 0) + Math.max(1, count))));
+            // "sell for emeralds": whatever on hand the villagers take (count: emeralds to make; all: no limit)
+            sellItem = item;
+            sellHad = Inventories.plainCounts(mc.player).getOrDefault(item, 0);
+            sellKeep = Math.max(0, count);
+            begin(mc, List.of(), false);
             return;
         }
         sellItem = item;
@@ -197,6 +200,7 @@ public final class TradeProcess implements Process {
             return;
         }
         chat.accept(scanOnly ? Chat.ok("Looking at {} villagers' trades", toScan.size())
+            : sellingAny() ? Chat.ok("Selling what's on hand for {}", sellKeep > 0 ? sellKeep + " emeralds" : "emeralds")
             : sellItem != null ? Chat.ok("Selling {} {}", sellHad - sellKeep, name(sellItem)) : Chat.ok("Trading for {}", describe(wants)));
         next(mc);
     }
@@ -255,12 +259,17 @@ public final class TradeProcess implements Process {
     }
 
     private void plan(Minecraft mc, LocalPlayer p) {
-        if (p.containerMenu != p.inventoryMenu) return; // a screen still closing
+        boolean merchant = p.containerMenu instanceof MerchantMenu;
+        if (p.containerMenu != p.inventoryMenu && !(merchant && settings.tradeStayOpen.get())) return; // a screen still closing
         Recipes recipes = RecipeData.get().getNow(null);
         Drops drops = RecipeData.drops().getNow(null);
         if (recipes == null || drops == null) return;
         if (++steps > MAX_STEPS) {
             end(Outcome.FAILED, Chat.err("Gave up after {} steps", MAX_STEPS));
+            return;
+        }
+        if (sellingAny()) {
+            sellAnyPlan(mc, p);
             return;
         }
         if (sellItem != null) {
@@ -276,20 +285,13 @@ public final class TradeProcess implements Process {
                 chat.accept(Chat.info("Sold out; waiting up to {} min for a restock", settings.tradeRestockMinutes.get()));
             }
             steps = 0;
+            if (merchant) p.closeContainer();
             enter(Phase.RESTOCK, p);
             return;
         }
         if (!plan.ok()) {
             // maybe one not looked at yet buys or sells it: look at every villager around once, then plan again
-            if (!scannedAll) {
-                scannedAll = true;
-                queueUnknown(mc, v -> true, Integer.MAX_VALUE);
-                if (!toScan.isEmpty()) {
-                    chat.accept(Chat.info("Looking at {} more villagers' trades", toScan.size()));
-                    next(mc);
-                    return;
-                }
-            }
+            if (scanMore(mc)) return;
             end(Outcome.FAILED, Chat.err("Can't trade for {}: {}", describe(wants), plan.problem()));
             return;
         }
@@ -300,6 +302,7 @@ public final class TradeProcess implements Process {
         step = plan.steps().get(0);
         if (step.kind() == TradePlanner.Step.Kind.GATHER) {
             ItemCount it = step.item();
+            if (merchant) p.closeContainer();
             if (settings.tradeLootChests.get() && !looted && queueLoot(mc, p, it.item(), plan)) {
                 looted = true;
                 chat.accept(Chat.info("Looking in {} chests near the villagers for {}", toLoot.size(), name(it.item())));
@@ -312,11 +315,91 @@ public final class TradeProcess implements Process {
             enter(Phase.GATHER, p);
             return;
         }
+        goTrade(mc, p);
+    }
+
+    /** Off to the step's villager; with its screen open already (tradeStayOpen), straight on trading. */
+    private void goTrade(Minecraft mc, LocalPlayer p) {
         chat.accept(Chat.info("Trading {} x{} with a {}", step.offer().describe(), step.times(), step.trader().profession()));
         target = step.trader().id();
         lastSeen = new BlockPos(step.trader().x(), step.trader().y(), step.trader().z());
         tries = 0;
+        if (p.containerMenu instanceof MerchantMenu) {
+            if (watcher != null && watcher.trading() != null && watcher.trading().getUUID().toString().equals(target)) {
+                startTrading(p);
+                return;
+            }
+            p.closeContainer();
+        }
         enter(Phase.GO, p);
+    }
+
+    /** If tradeScanUnknown: queues every villager around not looked at yet (once a run); true if there are some. */
+    private boolean scanMore(Minecraft mc) {
+        if (scannedAll || !settings.tradeScanUnknown.get()) return false;
+        scannedAll = true;
+        queueUnknown(mc, v -> true, Integer.MAX_VALUE);
+        if (toScan.isEmpty()) return false;
+        if (mc.player.containerMenu instanceof MerchantMenu) mc.player.closeContainer();
+        chat.accept(Chat.info("Looking at {} more villagers' trades", toScan.size()));
+        next(mc);
+        return true;
+    }
+
+    private boolean sellingAny() {
+        return TradePlanner.EMERALD.equals(sellItem);
+    }
+
+    /** #trade sell emerald: whatever on hand the villagers around buy, until done or out. */
+    private void sellAnyPlan(Minecraft mc, LocalPlayer p) {
+        int made = Inventories.plainCounts(p).getOrDefault(TradePlanner.EMERALD, 0) - sellHad;
+        if (sellKeep > 0 && made >= sellKeep) {
+            end(Outcome.DONE, Chat.ok("Made {} emeralds", made));
+            return;
+        }
+        BlockPos f = p.blockPosition();
+        TradePlanner.Plan plan = TradePlanner.sellAny(Inventories.plainCounts(p), traders(mc, p), f.getX(), f.getY(), f.getZ(),
+            this::maySell, sellKeep > 0 ? sellKeep - made : 0);
+        if (!plan.ok()) {
+            if (scanMore(mc)) return;
+            if (made > 0) end(Outcome.DONE, Chat.ok("Made {} emeralds (nothing more on hand that they buy)", made));
+            else end(Outcome.FAILED, Chat.err("Can't sell for emeralds: {}", plan.problem()));
+            return;
+        }
+        step = plan.steps().get(0);
+        goTrade(mc, p);
+    }
+
+    /** May be sold for emeralds: not in tradeNeverSell, and in tradeSellOnly when that's set. */
+    private boolean maySell(String item) {
+        if (list(settings.tradeNeverSell.get()).contains(item)) return false;
+        List<String> only = list(settings.tradeSellOnly.get());
+        return only.isEmpty() || only.contains(item);
+    }
+
+    private static List<String> list(String csv) {
+        List<String> out = new ArrayList<>();
+        for (String s : csv.split(",")) {
+            s = s.trim().toLowerCase(java.util.Locale.ROOT);
+            if (!s.isEmpty()) out.add(s.contains(":") ? s : "minecraft:" + s);
+        }
+        return out;
+    }
+
+    /**
+     * What the planner may use of a villager: no buying trades dearer than tradeMaxEmeralds, and no selling (for
+     * emeralds) what mustn't be sold.
+     */
+    private Trader allowed(Trader t) {
+        int max = settings.tradeMaxEmeralds.get();
+        List<Offer> ok = new ArrayList<>();
+        for (Offer o : t.offers()) {
+            boolean buying = o.costA().item().equals(TradePlanner.EMERALD);
+            if (buying && o.costA().count() > max) continue;
+            if (!buying && o.result().item().equals(TradePlanner.EMERALD) && !maySell(o.costA().item())) continue;
+            ok.add(o);
+        }
+        return new Trader(t.id(), t.profession(), t.dim(), t.x(), t.y(), t.z(), ok);
     }
 
     /** Waiting for a restock: every minute, look at the villagers that sell what's wanted again, then plan. */
@@ -345,25 +428,13 @@ public final class TradeProcess implements Process {
         TradePlanner.Plan plan = TradePlanner.sell(sellItem, have - sellKeep, Inventories.plainCounts(p), traders(mc, p),
             f.getX(), f.getY(), f.getZ());
         if (!plan.ok()) {
-            if (!scannedAll) {
-                scannedAll = true;
-                queueUnknown(mc, v -> true, Integer.MAX_VALUE);
-                if (!toScan.isEmpty()) {
-                    chat.accept(Chat.info("Looking at {} more villagers' trades", toScan.size()));
-                    next(mc);
-                    return;
-                }
-            }
+            if (scanMore(mc)) return;
             if (sold > 0) end(Outcome.DONE, Chat.ok("Sold {} {} ({})", sold, name(sellItem), plan.problem()));
             else end(Outcome.FAILED, Chat.err("Can't sell {}: {}", name(sellItem), plan.problem()));
             return;
         }
         step = plan.steps().get(0);
-        chat.accept(Chat.info("Trading {} x{} with a {}", step.offer().describe(), step.times(), step.trader().profession()));
-        target = step.trader().id();
-        lastSeen = new BlockPos(step.trader().x(), step.trader().y(), step.trader().z());
-        tries = 0;
-        enter(Phase.GO, p);
+        goTrade(mc, p);
     }
 
     /** The known villagers in range (not skipped this run). */
@@ -383,7 +454,7 @@ public final class TradeProcess implements Process {
         BlockPos f = p.blockPosition();
         int range = settings.tradeRange.get();
         List<Trader> traders = memory.apply(mc).near(dimension.apply(mc), f.getX(), f.getY(), f.getZ()).stream()
-            .filter(t -> t.distSq(f.getX(), f.getY(), f.getZ()) <= (double) range * range && !skip.contains(t.id())).toList();
+            .filter(t -> t.distSq(f.getX(), f.getY(), f.getZ()) <= (double) range * range && !skip.contains(t.id())).map(this::allowed).toList();
         return TradePlanner.plan(wants, w -> TradeWatcher.count(p, w), Inventories.plainCounts(p), traders,
             f.getX(), f.getY(), f.getZ(), settings.tradeForEmeralds.get(), gatherCost(mc, p, recipes, drops), partial);
     }
@@ -506,11 +577,7 @@ public final class TradeProcess implements Process {
 
     private void open(Minecraft mc, LocalPlayer p) {
         if (p.containerMenu instanceof MerchantMenu) {
-            input.release();
-            reselects = 0;
-            lastSelect = -100;
-            gotBefore = -1;
-            enter(Phase.TRADE, p);
+            startTrading(p);
             return;
         }
         AbstractVillager v = find(mc, target);
@@ -537,6 +604,14 @@ public final class TradeProcess implements Process {
             p.swing(InteractionHand.MAIN_HAND);
             clicked = true;
         }
+    }
+
+    private void startTrading(LocalPlayer p) {
+        input.release();
+        reselects = 0;
+        lastSelect = -100;
+        gotBefore = -1;
+        enter(Phase.TRADE, p);
     }
 
     private void trade(Minecraft mc, LocalPlayer p) {
@@ -570,7 +645,8 @@ public final class TradeProcess implements Process {
         int done = (got - gotBefore) / Math.max(1, o.result().count());
         if (clicks.busy()) return;
         if (done >= step.times()) {
-            close(mc, p);
+            if (settings.tradeStayOpen.get()) enter(Phase.PLAN, p); // the next trade may be with this villager too
+            else close(mc, p);
             return;
         }
         ItemStack carried = menu.getCarried();
@@ -669,6 +745,8 @@ public final class TradeProcess implements Process {
 
     private void end(Outcome how, String msg) {
         phase = Phase.IDLE;
+        LocalPlayer p = Minecraft.getInstance().player;
+        if (p != null && p.containerMenu instanceof MerchantMenu) p.closeContainer();
         outcome = how;
         trip.cancel();
         input.release();

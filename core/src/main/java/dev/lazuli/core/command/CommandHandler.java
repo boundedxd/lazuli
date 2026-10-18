@@ -928,7 +928,7 @@ public final class CommandHandler {
             case "scan" -> ctx.tradeScan();
             case "sell" -> {
                 if (args.length < 2 || args.length > 3) {
-                    ctx.reply(Chat.err("Usage: trade sell <item> [count|all]"));
+                    ctx.reply(Chat.err("Usage: trade sell <item> [count|all]  (sell emerald [n|all]: sell what you have for emeralds)"));
                     return;
                 }
                 String id = args[1].toLowerCase(Locale.ROOT);
@@ -938,7 +938,7 @@ public final class CommandHandler {
                     try {
                         count = Integer.parseInt(args[2]);
                     } catch (NumberFormatException e) {
-                        ctx.reply(Chat.err("Usage: trade sell <item> [count|all]"));
+                        ctx.reply(Chat.err("Usage: trade sell <item> [count|all]  (sell emerald [n|all]: sell what you have for emeralds)"));
                         return;
                     }
                 }

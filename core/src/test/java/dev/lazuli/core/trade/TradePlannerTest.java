@@ -62,6 +62,23 @@ class TradePlannerTest {
     }
 
     @Test
+    void sellingAnythingForEmeraldsUsesUpTheInventoryNearestFirstKeepingWhatsKept() {
+        Trader fisher = trader("f", "fisherman", 30, buys(0, "minecraft:string", 19));
+        Trader farmer = trader("w", "farmer", 5, buys(0, "minecraft:wheat", 20), buys(1, "minecraft:diamond", 1));
+        Map<String, Integer> have = Map.of("minecraft:string", 64, "minecraft:wheat", 45, "minecraft:diamond", 3);
+        var p = TradePlanner.sellAny(have, List.of(fisher, farmer), 0, 64, 0, i -> !i.equals("minecraft:diamond"), 0);
+        assertTrue(p.ok(), p.problem());
+        assertEquals(2, p.steps().size());
+        assertEquals("w", p.steps().get(0).trader().id(), "the nearer villager first");
+        assertEquals(2, p.steps().get(0).times(), "45 wheat: two whole trades");
+        assertEquals(3, p.steps().get(1).times(), "64 string: three trades of 19");
+        // only 4 emeralds wanted: the wheat (2), then 2 of the string trades
+        var some = TradePlanner.sellAny(have, List.of(fisher, farmer), 0, 64, 0, i -> !i.equals("minecraft:diamond"), 4);
+        assertEquals(2, some.steps().get(1).times());
+        assertFalse(TradePlanner.sellAny(Map.of("minecraft:diamond", 3), List.of(farmer), 0, 64, 0, i -> !i.equals("minecraft:diamond"), 0).ok());
+    }
+
+    @Test
     void aLowerLevelBookDoesntCount() {
         Trader lib = trader("a", "librarian", 10, book(0, 9, "minecraft:sharpness", 3));
         var p = plan(List.of(new Want(EBOOK, "minecraft:sharpness", 5, 1)), Map.of(EMERALD, 30, BOOK, 2), List.of(lib), false, i -> NO);

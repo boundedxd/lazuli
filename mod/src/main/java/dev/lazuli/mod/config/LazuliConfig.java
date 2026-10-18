@@ -252,6 +252,25 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(bool(s.tradeForEmeralds, "#trade without enough emeralds: sell things for them first (string, sticks, crops...)."))
                     .option(bool(s.tradeLootChests, "#trade needing things to sell: look in the chests near the villagers that buy them."))
                     .option(bool(s.getItemTrade, "#getitem trades with villagers when that's the only way, or cheaper than making it."))
+                    .option(bool(s.tradeScanUnknown, "#trade walks to villagers it hasn't seen yet when the known ones can't do it."))
+                    .option(bool(s.tradeStayOpen, "#trade keeps the trading screen open for more trades with the same villager."))
+                    .option(Options.ofNumber("Trade max emeralds", s.tradeMaxEmeralds::get, s.tradeMaxEmeralds.defaultValue(), s.tradeMaxEmeralds::set)
+                        .range(1, 64, 1)
+                        .description(OptionDescription.ofText(() -> "#trade skips trades costing more emeralds than this.")).build())
+                    .option(Options.ofString("Never sell", s.tradeNeverSell::get, s.tradeNeverSell.defaultValue(), v -> {
+                        try {
+                            s.tradeNeverSell.parse(v);
+                        } catch (IllegalArgumentException ignored) {
+                            // keep the previous list
+                        }
+                    }).description(OptionDescription.ofText(() -> "Items #trade never sells for emeralds, comma separated (#trade sell <item> still does).")).build())
+                    .option(Options.ofString("Sell only", s.tradeSellOnly::get, s.tradeSellOnly.defaultValue(), v -> {
+                        try {
+                            s.tradeSellOnly.parse(v);
+                        } catch (IllegalArgumentException ignored) {
+                            // keep the previous list
+                        }
+                    }).description(OptionDescription.ofText(() -> "If set: the only items #trade sells for emeralds, comma separated.")).build())
                     .option(bool(s.getItemHunt, "#getitem kills mobs for what they drop (leather, bones, string, gunpowder...)."))
                     .option(Options.ofNumber("Hunt minutes", s.huntMinutes::get, s.huntMinutes.defaultValue(), s.huntMinutes::set)
                         .range(1, 60, 1)

@@ -198,6 +198,41 @@ public final class TradePlanner {
         return new Plan(List.copyOf(steps), null, false);
     }
 
+    /**
+     * Selling whatever's on hand that villagers buy for emeralds ({@code #trade sell emerald}): the nearest villager
+     * first (fewer walks), its best-paying offers first, whole trades only, until the inventory runs out or
+     * {@code emeralds} are made (0: no limit). {@code allowed} says which items may go.
+     */
+    public static Plan sellAny(Map<String, Integer> have, List<Trader> traders, int px, int py, int pz,
+                               java.util.function.Predicate<String> allowed, int emeralds) {
+        List<Step> buyers = new ArrayList<>();
+        for (Trader t : traders) {
+            for (Offer o : t.offers()) {
+                String in = o.costA().item();
+                if (o.costB() == null && o.result().item().equals(EMERALD) && !in.equals(EMERALD) && o.left() > 0
+                    && allowed.test(in) && have.getOrDefault(in, 0) >= o.costA().count()) buyers.add(Step.trade(t, o, 0));
+            }
+        }
+        buyers.sort(Comparator.comparingDouble((Step s) -> s.trader().distSq(px, py, pz))
+            .thenComparingDouble(s -> -(double) s.offer().result().count() / s.offer().costA().count()));
+        Map<String, Integer> inv = new HashMap<>(have);
+        int toGo = emeralds > 0 ? emeralds : Integer.MAX_VALUE;
+        List<Step> steps = new ArrayList<>();
+        for (Step b : buyers) {
+            if (toGo <= 0) break;
+            Offer o = b.offer();
+            int per = o.costA().count(), pay = o.result().count();
+            int times = Math.min(o.left(), inv.getOrDefault(o.costA().item(), 0) / per);
+            if (toGo != Integer.MAX_VALUE) times = Math.min(times, ceil(toGo, pay));
+            if (times <= 0) continue;
+            inv.merge(o.costA().item(), -times * per, Integer::sum);
+            if (toGo != Integer.MAX_VALUE) toGo -= times * pay;
+            steps.add(Step.trade(b.trader(), o, times));
+        }
+        if (steps.isEmpty()) return Plan.fail("nothing on hand that a villager I've seen buys");
+        return new Plan(List.copyOf(steps), null, false);
+    }
+
     /** Every known offer of {@code w} (sold out too), the cheapest per item first, then the nearest. */
     public static List<Step> find(Want w, List<Trader> traders, int px, int py, int pz) {
         List<Step> out = new ArrayList<>();
