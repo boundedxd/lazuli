@@ -51,6 +51,8 @@ public final class Restock {
                 case "food" -> FOOD;
                 case "pickaxe", "axe", "shovel", "sword", "hoe" -> tools(name);
                 case "blocks" -> List.copyOf(blocks);
+                case "arrows" -> ids("arrow", "spectral_arrow", "tipped_arrow");
+                case "totem" -> ids("totem_of_undying");
                 default -> List.of(ItemKeys.id(name));
             };
             out.add(new Want(name, which, amount));

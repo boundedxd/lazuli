@@ -49,8 +49,25 @@ public final class ChestWatcher {
         });
     }
 
+    /**
+     * Forgets remembered containers in loaded chunks that aren't one any more (broken, or the block replaced); the
+     * ones in unloaded chunks stay. Cheap: a block entity lookup per remembered container.
+     */
+    public void prune(Minecraft mc) {
+        if (mc.level == null || !enabled.get()) return;
+        String dim = dimension.apply(mc);
+        memory.apply(mc).prune(s -> {
+            if (!s.dim().equals(dim)) return false;
+            BlockPos at = new BlockPos(s.x(), s.y(), s.z());
+            if (!mc.level.isLoaded(at)) return false;
+            var be = mc.level.getBlockEntity(at);
+            return !(be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity || be instanceof ShulkerBoxBlockEntity);
+        });
+    }
+
     public void tick(Minecraft mc) {
         LocalPlayer p = mc.player;
+        if (p != null && p.tickCount % 100 == 50) prune(mc);
         if (p == null || clicked == null) return;
         AbstractContainerMenu menu = p.containerMenu;
         if (menu == p.inventoryMenu) {

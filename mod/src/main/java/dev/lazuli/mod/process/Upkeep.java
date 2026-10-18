@@ -110,6 +110,7 @@ public final class Upkeep {
         if (!busy || !settings.autoEat.get() || food > (Guard.healing() ? 19 : settings.autoEatHunger.get()) || mc.screen != null || p.isUsingItem()) return;
         int slot = bestFood(p, food <= DESPERATE);
         if (slot < 0) {
+            RestockProcess.urgent("food"); // a remembered chest may have some
             if (!warnedNoFood) chat.accept(Chat.warn("Hungry and no food to eat"));
             warnedNoFood = true;
             return;

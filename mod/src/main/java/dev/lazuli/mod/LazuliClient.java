@@ -200,6 +200,9 @@ public final class LazuliClient implements ClientModInitializer {
 		brews = new dev.lazuli.mod.process.BrewProcess(session, settings, clicks, crafts, this::chat);
 		brews.useGetItem(getItem);
 		brews.useChests(containers, this::chests, LazuliClient::dimension);
+		crafts.useChests(containers, this::chests, LazuliClient::dimension);
+		smelts.useChests(containers, this::chests, LazuliClient::dimension);
+		smiths.useChests(containers, this::chests, LazuliClient::dimension);
 		enchants = new dev.lazuli.mod.process.EnchantProcess(session, settings, clicks, this::chat);
 		enchants.useChests(containers, this::chests, LazuliClient::dimension);
 		elytra = new dev.lazuli.mod.process.ElytraProcess(session, settings, clicks, this::chat);
@@ -215,12 +218,14 @@ public final class LazuliClient implements ClientModInitializer {
 		}, this::chat);
 		restock.skipWhen(() -> follow.active() && !settings.restockFollow.get());
 		breeds = new dev.lazuli.mod.process.BreedProcess(session, settings, this::chat);
+		breeds.useChests(containers, this::chests, LazuliClient::dimension);
 		fishing = new dev.lazuli.mod.process.FishProcess(session, settings, this::chat);
 		fishing.useContainers(containers);
 		portals = new dev.lazuli.mod.process.PortalProcess(session, settings, cache, this::portalMemory, LazuliClient::dimension, this::chat);
 		portals.useGetItem(getItem);
 		strongholds = new dev.lazuli.mod.process.StrongholdProcess(session, settings,
 			(mc, b) -> waypoints(mc).set("stronghold", dimension(mc), b.getX(), b.getY(), b.getZ()), this::chat);
+		strongholds.useChests(containers, this::chests, LazuliClient::dimension);
 		recovery = new dev.lazuli.mod.process.DeathRecovery(session, settings, LazuliClient::dimension, this::chat);
 		iceboat = new dev.lazuli.mod.process.IceBoatProcess(settings, cache,
 			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("iceboat"), this::chat);

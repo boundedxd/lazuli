@@ -156,7 +156,7 @@ public final class EnchantProcess implements Process {
      * false if that's off, none is known, or it has tried enough.
      */
     private boolean fetch(Minecraft mc, String id, int n, Runnable again) {
-        if (take == null || !settings.chestIngredients.get() || fetches >= MAX_FETCHES) return false;
+        if (take == null || !ChestTake.allowed(settings, ChestTake.Use.INGREDIENT) || fetches >= MAX_FETCHES) return false;
         LocalPlayer p = mc.player;
         java.util.function.Predicate<String> m = Inventories.matcher(id);
         if (!take.start(mc, p, id, n, pl -> {

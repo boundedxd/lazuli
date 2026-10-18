@@ -405,7 +405,7 @@ public final class BuildProcess implements Process {
         for (int i = 0; i < 36; i++) if (Inventories.key(inv.getItem(i)).equals(item)) slot = slot < 0 || i < 9 && slot >= 9 ? i : slot;
         if (slot < 0) {
             input.release();
-            if (take != null && settings.chestIngredients.get() && refills++ < 20
+            if (take != null && ChestTake.allowed(settings, ChestTake.Use.INGREDIENT) && refills++ < 20
                 && take.start(mc, p, item, Math.min(64 * 9, needed(mc, item)), pl -> held(pl, item))) {
                 chat.accept(Chat.info("Out of {}: getting more", name(item)));
                 return false;

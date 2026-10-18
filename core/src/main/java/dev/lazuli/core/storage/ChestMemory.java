@@ -10,6 +10,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 
 /**
  * What was in each container the last time it was opened, per dimension, kept in a small text file
@@ -28,11 +30,54 @@ public final class ChestMemory {
 
     private final Path file;
     private final Map<Key, Map<String, Integer>> chests = new LinkedHashMap<>();
+    private final LongSupplier clock;
+    /** Failed trips per container (3 strikes and it's forgotten), and until when each is left alone after one. */
+    private final Map<Key, Integer> strikes = new HashMap<>();
+    private final Map<Key, Long> coolUntil = new HashMap<>();
+    /** Strikes before a container that can't be reached or opened is forgotten. */
+    public static final int STRIKES = 3;
 
     /** {@code file} null: kept in memory only. */
     public ChestMemory(Path file) {
+        this(file, System::currentTimeMillis);
+    }
+
+    /** {@code clock}: milliseconds, for the cooldown after a failed trip. */
+    public ChestMemory(Path file, LongSupplier clock) {
         this.file = file;
+        this.clock = clock;
         load();
+    }
+
+    /**
+     * A trip to the container at x y z failed (couldn't get there or open it): it's left alone for {@code cooldownMs},
+     * and forgotten at the third strike. True if forgotten.
+     */
+    public synchronized boolean fail(String dim, int x, int y, int z, long cooldownMs) {
+        Key k = new Key(dim, x, y, z);
+        int n = strikes.merge(k, 1, Integer::sum);
+        if (n >= STRIKES) {
+            forget(dim, x, y, z);
+            return true;
+        }
+        coolUntil.put(k, clock.getAsLong() + cooldownMs);
+        return false;
+    }
+
+    private boolean cooling(Key k) {
+        Long until = coolUntil.get(k);
+        return until != null && clock.getAsLong() < until;
+    }
+
+    /** Forgets every remembered container for which {@code gone} (given dim x y z) says it isn't a container now. */
+    public synchronized int prune(Predicate<Spot> gone) {
+        int before = chests.size();
+        chests.keySet().removeIf(k -> gone.test(new Spot(k.dim(), k.x(), k.y(), k.z(), 0)));
+        strikes.keySet().retainAll(chests.keySet());
+        coolUntil.keySet().retainAll(chests.keySet());
+        int n = before - chests.size();
+        if (n > 0) save();
+        return n;
     }
 
     /** The container at x y z now holds these (an empty map: nothing; it's still remembered as a container). */
@@ -41,13 +86,19 @@ public final class ChestMemory {
         items.forEach((k, v) -> {
             if (v > 0) copy.merge(k, v, Integer::sum);
         });
-        Map<String, Integer> old = chests.put(new Key(dim, x, y, z), copy);
+        Key key = new Key(dim, x, y, z);
+        strikes.remove(key);
+        coolUntil.remove(key);
+        Map<String, Integer> old = chests.put(key, copy);
         if (!copy.equals(old)) save();
     }
 
     /** Forgets the container at x y z (broken, or not there any more). */
     public synchronized void forget(String dim, int x, int y, int z) {
-        if (chests.remove(new Key(dim, x, y, z)) != null) save();
+        Key key = new Key(dim, x, y, z);
+        strikes.remove(key);
+        coolUntil.remove(key);
+        if (chests.remove(key) != null) save();
     }
 
     public synchronized void clear() {
@@ -60,7 +111,7 @@ public final class ChestMemory {
         List<Spot> out = new ArrayList<>();
         chests.forEach((k, items) -> {
             Integer n = items.get(item);
-            if (n != null && n > 0 && k.dim().equals(dim)) out.add(new Spot(k.dim(), k.x(), k.y(), k.z(), n));
+            if (n != null && n > 0 && k.dim().equals(dim) && !cooling(k)) out.add(new Spot(k.dim(), k.x(), k.y(), k.z(), n));
         });
         out.sort(Comparator.comparingDouble(s -> s.distSq(px, py, pz)));
         return out;
@@ -77,6 +128,18 @@ public final class ChestMemory {
         Map<String, Integer> out = new HashMap<>();
         chests.forEach((k, items) -> {
             if (k.dim().equals(dim)) items.forEach((i, n) -> out.merge(i, n, Integer::sum));
+        });
+        return out;
+    }
+
+    /** Like {@link #totals(String)}, for the containers within {@code range} blocks of px py pz only. */
+    public synchronized Map<String, Integer> totals(String dim, int px, int py, int pz, int range) {
+        Map<String, Integer> out = new HashMap<>();
+        double r2 = (double) range * range;
+        chests.forEach((k, items) -> {
+            if (!k.dim().equals(dim) || cooling(k)) return;
+            double dx = k.x() - px, dy = k.y() - py, dz = k.z() - pz;
+            if (dx * dx + dy * dy + dz * dz <= r2) items.forEach((i, n) -> out.merge(i, n, Integer::sum));
         });
         return out;
     }

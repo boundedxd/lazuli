@@ -14,7 +14,7 @@ import java.util.function.ToIntFunction;
 
 /**
  * Takes an item out of the nearest remembered chest (chestMemory, within chestRange) through {@link ContainerProcess};
- * a chest it couldn't get to or open is forgotten. With {@code shulkers} on, also out of a shulker box in the inventory
+ * a chest it couldn't get to or open is left alone a while and forgotten at the third strike; it goes on to the next chest when one doesn't hold enough. With {@code shulkers} on, also out of a shulker box in the inventory
  * (placed, opened, picked up again), or a remembered chest's shulker box holding it (taken, then unpacked).
  * Shared by #getitem, #brew, #enchant and restocking.
  */
@@ -34,6 +34,10 @@ final class ChestTake {
     private int n;
     private ToIntFunction<LocalPlayer> count;
     private int before;
+    /** Chests this take already went to (it moves on to the next one when one didn't hold enough). */
+    private final java.util.Set<BlockPos> tried = new java.util.HashSet<>();
+    /** How long a chest that couldn't be reached is left alone before the next strike (ms). */
+    private static final long COOLDOWN = 60_000;
 
     ChestTake(dev.lazuli.core.settings.Settings settings, ContainerProcess containers, Function<Minecraft, ChestMemory> chests,
               Function<Minecraft, String> dimension) {
@@ -42,6 +46,36 @@ final class ChestTake {
         this.chests = chests;
         this.dimension = dimension;
         this.unpack = new ShulkerUnpack(containers.session(), settings, ClickDriver.get());
+    }
+
+    /** What a take is for: the finished thing asked for, something to make it with, or a restock. */
+    enum Use { FINAL, INGREDIENT, RESTOCK }
+
+    /** The one place that says whether remembered chests may be used for {@code use} (chestMemory + chestFinal/chestIngredients). */
+    static boolean allowed(dev.lazuli.core.settings.Settings s, Use use) {
+        if (!s.chestMemory.get()) return false;
+        return switch (use) {
+            case FINAL -> s.chestFinal.get();
+            case INGREDIENT -> s.chestIngredients.get();
+            case RESTOCK -> true;
+        };
+    }
+
+    /**
+     * What remembered chests within chestRange hold, as plain item ids (a shulker box's contents counted when
+     * {@code shulkers} is on): for the planner to take from. Empty when chests may not be used for {@code use}.
+     */
+    static java.util.Map<String, Integer> stored(dev.lazuli.core.settings.Settings s, ChestMemory mem, String dim, BlockPos at, Use use) {
+        if (mem == null || !allowed(s, use)) return java.util.Map.of();
+        java.util.Map<String, Integer> out = new java.util.HashMap<>();
+        mem.totals(dim, at.getX(), at.getY(), at.getZ(), s.chestRange.get()).forEach((k, n) -> {
+            if (ItemKeys.isInShulker(k)) {
+                if (s.shulkers.get()) out.merge(ItemKeys.shulkerContent(k), n, Integer::sum);
+            } else if (k.indexOf('#') < 0 && k.indexOf('@') < 0) {
+                out.merge(k, n, Integer::sum);
+            }
+        });
+        return out;
     }
 
     boolean active() {
@@ -58,6 +92,7 @@ final class ChestTake {
         this.n = n;
         this.count = count;
         before = count.applyAsInt(p);
+        tried.clear();
         if (settings.chestMemory.get() && fromChest(mc, p, item, n)) {
             mode = Mode.CHEST;
             return true;
@@ -79,16 +114,18 @@ final class ChestTake {
     private boolean fromChest(Minecraft mc, LocalPlayer p, String what, int n) {
         var mem = chests.apply(mc);
         var bp = p.blockPosition();
-        var spot = mem.nearest(what, dimension.apply(mc), bp.getX(), bp.getY(), bp.getZ(), settings.chestRange.get());
-        if (spot == null) return false;
-        at = new BlockPos(spot.x(), spot.y(), spot.z());
-        containers.start(mc, false, List.of(new ItemCount(what, ItemKeys.isInShulker(what) ? 1 : Math.min(n, spot.count()))), at);
-        if (!containers.active()) {
-            mem.forget(spot.dim(), spot.x(), spot.y(), spot.z());
+        double r = (double) settings.chestRange.get();
+        for (var spot : mem.find(what, dimension.apply(mc), bp.getX(), bp.getY(), bp.getZ())) {
+            if (spot.distSq(bp.getX(), bp.getY(), bp.getZ()) > r * r) break;
+            BlockPos pos = new BlockPos(spot.x(), spot.y(), spot.z());
+            if (!tried.add(pos)) continue;
+            at = pos;
+            containers.start(mc, false, List.of(new ItemCount(what, ItemKeys.isInShulker(what) ? 1 : Math.min(n, spot.count()))), at);
+            if (containers.active()) return true;
+            mem.fail(spot.dim(), spot.x(), spot.y(), spot.z(), COOLDOWN);
             at = null;
-            return false;
         }
-        return true;
+        return false;
     }
 
     /** RUNNING while walking/taking; once it's over, how it went ({@link #got} says how many). */
@@ -110,13 +147,16 @@ final class ChestTake {
                 // (opened but got nothing, say with a full inventory: the chest is fine)
                 if (containers.outcome() == ContainerProcess.Outcome.FAILED && !containers.opened()
                     && (mode == Mode.CHEST ? count.applyAsInt(p) <= before : !gotBox)) {
-                    chests.apply(mc).forget(dimension.apply(mc), was.getX(), was.getY(), was.getZ());
+                    chests.apply(mc).fail(dimension.apply(mc), was.getX(), was.getY(), was.getZ(), COOLDOWN);
                 }
                 if (gotBox) {
                     unpack.start(p, ShulkerUnpack.boxWith(p, item), item, n);
                     mode = Mode.UNPACK;
                     return Result.RUNNING;
                 }
+                // this chest didn't hold enough: on to the next one that has some
+                if (mode == Mode.CHEST && !ItemKeys.isInShulker(item) && containers.outcome() == ContainerProcess.Outcome.DONE
+                    && got(p) < n && fromChest(mc, p, item, n - got(p))) return Result.RUNNING;
                 mode = Mode.NONE;
                 return Result.DONE;
             }

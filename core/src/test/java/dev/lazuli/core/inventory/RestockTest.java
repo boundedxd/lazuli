@@ -45,4 +45,14 @@ class RestockTest {
         var w = Restock.parse("torch:32", BLOCKS);
         assertNull(Restock.next(w, ids -> 0, id -> true, Set.of("torch")));
     }
+
+    @Test
+    void builtInNamesForArrowsTotemShieldAndWater() {
+        var w = Restock.parse("arrows:32,totem:1,shield:1,water_bucket:1", BLOCKS);
+        assertEquals(4, w.size());
+        assertTrue(w.get(0).ids().contains("minecraft:arrow"));
+        assertEquals(List.of("minecraft:totem_of_undying"), w.get(1).ids());
+        assertEquals(List.of("minecraft:shield"), w.get(2).ids());
+        assertEquals(List.of("minecraft:water_bucket"), w.get(3).ids());
+    }
 }

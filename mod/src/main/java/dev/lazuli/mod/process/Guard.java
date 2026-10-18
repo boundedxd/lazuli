@@ -159,6 +159,7 @@ public final class Guard implements Process {
                 if (p.getHealth() >= p.getMaxHealth() - 1 || since > HEAL_TICKS) {
                     if (since > HEAL_TICKS) {
                         chat.accept(Chat.warn("Not healing (no food?); carrying on at {} HP", (int) p.getHealth()));
+                        RestockProcess.urgent("food"); // a remembered chest may have some
                         healGaveUpAt = p.tickCount;
                         healGaveUpHp = p.getHealth();
                     }

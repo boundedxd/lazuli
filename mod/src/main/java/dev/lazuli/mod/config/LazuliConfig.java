@@ -197,6 +197,7 @@ public final class LazuliConfig implements WalksyLibApi {
                 .group(OptionGroup.builder("Restock")
                     .option(bool(s.restock, "While busy, refill what's running low from chests you've opened (or shulker boxes); the job waits. Refills when under half."))
                     .option(bool(s.restockFollow, "Also restock while following someone (#follow)."))
+                    .option(bool(s.restockUrgent, "Hungry with no food (or too hurt to heal): fetch food from a chest you've opened at once, even if nothing else is running."))
                     .option(bool(s.blockBudget, "With building blocks not restocked: a path needing more blocks than you carry goes the way round without placing instead (when there is one)."))
                     .build())
                 .group(OptionGroup.builder("What")
@@ -213,6 +214,10 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(bool(s.restockBlocks, "Keep building blocks (the throwaway blocks: dirt, cobblestone...)."))
                     .option(Options.ofNumber("Block count", s.restockBlocksCount::get, s.restockBlocksCount.defaultValue(), s.restockBlocksCount::set)
                         .range(1, 256, 1).description(OptionDescription.ofText(() -> "How many building blocks to keep.")).build())
+                    .option(bool(s.restockArrows, "Keep arrows (32)."))
+                    .option(bool(s.restockWaterBucket, "Keep a water bucket."))
+                    .option(bool(s.restockTotem, "Keep a totem of undying."))
+                    .option(bool(s.restockShield, "Keep a shield."))
                     .option(Options.ofString("Other items", s.restockItems::get, s.restockItems.defaultValue(), v -> {
                         try {
                             s.restockItems.parse(v);

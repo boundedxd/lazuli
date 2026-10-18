@@ -33,6 +33,13 @@ public final class RestockProcess implements Process {
     private static final int GAVE_UP_TICKS = 20 * 60 * 5, BREATHER = 20 * 20;
 
     private static volatile boolean active;
+    /** A job asked for this restock line now (no food...): tried on the next tick whatever else is (not) running. */
+    private static volatile String urgent;
+
+    /** Asks for {@code line} (food, arrows, water_bucket, totem, shield) to be fetched from a chest at once (restockUrgent). */
+    public static void urgent(String line) {
+        urgent = line;
+    }
 
     private final Settings settings;
     private final Consumer<String> chat;
@@ -126,15 +133,19 @@ public final class RestockProcess implements Process {
             finish(p);
             return;
         }
-        if (!settings.restock.get() || p.tickCount < nextCheck) return;
+        String rush = urgent;
+        urgent = null;
+        if (!settings.restockUrgent.get()) rush = null;
+        if (rush == null && (!settings.restock.get() || p.tickCount < nextCheck)) return;
         nextCheck = p.tickCount + CHECK_EVERY;
         PathingSession.Snapshot snap = session.snapshot();
         boolean pathing = snap.state() == PathingSession.State.PATHING || session.planning();
         boolean job = jobRunning.getAsBoolean();
-        if (!pathing && !job || skipWhen.getAsBoolean()) return;
+        if (rush == null && (!pathing && !job || skipWhen.getAsBoolean())) return;
         if (Guard.paused() || p.isFallFlying() || mc.screen != null || p.containerMenu != p.inventoryMenu) return;
         if (ClickDriver.get().busy() || ClickDriver.holding()) return;
-        List<Restock.Want> wants = Restock.parse(settings.restockSpec(),
+        List<Restock.Want> wants = Restock.parse(rush != null ? rush + ":" + (rush.equals("food") ? settings.restockFoodCount.get()
+                : rush.equals("arrows") ? 32 : 1) : settings.restockSpec(),
             Arrays.stream(settings.throwawayBlocks.get().split(",")).filter(s -> !s.isBlank()).map(ItemKeys::id).toList());
         java.util.Set<String> skip = new java.util.HashSet<>();
         skipUntil.forEach((k, until) -> {
@@ -145,7 +156,7 @@ public final class RestockProcess implements Process {
         var bp = p.blockPosition();
         int range = settings.chestRange.get();
         ItemCount next = Restock.next(wants, ids -> held(p, ids), id -> !Tools.collecting(id)
-            && (settings.chestMemory.get() && (mem.nearest(id, dim, bp.getX(), bp.getY(), bp.getZ(), range) != null
+            && (ChestTake.allowed(settings, ChestTake.Use.RESTOCK) && (mem.nearest(id, dim, bp.getX(), bp.getY(), bp.getZ(), range) != null
                 || settings.shulkers.get() && mem.nearest(ItemKeys.inShulker(id), dim, bp.getX(), bp.getY(), bp.getZ(), range) != null)
                 || settings.shulkers.get() && ShulkerUnpack.boxWith(p, id) >= 0), skip);
         if (next == null) return;

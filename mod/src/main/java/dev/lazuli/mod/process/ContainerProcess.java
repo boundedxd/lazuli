@@ -194,13 +194,25 @@ public final class ContainerProcess implements Process {
         java.util.Map<BlockPos, List<ItemCount>> from = new java.util.LinkedHashMap<>();
         List<ItemCount> rest = new ArrayList<>();
         for (ItemCount i : items) {
-            ChestMemory.Spot s = m == null || dev.lazuli.core.inventory.ItemKeys.isInShulker(i.item()) ? null
-                : m.nearest(Inventories.id(i.item()), dim, f.getX(), f.getY(), f.getZ(), settings.chestRange.get());
-            if (s != null && storageAt(mc, new BlockPos(s.x(), s.y(), s.z()))) {
-                from.computeIfAbsent(new BlockPos(s.x(), s.y(), s.z()), k -> new ArrayList<>()).add(i);
-            } else {
-                rest.add(i);
+            boolean box = dev.lazuli.core.inventory.ItemKeys.isInShulker(i.item()); // a shulker box holding it is taken
+            String id = box ? i.item() : Inventories.id(i.item());
+            int left = box ? 1 : i.count() < 0 ? Integer.MAX_VALUE : i.count();
+            boolean any = false;
+            // several chests when one doesn't hold enough, nearest first
+            for (ChestMemory.Spot s : m == null ? List.<ChestMemory.Spot>of() : m.find(id, dim, f.getX(), f.getY(), f.getZ())) {
+                if (left <= 0) break;
+                double r = settings.chestRange.get();
+                if (s.distSq(f.getX(), f.getY(), f.getZ()) > r * r) break;
+                BlockPos at = new BlockPos(s.x(), s.y(), s.z());
+                if (!storageAt(mc, at)) continue;
+                int n = box || i.count() < 0 ? i.count() : Math.min(left, s.count());
+                from.computeIfAbsent(at, k -> new ArrayList<>()).add(new ItemCount(i.item(), n));
+                any = true;
+                if (box) break;
+                if (i.count() >= 0) left -= n;
             }
+            if (!any) rest.add(i);
+            else if (left > 0 && i.count() >= 0 && !box) rest.add(new ItemCount(i.item(), left)); // the rest from the nearest storage
         }
         List<Group> out = new ArrayList<>();
         from.forEach((at, list) -> out.add(new Group(at, list)));

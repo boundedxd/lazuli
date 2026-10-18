@@ -175,6 +175,13 @@ public final class Settings {
     public final Setting<Integer> restockTorchCount = integer("restockTorchCount", 16, 1, 64);
     public final Setting<Boolean> restockBlocks = bool("restockBlocks", true);
     public final Setting<Integer> restockBlocksCount = integer("restockBlocksCount", 64, 1, 256);
+    /** Also keep arrows, a water bucket, a totem of undying, a shield (one each, arrows: 32); off unless wanted. */
+    public final Setting<Boolean> restockArrows = bool("restockArrows", false);
+    public final Setting<Boolean> restockWaterBucket = bool("restockWaterBucket", false);
+    public final Setting<Boolean> restockTotem = bool("restockTotem", false);
+    public final Setting<Boolean> restockShield = bool("restockShield", false);
+    /** No food while hungry (or healing): fetch some from remembered chests at once, even with nothing else running. */
+    public final Setting<Boolean> restockUrgent = bool("restockUrgent", true);
     /** Paths that need more blocks than you carry (and won't restock blocks) look for a way round without placing. */
     public final Setting<Boolean> blockBudget = bool("blockBudget", true);
     /** Restocks while following someone (#follow) too. */
@@ -183,7 +190,7 @@ public final class Settings {
     public final Setting<String> restockItems = register(new Setting<>("restockItems", "",
         s -> s.replace(" ", "").toLowerCase(java.util.Locale.ROOT)));
 
-    private static final java.util.Set<String> RESTOCK_OWN = java.util.Set.of("food", "pickaxe", "axe", "shovel", "sword", "torch", "blocks");
+    private static final java.util.Set<String> RESTOCK_OWN = java.util.Set.of("food", "pickaxe", "axe", "shovel", "sword", "torch", "blocks", "arrows", "water_bucket", "totem", "shield");
 
     /** The whole restock list: the toggled things, then the other items. */
     public String restockSpec() {
@@ -195,6 +202,10 @@ public final class Settings {
         if (restockSword.get()) out.add("sword:1");
         if (restockTorch.get()) out.add("torch:" + restockTorchCount.get());
         if (restockBlocks.get()) out.add("blocks:" + restockBlocksCount.get());
+        if (restockArrows.get()) out.add("arrows:32");
+        if (restockWaterBucket.get()) out.add("water_bucket:1");
+        if (restockTotem.get()) out.add("totem:1");
+        if (restockShield.get()) out.add("shield:1");
         for (String part : restockItems.get().split(",")) {
             int c = part.lastIndexOf(':');
             String name = c < 0 ? part : part.substring(0, c);

@@ -159,7 +159,7 @@ public final class BrewProcess implements Process {
 
     /** Starts taking finished bottles from a remembered chest (chestFinal); false if off or none known. */
     private boolean takeFinished(Minecraft mc) {
-        if (take == null || !settings.chestFinal.get() || count - made <= 0) return false;
+        if (take == null || !ChestTake.allowed(settings, ChestTake.Use.FINAL) || count - made <= 0) return false;
         String item = bottleItem();
         String key = dev.lazuli.core.inventory.ItemKeys.potion(item, potion);
         if (!take.start(mc, mc.player, key, count - made, pl -> held(pl, item, potion))) return false;
