@@ -106,6 +106,17 @@ public final class LazuliRenderer {
             int dist = (int) Math.sqrt(mc.player.blockPosition().distSqr(b));
             Gizmos.billboardTextOverBlock(w.name() + " (" + dist + "m)", b, 0, color, 1.0f);
         }
+        for (var t : targets.get()) {
+            BlockPos b = new BlockPos(t.x(), t.y(), t.z());
+            int color = targetColor(t.kind());
+            if (t.isEntity()) {
+                Gizmos.cuboid(new AABB(t.x() + 0.2, t.y(), t.z() + 0.2, t.x() + 0.8, t.y() + 1.9, t.z() + 0.8), GizmoStyle.stroke(color, width));
+            } else {
+                Gizmos.cuboid(b, GizmoStyle.stroke(color, width));
+            }
+            int dist = (int) Math.sqrt(mc.player.blockPosition().distSqr(b));
+            Gizmos.billboardTextOverBlock("@" + t.name() + " (" + dist + "m)", b, 0, color, 1.0f);
+        }
     }
 
     /** The ghost view: recorded every tick while it's on, drawn until the next trip. */
@@ -138,6 +149,22 @@ public final class LazuliRenderer {
     }
 
     private Supplier<List<dev.lazuli.core.waypoint.Waypoints.Waypoint>> waypoints = List::of;
+    private Supplier<List<dev.lazuli.core.target.Target>> targets = List::of;
+
+    /** The saved targets to draw (this dimension's, or none when they're switched off). */
+    public void targets(Supplier<List<dev.lazuli.core.target.Target>> targets) {
+        this.targets = targets;
+    }
+
+    private static int targetColor(dev.lazuli.core.target.Target.Kind kind) {
+        return switch (kind) {
+            case CONTAINER -> 0xFF55FF55;
+            case VILLAGER -> 0xFFFFAA00;
+            case STATION -> 0xFF55FFFF;
+            case ENTITY -> 0xFFFF55FF;
+            default -> 0xFFCCCCCC;
+        };
+    }
     private Supplier<dev.lazuli.core.area.Selection> selection = () -> null;
 
     /** #sel's corners and box, to draw. */

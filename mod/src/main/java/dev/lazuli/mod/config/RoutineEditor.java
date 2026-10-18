@@ -518,6 +518,13 @@ public final class RoutineEditor {
         }, "", v -> setArgs(s, id, v)).visibility(() -> parsed.getAsBoolean() && (command.getAsBoolean() || layout(s, id) == Forms.Layout.RAW))
             .description(OptionDescription.ofText(() -> "The command's arguments as text. The fields below fill this in for the common ones.")).build());
 
+        ListEntries targetNames = new ListEntries() {
+            @Override
+            public List<String> values() {
+                return targets.get();
+            }
+        };
+
         // item and count
         BooleanSupplier itemLike = () -> parsed.getAsBoolean() && switch (layout(s, id)) {
             case ITEM_COUNT, ITEM_ALL_COUNT -> Forms.parseItem(r(s, id).args()) != null;
@@ -529,7 +536,7 @@ public final class RoutineEditor {
         out.add(Options.ofBoolean("Everything", () -> allOn.getAsBoolean(), false, v -> {
             var a = Forms.parseItem(r(s, id).args());
             if (a == null) return;
-            setArgs(s, id, Forms.compose(new Forms.ItemArg(v ? "all" : "", v ? 0 : a.count())));
+            setArgs(s, id, Forms.compose(new Forms.ItemArg(v ? "all" : "", v ? 0 : a.count(), a.target())));
         }).visibility(allLike::getAsBoolean).description(OptionDescription.ofText(() -> "Every item in the inventory, not one kind.")).build());
         out.add(single("Item", ListEntries.items(), () -> {
             var a = Forms.parseItem(r(s, id).args());
@@ -537,7 +544,7 @@ public final class RoutineEditor {
         }, pick -> {
             var a = Forms.parseItem(r(s, id).args());
             if (a == null) return;
-            setArgs(s, id, Forms.compose(new Forms.ItemArg(stripNamespace(pick), a.count())));
+            setArgs(s, id, Forms.compose(new Forms.ItemArg(stripNamespace(pick), a.count(), a.target())));
         }, () -> itemLike.getAsBoolean() && !allOn.getAsBoolean(), "Which item (search by name)."));
         out.add(intOption("Count", 0, 2304, () -> {
             var a = Forms.parseItem(r(s, id).args());
@@ -545,8 +552,23 @@ public final class RoutineEditor {
         }, v -> {
             var a = Forms.parseItem(r(s, id).args());
             if (a == null) return;
-            setArgs(s, id, Forms.compose(new Forms.ItemArg(a.item(), v)));
+            setArgs(s, id, Forms.compose(new Forms.ItemArg(a.item(), v, a.target())));
         }, () -> itemLike.getAsBoolean() && !allOn.getAsBoolean(), "How many (0: not given, the command's own default)."));
+
+        BooleanSupplier targetLike = () -> itemLike.getAsBoolean() && Forms.takesTarget(word(s, id));
+        out.add(single("Work at target", targetNames, () -> {
+            var a = Forms.parseItem(r(s, id).args());
+            return a == null ? "" : a.target();
+        }, pick -> {
+            var a = Forms.parseItem(r(s, id).args());
+            if (a == null) return;
+            setArgs(s, id, Forms.compose(new Forms.ItemArg(a.item(), a.count(), pick)));
+        }, targetLike, "A saved target (Targets page): the chest to use, the brewing stand to brew at... Without one it uses the nearest."));
+        out.add(Options.ofButton("Use the nearest instead", () -> {
+            var a = Forms.parseItem(r(s, id).args());
+            if (a != null) setArgs(s, id, Forms.compose(new Forms.ItemArg(a.item(), a.count(), "")));
+        }).visibility(() -> targetLike.getAsBoolean() && !Forms.parseItem(r(s, id).args()).target().isEmpty())
+            .description(OptionDescription.ofText(() -> "Stop using the target.")).build());
 
         // mine: block and count
         BooleanSupplier blockLike = () -> parsed.getAsBoolean() && layout(s, id) == Forms.Layout.BLOCK_COUNT
@@ -557,7 +579,7 @@ public final class RoutineEditor {
         }, pick -> {
             var a = Forms.parseBlock(r(s, id).args());
             if (a == null) return;
-            setArgs(s, id, Forms.composeBlock(new Forms.ItemArg(stripNamespace(pick), a.count())));
+            setArgs(s, id, Forms.composeBlock(new Forms.ItemArg(stripNamespace(pick), a.count(), a.target())));
         }, blockLike, "Which block to mine."));
         out.add(intOption("Blocks to mine", 0, 2304, () -> {
             var a = Forms.parseBlock(r(s, id).args());
@@ -565,7 +587,7 @@ public final class RoutineEditor {
         }, v -> {
             var a = Forms.parseBlock(r(s, id).args());
             if (a == null) return;
-            setArgs(s, id, Forms.composeBlock(new Forms.ItemArg(a.item(), v)));
+            setArgs(s, id, Forms.composeBlock(new Forms.ItemArg(a.item(), v, a.target())));
         }, blockLike, "How many (0: keep mining until stopped)."));
 
         // a number
@@ -602,12 +624,6 @@ public final class RoutineEditor {
             }
             setArgs(s, id, Forms.compose(new Forms.Where(p.clone(), "")));
         }).visibility(atCoords::getAsBoolean).description(OptionDescription.ofText(() -> "Fill in the coordinates with where you stand now.")).build());
-        ListEntries targetNames = new ListEntries() {
-            @Override
-            public List<String> values() {
-                return targets.get();
-            }
-        };
         out.add(single("Target", targetNames, () -> {
             var w = Forms.parseWhere(r(s, id).args());
             return w == null || w.xyz() != null ? "" : w.target();

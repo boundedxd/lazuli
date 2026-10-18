@@ -9,6 +9,7 @@ import dev.lazuli.mod.config.tabs.PlannerTab;
 import dev.lazuli.mod.config.tabs.ProcessesTab;
 import dev.lazuli.mod.config.tabs.RoutinesTab;
 import dev.lazuli.mod.config.tabs.SurvivalTab;
+import dev.lazuli.mod.config.tabs.TargetsTab;
 import dev.lazuli.mod.config.tabs.VisualsTab;
 import main.walksy.lib.api.WalksyLibApi;
 import main.walksy.lib.api.config.Config;
@@ -69,6 +70,7 @@ public final class LazuliConfig implements WalksyLibApi {
             .category(ControlsTab.build(s))
             .category(PlannerTab.build(s))
             .category(RoutinesTab.build(s))
+            .category(TargetsTab.build(s))
             .category(VisualsTab.build(s))
             .build();
         // a setting nobody gave a widget to can't be changed from the screen: say so in the log

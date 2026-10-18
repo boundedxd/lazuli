@@ -16,8 +16,26 @@ class FormsTest {
         // several items or coordinates aren't one item with a count
         assertNull(Forms.parseItem("string 64 iron_ingot 3"));
         assertNull(Forms.parseItem("string 64 10"));
-        assertNull(Forms.parseItem("all 5 @duper"));
+        assertEquals("duper", Forms.parseItem("all 5 @duper").target());
         assertNull(Forms.parseItem("64"));
+    }
+
+    @Test
+    void aTargetComesLastAndIsKept() {
+        var a = Forms.parseItem("string all @duper");
+        assertNull(a, "two words before the target: not one item");
+        var b = Forms.parseItem("string 64 @duper");
+        assertEquals("duper", b.target());
+        assertEquals(64, b.count());
+        assertEquals("string 64 @duper", Forms.compose(b));
+        var c = Forms.parseItem("all @duper");
+        assertEquals("all", c.item());
+        assertEquals("all @duper", Forms.compose(c));
+        assertEquals("@duper", Forms.compose(Forms.parseItem("@duper")));
+        assertNull(Forms.parseItem("@duper string"));
+        assertTrue(Forms.takesTarget("withdraw"));
+        assertTrue(Forms.takesTarget("brew"));
+        assertFalse(Forms.takesTarget("getitem"));
     }
 
     @Test

@@ -24,7 +24,8 @@ public final class VisualsTab {
                 Options.ofNumber("Line width", () -> LazuliConfig.lineWidth, 2.5f, v -> LazuliConfig.lineWidth = v).range(1.0f, 6.0f, 0.5f).build()),
             Ui.group("World",
                 Options.ofBoolean("Show selection", () -> LazuliConfig.renderSelection, true, v -> LazuliConfig.renderSelection = v).build(),
-                Ui.bool(s.renderWaypoints, "Draw waypoints (#wp) in the world.")),
+                Ui.bool(s.renderWaypoints, "Draw waypoints (#wp) in the world."),
+                Ui.bool(s.renderTargets, "Draw saved targets (#pick, #target: chests, villagers, stations) with their @names in the world.")),
             Ui.group("Status panel",
                 Options.ofBoolean("Status panel", () -> LazuliConfig.showHud, true, v -> LazuliConfig.showHud = v)
                     .description(OptionDescription.ofText(() -> "What Lazuli is doing (job, step, trip) in the top left.")).build(),

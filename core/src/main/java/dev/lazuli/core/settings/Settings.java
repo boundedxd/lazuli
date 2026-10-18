@@ -122,6 +122,8 @@ public final class Settings {
     public final Setting<Boolean> deathRecovery = bool("deathRecovery", true);
     /** Draw this dimension's waypoints in the world. */
     public final Setting<Boolean> renderWaypoints = bool("renderWaypoints", true);
+    /** Draw the saved targets (#pick, #target) in the world. */
+    public final Setting<Boolean> renderTargets = bool("renderTargets", true);
     /** Move the best tool from the inventory into the hotbar when mining. */
     public final Setting<Boolean> allowInventory = bool("allowInventory", true);
     /**

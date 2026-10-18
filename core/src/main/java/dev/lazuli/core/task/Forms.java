@@ -135,8 +135,19 @@ public final class Forms {
 
     // ---- argument fields ------------------------------------------------------------------------------------
 
-    /** An item and how many (0: none given). */
-    public record ItemArg(String item, int count) {
+    /** An item, how many (0: none given) and a target name that comes last ("" when none): {@code withdraw string 64 @duper}. */
+    public record ItemArg(String item, int count, String target) {
+        public ItemArg(String item, int count) {
+            this(item, count, "");
+        }
+    }
+
+    /** The commands whose work place can be a target (a chest to deposit into, a brewing stand to brew at). */
+    public static boolean takesTarget(String word) {
+        return switch (word) {
+            case "deposit", "withdraw", "craft", "smelt", "brew", "enchant", "repair", "combine", "smith" -> true;
+            default -> false;
+        };
     }
 
     private static boolean isNumber(String s) {
@@ -146,18 +157,21 @@ public final class Forms {
     /** Reads {@code <item> [count]}; null when the text isn't that (more items, odd words). */
     public static ItemArg parseItem(String args) {
         String[] t = args.isBlank() ? new String[0] : args.trim().split("\\s+");
-        String item = "";
+        String item = "", target = "";
         int count = 0;
-        for (String w : t) {
-            if (isNumber(w) && count == 0 && !item.isEmpty()) count = Integer.parseInt(w);
+        for (int i = 0; i < t.length; i++) {
+            String w = t[i];
+            if (w.matches("@[A-Za-z0-9_][A-Za-z0-9_.-]*") && i == t.length - 1 && target.isEmpty()) target = w.substring(1);
+            else if (isNumber(w) && count == 0 && !item.isEmpty()) count = Integer.parseInt(w);
             else if (item.isEmpty() && !isNumber(w) && !w.startsWith("@") && !w.startsWith("~")) item = w;
             else return null;
         }
-        return new ItemArg(item, count);
+        return new ItemArg(item, count, target);
     }
 
     public static String compose(ItemArg a) {
-        return (a.item().isEmpty() ? "" : a.item() + (a.count() > 0 ? " " + a.count() : "")).trim();
+        String base = (a.item().isEmpty() ? "" : a.item() + (a.count() > 0 ? " " + a.count() : "")).trim();
+        return a.target().isEmpty() ? base : (base + " @" + a.target()).trim();
     }
 
     /** Reads {@code [count] <block>} (mine); null when it's something else. */

@@ -387,6 +387,17 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public dev.lazuli.core.target.Targets targets() {
+				Minecraft mc = Minecraft.getInstance();
+				return mc.level == null ? null : LazuliClient.this.targets(mc);
+			}
+
+			@Override
+			public void pick(String name) {
+				pickMode.command(name);
+			}
+
+			@Override
 			public String routineStatus() {
 				return routine.detail();
 			}
@@ -707,6 +718,32 @@ public final class LazuliClient implements ClientModInitializer {
 		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal, cache);
 		renderer.processes(processes);
 		renderer.selection(commands::selection);
+		pickMode = new dev.lazuli.mod.process.PickMode(() -> {
+			Minecraft mc = Minecraft.getInstance();
+			return mc.level == null ? null : targets(mc);
+		}, () -> dimension(Minecraft.getInstance()), this::chat);
+		renderer.targets(() -> {
+			Minecraft mc = Minecraft.getInstance();
+			var t = mc.level == null || !settings.renderTargets.get() ? null : targets(mc);
+			return t == null ? java.util.List.of() : t.inDim(dimension(mc));
+		});
+		dev.lazuli.mod.config.RoutineEditor.targets = () -> {
+			Minecraft mc = Minecraft.getInstance();
+			var t = mc.level == null ? null : targets(mc);
+			return t == null ? java.util.List.of() : t.all().stream().map(x -> x.name()).toList();
+		};
+		dev.lazuli.mod.config.tabs.TargetsTab.store = () -> {
+			Minecraft mc = Minecraft.getInstance();
+			return mc.level == null ? null : targets(mc);
+		};
+		dev.lazuli.mod.config.tabs.TargetsTab.dimension = () -> dimension(Minecraft.getInstance());
+		dev.lazuli.mod.config.tabs.TargetsTab.command = line -> {
+			try {
+				runCommand(line);
+			} catch (RuntimeException e) {
+				chat(Chat.err("Error: {}", e.getMessage()));
+			}
+		};
 		renderer.waypoints(() -> {
 			Minecraft mc = Minecraft.getInstance();
 			Waypoints w = mc.level == null ? null : waypoints(mc);
@@ -1187,6 +1224,15 @@ public final class LazuliClient implements ClientModInitializer {
 	private Waypoints waypoints(Minecraft mc) {
 		Path file = memoryFile(mc, "waypoints");
 		return waypointsByWorld.computeIfAbsent(file.toString(), f -> new Waypoints(file));
+	}
+
+	private dev.lazuli.mod.process.PickMode pickMode;
+	private final java.util.Map<String, dev.lazuli.core.target.Targets> targetsByWorld = new java.util.HashMap<>();
+
+	/** This server's (or world's) saved targets (#pick, #target). */
+	private dev.lazuli.core.target.Targets targets(Minecraft mc) {
+		Path file = memoryFile(mc, "targets");
+		return targetsByWorld.computeIfAbsent(file.toString(), f -> new dev.lazuli.core.target.Targets(file));
 	}
 
 	/** What's in this server's (or world's) chests, as last seen. */

@@ -136,7 +136,11 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
   (`inv.<item>>n chest.<item> inv.free inv.full has.<item> health hunger day night time dim busy`, and/or/not), step words `wait say notify skip end label jump` (no prefix).
   `RoutineRunner` runs `Step`s through a `Host` (run/stop/world/say/notify); only steps with @retry/@onfail react to `failStep` (chat errors), plain ones behave as before; `@with`
   overrides settings for that step and restores them. `Routine.check` validates (`#routine check`); `#routine show|edit|insert|remove|rename|copy|check|status|help`.
-  GUI editor: `mod/config/RoutineEditor` (step page list, per-step widgets; model helpers `core/task/Forms` + `CondForm`), hooked from `LazuliConfig.routinePage`.
+  GUI editor: `mod/config/RoutineEditor` (step page list, per-step widgets; model helpers `core/task/Forms` + `CondForm`), tab `config/tabs/RoutinesTab`.
+- Targets: `#pick [name]` toggles pick mode (`mod/process/PickMode`: shift+right-click a block/entity saves it, vanilla click cancelled), `#target list|show|del|rename|clear|goto|near`;
+  `core/target/Target`, `Targets` (per-server file `targets.txt`, names lower-case, modifier words reserved). `@name` anywhere in a typed command or a routine step is expanded when it runs
+  (`Targets.expand`: `x y z`, `at x y z` for craft/smelt/brew..., `--with <uuid>` for a villager in #trade); `#routine`/`#queue` keep it raw. Drawn by `LazuliRenderer` (renderTargets),
+  tab `config/tabs/TargetsTab`, target dropdowns in the routine step editor.
 - HUD -> `mod/render/LazuliRenderer` (Material 3 card via `Material`), `Minimap`.
 - `#bucket` -> `mod/process/BucketProcess`; `#hunt <item> [count]` -> `HuntProcess` (mobs from `MobDrops`, like #getitem); `#smith <item>` -> `SmithProcess`.
 - Command parsing helpers in `CommandHandler`: `integer/count/coords` (errors say "must be a number", `~` relative coordinates). `#stop` prints "Stopped" itself (only if something ran); `#kill` is the hard reset when `#stop` isn't enough.
