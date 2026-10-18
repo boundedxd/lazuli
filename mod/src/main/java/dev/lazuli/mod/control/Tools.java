@@ -166,6 +166,26 @@ public final class Tools {
         return best;
     }
 
+    /**
+     * Menu slot (inventory screen numbering) of a stack of junk to throw out when the inventory is full: a listed
+     * throwaway block first, else any plain full block, never what a process is collecting. -1 if none.
+     */
+    public static int junkSlot(Player p, Settings settings) {
+        Set<String> names = throwawayNames(settings);
+        Map<String, Integer> spare = spares(p, settings);
+        int best = -1, bestRank = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = p.getInventory().getItem(i);
+            if (s.isEmpty() || spare.getOrDefault(BuiltInRegistries.ITEM.getKey(s.getItem()).toString(), 1) <= 0) continue;
+            int r = throwawayRank(s, names) * 100 + s.getCount();
+            if (r > 100 && r > bestRank) {
+                bestRank = r;
+                best = i;
+            }
+        }
+        return best < 0 ? -1 : best < 9 ? best + 36 : best; // hotbar is menu slots 36-44
+    }
+
     /** Items processes are collecting, by process: how many of each it needs (Integer.MAX_VALUE: all). */
     private static final Map<String, Map<String, Integer>> KEEP = new ConcurrentHashMap<>();
 

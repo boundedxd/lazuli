@@ -103,6 +103,7 @@ public final class LazuliConfig implements WalksyLibApi {
                     .option(bool(s.breakNeedsTool, "Never dig through blocks that need a tool it doesn't have (stone without a pickaxe) on the way somewhere."))
                     .option(bool(s.allowBreak, "Mine through blocks in the way, with the best tool in the hotbar."))
                     .option(bool(s.minePickup, "#mine walks over to pick up what each broken block drops."))
+                    .option(bool(s.mineDropJunk, "#mine with a full inventory throws away junk blocks (deepslate, cobblestone, dirt...) to make room for what it's after."))
                     .option(bool(s.mineSearch, "None found: strip-mine at the ore's best Y level, or explore for anything else (logs, sand...)."))
                     .option(bool(s.antiXray, "The server hides ores (anti-xray): only trust ores you can see, find the rest by strip mining."))
                     .option(bool(s.oreMemory, "Remember every ore seen as chunks load, even after they unload: #mine picks targets at once and goes back for ones seen earlier. Off: nothing extra on chunk loads (#mine scans when it runs)."))

@@ -50,6 +50,8 @@ public final class Settings {
     public final Setting<Boolean> freeLook = bool("freeLook", false);
     /** #mine walks over to the drops of each block it breaks. */
     public final Setting<Boolean> minePickup = bool("minePickup", true);
+    /** #mine with a full inventory throws away junk blocks (the throwaway list) to make room for what it is after. */
+    public final Setting<Boolean> mineDropJunk = bool("mineDropJunk", true);
     /** #follow stops this many blocks from whoever it follows. */
     public final Setting<Integer> followRadius = integer("followRadius", 3, 1, 32);
     /** #farm works this far (blocks, horizontally) around where it started. */

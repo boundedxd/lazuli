@@ -563,6 +563,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
     private void breakTick(Minecraft mc, LocalPlayer player) {
         if (!targets.contains(mc.level.getBlockState(breaking).getBlock())) {
             mined++;
+            dropTries = 0;
             known.remove(Pos.pack(breaking.getX(), breaking.getY(), breaking.getZ()));
             if (quantity > 0) chat.accept(Chat.info("Mined {}/{}", mined, quantity));
             tripStart = -1;
@@ -623,6 +624,18 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
                 var st = inv.getItem(i);
                 room = st.getCount() < st.getMaxStackSize() && (st.is(drop) || dropsInto(state, st));
             }
+            if (!room && settings.mineDropJunk.get()) {
+                // throw a stack of junk out (deepslate from the way in...) and go on with what it came for
+                int junk = Tools.junkSlot(player, settings);
+                var clicks = dev.lazuli.mod.inventory.ClickDriver.get();
+                if (junk >= 0 && dropTries < 12) {
+                    if (!clicks.busy()) {
+                        clicks.add(player.inventoryMenu.containerId, java.util.List.of(dev.lazuli.core.inventory.Click.throwAll(junk)));
+                        dropTries++;
+                    }
+                    return false;
+                }
+            }
             if (!room) {
                 finish(Chat.err("Inventory full ({} mined)", mined));
                 failed = true;
@@ -639,6 +652,9 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         String ore = block.replace("deepslate_", "").replace("nether_", "").replace("_ore", "");
         return block.endsWith("_ore") && (item.equals(ore) || item.equals("raw_" + ore) || item.startsWith(ore));
     }
+
+    /** Junk stacks thrown out in a row to make room (reset when a block is mined). */
+    private int dropTries;
 
     /** The last run ended on something it can't get round (no tool, full inventory). */
     private boolean failed;
