@@ -104,6 +104,19 @@ public final class Menu {
         }
     }
 
+    /**
+     * A shift-click on {@code from} that the game is known to route into {@code to} only (a furnace's input slot, a
+     * stand's bottle slot...): moves as much as fits there.
+     */
+    public void quickInto(int from, int to) {
+        Stack s = slots[from], d = slots[to];
+        if (s.empty() || !(d.empty() || d.stacksWith(s))) return;
+        int put = Math.min(s.count(), s.max() - d.count());
+        if (put <= 0) return;
+        slots[to] = s.withCount(d.count() + put);
+        slots[from] = s.withCount(s.count() - put);
+    }
+
     public void applyAll(List<Click> clicks) {
         for (Click c : clicks) apply(c);
     }

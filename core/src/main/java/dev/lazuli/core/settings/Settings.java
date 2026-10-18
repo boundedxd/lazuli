@@ -118,7 +118,7 @@ public final class Settings {
      */
     public final Setting<Boolean> openInventory = bool("openInventory", true);
     /** Inventory clicks (moving, dropping items) sent per tick: more is faster, fewer looks less like a bot. */
-    public final Setting<Integer> clicksPerTick = integer("clicksPerTick", 2, 1, 20);
+    public final Setting<Integer> clicksPerTick = integer("clicksPerTick", 4, 1, 20);
     /** #craft also crafts the ingredients it lacks (logs into planks, planks into sticks...). */
     public final Setting<Boolean> craftIngredients = bool("craftIngredients", true);
     /** #craft places a crafting table (crafting one if need be) when a recipe needs one and none is near. */

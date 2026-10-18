@@ -51,6 +51,24 @@ public final class Moves {
      * @throws IllegalStateException if the {@code from} slots don't hold enough
      */
     public static List<Click> put(Menu menu, int[] from, int slot, String item, int n) {
+        return put(menu, from, slot, item, n, Quick.OFF);
+    }
+
+    /** When a shift-click may do a put the game would otherwise need pick-ups for (only where it routes to the slot). */
+    public enum Quick {
+        /** Always pick up and place. */
+        OFF,
+        /** One shift-click for a source stack that is no bigger than needed (and fits whole). */
+        EXACT,
+        /** As EXACT, and also for a bigger stack when the slot may hold the surplus (it comes back when the menu closes). */
+        OVERFILL
+    }
+
+    /**
+     * Like {@link #put(Menu, int[], int, String, int)}, but with {@code quick} the caller says a shift-click on the item
+     * in the player's inventory lands in {@code slot} (and only there), so one click replaces pick up + place.
+     */
+    public static List<Click> put(Menu menu, int[] from, int slot, String item, int n, Quick quick) {
         Menu sim = menu.copy();
         List<Click> out = new ArrayList<>();
         int source = -1, left = n;
@@ -59,6 +77,17 @@ public final class Moves {
                 source = -1;
                 for (int s : from) if (item.equals(sim.get(s).item()) && (source < 0 || sim.get(s).count() > sim.get(source).count())) source = s;
                 if (source < 0) throw new IllegalStateException("Not enough " + item);
+                Stack src = sim.get(source), dst = sim.get(slot);
+                boolean fits = dst.empty() || dst.stacksWith(src);
+                int room = src.max() - dst.count();
+                if (quick != Quick.OFF && fits && (quick == Quick.OVERFILL ? room >= left : src.count() <= left && room >= src.count())) {
+                    int before = dst.count();
+                    sim.quickInto(source, slot);
+                    out.add(Click.shift(source));
+                    left -= sim.get(slot).count() - before;
+                    source = -1;
+                    continue;
+                }
                 add(sim, out, Click.left(source));
             }
             int c = sim.cursor().count();

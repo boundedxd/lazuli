@@ -280,11 +280,11 @@ public final class EnchantProcess implements Process {
                             : Chat.err("No " + name(item) + " that can be enchanted"));
                         return;
                     }
-                    add(sim, plan, Moves.put(sim, mine, 0, sim.get(slot).item(), 1));
+                    add(sim, plan, Moves.put(sim, mine, 0, sim.get(slot).item(), 1, Moves.Quick.EXACT));
                 }
                 int lapis = em.slots.get(1).getItem().getCount();
                 int more = Math.min(3 - lapis, sim.count(mine, k -> k.equals("minecraft:lapis_lazuli")));
-                if (more > 0) add(sim, plan, Moves.put(sim, mine, 1, "minecraft:lapis_lazuli", more));
+                if (more > 0) add(sim, plan, Moves.put(sim, mine, 1, "minecraft:lapis_lazuli", more, lapis == 0 ? Moves.Quick.OVERFILL : Moves.Quick.EXACT));
                 if (!plan.isEmpty()) clicks.play(em.containerId, plan);
                 phase = Phase.CHOOSE;
                 since = p.tickCount;

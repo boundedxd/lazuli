@@ -79,6 +79,15 @@ public final class SmeltProcess implements Process {
         this.station = new Station(session, settings, clicks);
     }
 
+    /** Fuels that can't be smelted into something, so a shift-click sends them to the fuel slot (logs go to the input). */
+    private static boolean pureFuel(String key) {
+        return switch (key.split("#")[0]) {
+            case "minecraft:coal", "minecraft:charcoal", "minecraft:coal_block", "minecraft:blaze_rod",
+                 "minecraft:lava_bucket", "minecraft:dried_kelp_block" -> true;
+            default -> false;
+        };
+    }
+
     @Override
     public String status() {
         if (phase == Phase.IDLE || asked == null) return null;
@@ -295,14 +304,14 @@ public final class SmeltProcess implements Process {
             if (!out.isEmpty()) add(sim, plan, List.of(Click.shift(2))); // take what's done
             int put = Math.min(job.toLoad, in.getMaxStackSize() - in.getCount());
             if (put > 0) {
-                add(sim, plan, Moves.put(sim, mine, 0, job.input, put));
+                add(sim, plan, Moves.put(sim, mine, 0, job.input, put, Moves.Quick.EXACT));
                 job.toLoad -= put;
             }
             // fuel one kind at a time, once the slot is free for it
             var next = job.fuel.entrySet().stream().findFirst().orElse(null);
             if (next != null && (fuel.isEmpty() || Inventories.key(fuel).equals(next.getKey()))) {
                 int k = Math.min(next.getValue(), 64 - fuel.getCount());
-                if (k > 0) add(sim, plan, Moves.put(sim, mine, 1, next.getKey(), k));
+                if (k > 0) add(sim, plan, Moves.put(sim, mine, 1, next.getKey(), k, pureFuel(next.getKey()) ? Moves.Quick.EXACT : Moves.Quick.OFF));
                 if (next.getValue() - k <= 0) job.fuel.remove(next.getKey());
                 else job.fuel.put(next.getKey(), next.getValue() - k);
             }

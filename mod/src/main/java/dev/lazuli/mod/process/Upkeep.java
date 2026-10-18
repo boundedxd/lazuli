@@ -187,8 +187,13 @@ public final class Upkeep {
             if (clicks.busy()) return; // something else is using the inventory: next time
             int from = bestIdx < 9 ? 36 + bestIdx : bestIdx;
             // into the armor slot by shift-click; over a worn piece, pick the new one up, swap, put the old one back
-            clicks.add(p.inventoryMenu.containerId, worn.isEmpty() ? java.util.List.of(Click.shift(from))
-                : java.util.List.of(Click.left(from), Click.left(ARMOR_MENU_SLOT[a]), Click.left(from)));
+            // (over a worn piece from the hotbar: one swap; from the main inventory: shift the old one out, the new one in)
+            java.util.List<Click> plan;
+            if (worn.isEmpty()) plan = java.util.List.of(Click.shift(from));
+            else if (bestIdx < 9) plan = java.util.List.of(Click.swap(ARMOR_MENU_SLOT[a], bestIdx));
+            else if (p.getInventory().getFreeSlot() >= 0) plan = java.util.List.of(Click.shift(ARMOR_MENU_SLOT[a]), Click.shift(from));
+            else plan = java.util.List.of(Click.left(from), Click.left(ARMOR_MENU_SLOT[a]), Click.left(from));
+            clicks.add(p.inventoryMenu.containerId, plan);
             chat.accept(Chat.info("Putting on better {}", slot.getName()));
             return;
         }

@@ -164,8 +164,10 @@ public final class ElytraProcess implements Process {
         int slot = e < 9 ? 36 + e : e;
         // pick it up, swap it with what's worn, and put that where the elytra was
         boolean worn = !p.getItemBySlot(EquipmentSlot.CHEST).isEmpty();
-        clicks.add(p.inventoryMenu.containerId, worn ? List.of(Click.left(slot), Click.left(CHEST_SLOT), Click.left(slot))
-            : List.of(Click.left(slot), Click.left(CHEST_SLOT)));
+        // from the hotbar: one swap; nothing worn: one shift-click; else pick up, swap, put back
+        clicks.add(p.inventoryMenu.containerId, !worn ? List.of(Click.shift(slot))
+            : e < 9 ? List.of(Click.swap(CHEST_SLOT, e))
+            : List.of(Click.left(slot), Click.left(CHEST_SLOT), Click.left(slot)));
         swappedSlot = worn ? slot : -1;
         equipSent = true;
     }
@@ -245,7 +247,9 @@ public final class ElytraProcess implements Process {
         if (swappedSlot >= 0 && settings.elytraSwapBack.get()) {
             ItemStack back = p.inventoryMenu.slots.get(swappedSlot).getItem();
             if (!back.isEmpty() && !back.is(Items.ELYTRA)) {
-                clicks.add(p.inventoryMenu.containerId, List.of(Click.left(swappedSlot), Click.left(CHEST_SLOT), Click.left(swappedSlot)));
+                clicks.add(p.inventoryMenu.containerId, swappedSlot >= 36 && swappedSlot < 45
+                    ? List.of(Click.swap(CHEST_SLOT, swappedSlot - 36))
+                    : List.of(Click.left(swappedSlot), Click.left(CHEST_SLOT), Click.left(swappedSlot)));
             }
         }
         swappedSlot = -1;

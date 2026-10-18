@@ -80,4 +80,42 @@ class MovesTest {
         assertEquals(0, m.count(PLAYER, "dirt"::equals));
         assertEquals(1, m.count(PLAYER, "stone"::equals));
     }
+
+    @Test
+    void quickPutUsesOneShiftClickForAWholeStack() {
+        Menu m = chest(30, "ingot", 8, 31, "ingot", 3);
+        List<Click> clicks = Moves.put(m, PLAYER, 5, "ingot", 8, Moves.Quick.EXACT);
+        assertEquals(List.of(Click.shift(30)), clicks); // (the real game routes it to the slot; the test menu doesn't)
+    }
+
+    @Test
+    void quickPutFallsBackToPickupsForAPartialStack() {
+        Menu m = chest(30, "ingot", 20);
+        List<Click> clicks = Moves.put(m, PLAYER, 5, "ingot", 8, Moves.Quick.EXACT);
+        assertTrue(clicks.stream().allMatch(c -> c.kind() == Click.Kind.PICKUP), clicks.toString());
+        m.applyAll(clicks);
+        assertEquals(8, m.get(5).count());
+        assertEquals(12, m.get(30).count());
+        assertTrue(m.cursor().empty());
+    }
+
+    @Test
+    void quickPutPicksTheBiggestStackFirstAndOnlyShiftsIfItFits() {
+        Menu m = chest(30, "ingot", 5, 31, "ingot", 20);
+        List<Click> clicks = Moves.put(m, PLAYER, 5, "ingot", 8, Moves.Quick.EXACT);
+        assertEquals(Click.left(31), clicks.get(0)); // 20 is more than the 8 needed, so no shift
+    }
+
+    @Test
+    void overfillShiftsABiggerStackWhenTheSlotCanHoldIt() {
+        Menu m = chest(30, "lapis", 40);
+        List<Click> clicks = Moves.put(m, PLAYER, 5, "lapis", 3, Moves.Quick.OVERFILL);
+        assertEquals(List.of(Click.shift(30)), clicks);
+    }
+
+    @Test
+    void quickPutDoesNotShiftOntoADifferentItem() {
+        Menu m = chest(5, "other", 1, 30, "ingot", 1);
+        assertThrows(IllegalStateException.class, () -> Moves.put(m, PLAYER, 5, "ingot", 1, Moves.Quick.EXACT));
+    }
 }

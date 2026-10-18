@@ -456,7 +456,7 @@ public final class BrewProcess implements Process {
                     fail("The " + name(route.from()) + " bottles are gone");
                     return;
                 }
-                for (int s = 0; s < batch; s++) add(sim, plan, Moves.put(sim, mine, s, key, 1));
+                for (int s = 0; s < batch; s++) add(sim, plan, Moves.put(sim, mine, s, key, 1, Moves.Quick.EXACT));
                 loaded = true;
             }
             if (bm.getFuel() == 0 && bm.slots.get(4).getItem().isEmpty()) {
@@ -464,7 +464,7 @@ public final class BrewProcess implements Process {
                     fail("Out of blaze powder to fuel the stand");
                     return;
                 }
-                add(sim, plan, Moves.put(sim, mine, 4, POWDER, 1));
+                add(sim, plan, Moves.put(sim, mine, 4, POWDER, 1, Moves.Quick.EXACT));
             }
             // the stand takes a moment to show an ingredient put in as brewing
             boolean idle = p.tickCount >= settleAt && bm.slots.get(3).getItem().isEmpty() && bm.getBrewingTicks() == 0;
@@ -475,7 +475,7 @@ public final class BrewProcess implements Process {
                     phase = Phase.COLLECT;
                     return;
                 }
-                add(sim, plan, Moves.put(sim, mine, 3, route.ingredients().get(step), 1));
+                add(sim, plan, Moves.put(sim, mine, 3, route.ingredients().get(step), 1, Moves.Quick.EXACT));
                 step++;
                 settleAt = p.tickCount + 10;
             }
