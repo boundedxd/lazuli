@@ -53,7 +53,7 @@ public record Step(String command, int retry, int timeoutTicks, OnFail onFail, S
 
     public Step {
         command = command.trim();
-        with = Map.copyOf(new LinkedHashMap<>(with));
+        with = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(with));
     }
 
     public static Step of(String command) {
