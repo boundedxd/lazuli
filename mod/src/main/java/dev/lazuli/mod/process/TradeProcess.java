@@ -190,6 +190,7 @@ public final class TradeProcess implements Process {
         restockSince = -1;
         steps = 0;
         skip.clear();
+        refreshed.clear();
         toScan.clear();
         toLoot.clear();
         RecipeData.get();
@@ -336,6 +337,30 @@ public final class TradeProcess implements Process {
     }
 
     /** If tradeScanUnknown: queues every villager around not looked at yet (once a run); true if there are some. */
+    /** Villagers looked at again this run because their buying trades were sold out when last seen. */
+    private final java.util.Set<String> refreshed = new java.util.HashSet<>();
+
+    /**
+     * Nothing to sell to: villagers known to buy it whose trades were sold out when last seen may have restocked since
+     * (the memory only knows the last look), so they're looked at again before looking at strangers.
+     */
+    private boolean refreshSoldOut(Minecraft mc, LocalPlayer p, String item) {
+        for (Trader t : traders(mc, p)) {
+            if (refreshed.contains(t.id())) continue;
+            boolean stale = t.offers().stream().anyMatch(o -> o.left() <= 0 && o.costB() == null && o.result().item().equals(TradePlanner.EMERALD)
+                && (item == null || o.costA().item().equals(item)));
+            if (stale) {
+                refreshed.add(t.id());
+                toScan.add(t.id());
+            }
+        }
+        if (toScan.isEmpty()) return false;
+        if (p.containerMenu instanceof MerchantMenu) p.closeContainer();
+        chat.accept(Chat.info("Checking whether {} villager(s) restocked", toScan.size()));
+        next(mc);
+        return true;
+    }
+
     private boolean scanMore(Minecraft mc) {
         if (scannedAll || !settings.tradeScanUnknown.get()) return false;
         scannedAll = true;
@@ -362,7 +387,7 @@ public final class TradeProcess implements Process {
         TradePlanner.Plan plan = TradePlanner.sellAny(Inventories.plainCounts(p), traders(mc, p), f.getX(), f.getY(), f.getZ(),
             this::maySell, sellKeep > 0 ? sellKeep - made : 0);
         if (!plan.ok()) {
-            if (scanMore(mc)) return;
+            if (refreshSoldOut(mc, p, null) || scanMore(mc)) return;
             if (made > 0) end(Outcome.DONE, Chat.ok("Made {} emeralds (nothing more on hand that they buy)", made));
             else end(Outcome.FAILED, Chat.err("Can't sell for emeralds: {}", plan.problem()));
             return;
@@ -429,7 +454,7 @@ public final class TradeProcess implements Process {
         TradePlanner.Plan plan = TradePlanner.sell(sellItem, have - sellKeep, Inventories.plainCounts(p), traders(mc, p),
             f.getX(), f.getY(), f.getZ());
         if (!plan.ok()) {
-            if (scanMore(mc)) return;
+            if (refreshSoldOut(mc, p, sellItem) || scanMore(mc)) return;
             if (sold > 0) end(Outcome.DONE, Chat.ok("Sold {} {} ({})", sold, name(sellItem), plan.problem()));
             else end(Outcome.FAILED, Chat.err("Can't sell {}: {}", name(sellItem), plan.problem()));
             return;

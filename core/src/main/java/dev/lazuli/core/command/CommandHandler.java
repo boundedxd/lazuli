@@ -768,6 +768,7 @@ public final class CommandHandler {
             String item = args[i].toLowerCase(Locale.ROOT);
             int count = -1;
             if (i + 1 < to && number(args[i + 1])) count = Math.max(1, integer(args[++i]));
+            else if (!item.equals("all") && i + 1 < to && args[i + 1].equalsIgnoreCase("all")) i++; // "string all": all of it
             out.add(new ItemCount(item, count));
         }
         return out.isEmpty() ? null : out;
