@@ -71,8 +71,13 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
   `ClickDriver` (sends planned clicks, `clicksPerTick` per tick).
 - `control/Aim` — legit looking: find a visible point, turn at rotationSpeed, act only when the crosshair is on it
   (`breakTick`, `useOn`).
-- `config/LazuliConfig` — WalksyLib screen, tabs: Movement, Building, Inventory, Survival, Processes, Controls,
-  Planner, Visuals. Every new feature needs a toggle here and in `Settings`.
+- `config/LazuliConfig` — tiny: assembles the WalksyLib screen from one class per tab in `config/tabs/`
+  (`MovementTab, BuildingTab, InventoryTab, SurvivalTab, ProcessesTab, ControlsTab, PlannerTab, VisualsTab`; Routines is
+  built in LazuliConfig). Each tab is a list of sections (`Ui.group` open, `Ui.folded` collapsed: rare options, one per
+  process in Processes, "Advanced: ..." last) made of `Ui.bool/num/dec/text/idList` widgets: one call per `Setting`, label
+  from the name (`Ui.LABELS` for nicer ones), the description given there is stored on the `Setting` too (`#settings
+  <filter>` shows it). Every new feature needs a `Setting` AND a `Ui` widget in the fitting tab/section; a setting with
+  no widget is logged at startup ("Settings missing from the config screen").
 
 ## Testing style
 - Closed-loop sim courses: `CourseTest.drive(...)`, `InteractionCourseTest.drive(...)` (with `SimHands` for
@@ -118,11 +123,11 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
   Paths avoid mobs/lava edges: `core/move/Hazards` priced in `MoveGraph.danger`, fed by `Guard.hazards` every 10 ticks
   through `PathingSession.setHazards`.
 - `#portal` / far `#goto` through the nether -> `mod/process/PortalProcess`, `core/portal/PortalFrame` (build site +
-  frame), `NetherRoute` (worth it?), `PortalMemory` (portals seen, `config/lazuli/portals/`).
+  frame), `NetherRoute` (worth it?), `PortalMemory` (portals seen, `config/lazuli/servers/<key>/portals.txt`).
 - `#breed` -> `mod/process/BreedProcess`; `#fish` -> `mod/process/FishProcess` (bite flag via `FishingHookAccessor`).
 - `#iceboat` -> `mod/process/IceBoatProcess`; `core/physics/BoatSim` (vanilla boat tick), `core/race/IceRacer` (beam
   search over BoatSim, one-tick key delay), tracks `core/race/TrackField` (from blocks: drops, void jumps, lap seam) or
-  `RecordedLine` (driven once, `config/lazuli/iceboat/`). Courses drawn as ASCII maps in `RaceCourseTest`.
+  `RecordedLine` (driven once, `config/lazuli/servers/<key>/iceboat/`). Courses drawn as ASCII maps in `RaceCourseTest`.
 - `#build <file>` -> `mod/process/BuildProcess.startSchematic` (per-spot block states), `core/schematic/Schematic`
   (.litematic/.schem/.nbt via its own `Nbt` reader). `#getitem ... dry` -> `GetItemProcess.dryRun` + `core/craft/PlanEstimate`.
 - `#queue` / `#routine` / `a then b` -> `core/task/RoutineRunner` (step done = busy then idle; endless jobs like #farm hand over when the inventory is full, `RoutineRunner.endless`), `Routines` (`config/lazuli/routines.txt`); a forever routine whose whole round did nothing waits `routineIdleWaitSeconds` and gives up after `routineIdleRounds` such rounds; GUI: Routines tab (`LazuliConfig.routinePage`, WalksyLib page list).
@@ -135,11 +140,21 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
 - `#sort` -> `core/storage/SortPlan`, `mod/process/SortProcess` (reads each box via `ContainerProcess.onOpen`).
 - Shulker boxes -> `mod/process/ShulkerUnpack` (place, take, pick up; `Station.startPlaced`), chest memory names
   `shulker>id` (`ItemKeys.inShulker`); used through `ChestTake`. Restock -> `core/inventory/Restock`,
-  `mod/process/RestockProcess` (pauses the job like Guard; per-thing toggles in `Settings.restockSpec`, own Restock tab).
+  `mod/process/RestockProcess` (pauses the job like Guard; per-thing toggles in `Settings.restockSpec`, Survival tab: Restock sections).
 - `#stronghold` -> `mod/process/StrongholdProcess` (two eye throws, `core/portal/Triangulation`, then the end portal frame via BlockSearch; waypoint `stronghold`).
 - Death recovery -> `mod/process/DeathRecovery` (deathRecovery: back to the death spot after respawn, picks the items up before despawn).
 - `#sort` labels -> `SortProcess.label` (sortLabels: item frame on each box front with its main item).
 - Ghost view -> `core/control/GhostTrail` drawn by `LazuliRenderer.drawGhost` (renderGhost, ghostTicks).
+
+## Trade flags, work blocks, per-server memory
+- `#trade` flags (`--with --only-known --scan --max --keep --min-rate --wait-restock --wait-day --stay/--no-walk --range`) are
+  parsed by `core/trade/TradeOptions` (also puts them over the `trade*` settings) and passed through `Context.trade/tradeSell/tradeScan(..., options)`
+  to `TradeProcess.options(..)` (one run). Strangers are only scanned when no known villager has the offer at all; sold out ones are
+  re-checked / waited for; unreachable villagers get a cooldown + retries (`COOLDOWN`, `RETRIES`).
+- `craft|smelt|brew|enchant|repair|combine|smith ... at x y z`: `CommandHandler.locate` + `Context.stationAt`, each process has `station(BlockPos)`
+  (consumed by its next `start`), `Station.exact()` makes it refuse any other block.
+- What's remembered lives in `config/lazuli/servers/<key>/{chests,trades,portals,waypoints}.txt` and `iceboat/` (`core/storage/WorldKey`
+  makes the key and does the one-time copy of the old `config/lazuli/<kind>/<server>.txt` files; setting `perServerMemory`).
 
 ## More gotchas
 - Restart the game after every deploy: copying the jar over a running game crashes it on the next class load.
