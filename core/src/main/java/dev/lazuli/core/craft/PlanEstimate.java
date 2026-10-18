@@ -21,6 +21,8 @@ public final class PlanEstimate {
             case SMELT -> 8 + a.count() * 10;
             case KILL -> 20 + a.count() * 25;
             case SMITH -> 15 + a.count() * 2;
+            case BUCKET -> 15 + a.count() * 10;
+            case CAST -> 30 + a.count() * 12;
         };
     }
 

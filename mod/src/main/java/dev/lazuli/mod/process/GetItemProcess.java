@@ -45,6 +45,7 @@ public final class GetItemProcess implements Process {
     private final CraftProcess crafts;
     private final SmeltProcess smelts;
     private SmithProcess smiths;
+    private BucketProcess buckets;
     private ContainerProcess containers;
     private java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests;
     private java.util.function.Function<Minecraft, String> dimension;
@@ -89,6 +90,11 @@ public final class GetItemProcess implements Process {
     /** Upgrading at a smithing table (getItemSmith). */
     public void useSmith(SmithProcess smiths) {
         this.smiths = smiths;
+    }
+
+    /** Filling buckets and casting obsidian (getItemBuckets). */
+    public void useBuckets(BucketProcess buckets) {
+        this.buckets = buckets;
     }
 
     /** Hunting for mob drops (getItemHunt). */
@@ -197,6 +203,7 @@ public final class GetItemProcess implements Process {
                 case CRAFT -> crafts.stop(false);
                 case SMELT -> smelts.stop(false);
                 case SMITH -> smiths.stop(false);
+                case BUCKET, CAST -> buckets.stop(false);
                 case KILL -> hunt.stop(false);
             }
         }
@@ -321,6 +328,7 @@ public final class GetItemProcess implements Process {
             case CRAFT -> crafts.start(mc, List.of(new ItemCount(a.item(), a.count())), true);
             case SMELT -> smelts.start(mc, new ItemCount(a.item(), a.count()), true);
             case SMITH -> smiths.start(mc, new ItemCount(a.item(), a.count()));
+            case BUCKET, CAST -> buckets.start(mc, a.item(), a.count());
             case KILL -> hunt.start(mc, a.item(), count(p, a.item()) + a.count(), a.blocks());
         }
     }
@@ -487,6 +495,12 @@ public final class GetItemProcess implements Process {
                 case FAILED -> Status.FAILED;
                 case CANCELLED -> Status.CANCELLED;
             };
+            case BUCKET, CAST -> switch (buckets.outcome()) {
+                case NONE -> Status.RUNNING;
+                case DONE -> Status.OK;
+                case FAILED -> Status.FAILED;
+                case CANCELLED -> Status.CANCELLED;
+            };
             case KILL -> switch (hunt.outcome()) {
                 case NONE -> Status.RUNNING;
                 case DONE -> Status.OK;
@@ -598,6 +612,8 @@ public final class GetItemProcess implements Process {
             case CRAFT -> "craft";
             case SMELT -> "smelt";
             case SMITH -> "upgrade to";
+            case BUCKET -> "fill";
+            case CAST -> "cast";
             case KILL -> "hunt for";
         };
     }

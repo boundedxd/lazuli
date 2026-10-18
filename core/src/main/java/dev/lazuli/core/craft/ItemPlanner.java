@@ -17,7 +17,7 @@ import java.util.function.ToIntFunction;
  * first step and plans again from the real inventory, so the plan only has to be right, not exact.
  */
 public final class ItemPlanner {
-    public enum Kind { MINE, CRAFT, SMELT, KILL, SMITH }
+    public enum Kind { MINE, CRAFT, SMELT, KILL, SMITH, BUCKET, CAST }
 
     /**
      * Mine {@code count} of {@code blocks} for {@code item}; craft or smelt {@code count} more of {@code item}; kill the
@@ -44,13 +44,33 @@ public final class ItemPlanner {
         }
     }
 
-    /** What it may do: mine, smelt, place a crafting table, place a furnace, upgrade at a smithing table. */
-    public record Rules(boolean mine, boolean smelt, boolean placeTable, boolean placeFurnace, boolean smith) {
-        public static final Rules ALL = new Rules(true, true, true, true, true);
+    /**
+     * What it may do: mine, smelt, place a crafting table, place a furnace, upgrade at a smithing table, fill buckets
+     * (water, lava, milk) and cast obsidian with them.
+     */
+    public record Rules(boolean mine, boolean smelt, boolean placeTable, boolean placeFurnace, boolean smith, boolean buckets) {
+        public static final Rules ALL = new Rules(true, true, true, true, true, true);
+
+        public Rules(boolean mine, boolean smelt, boolean placeTable, boolean placeFurnace, boolean smith) {
+            this(mine, smelt, placeTable, placeFurnace, smith, true);
+        }
 
         public Rules(boolean mine, boolean smelt, boolean placeTable, boolean placeFurnace) {
-            this(mine, smelt, placeTable, placeFurnace, true);
+            this(mine, smelt, placeTable, placeFurnace, true, true);
         }
+    }
+
+    public static final String BUCKET = "minecraft:bucket", WATER = "minecraft:water_bucket", LAVA = "minecraft:lava_bucket",
+        MILK = "minecraft:milk_bucket", OBSIDIAN = "minecraft:obsidian";
+
+    /** What a bucket is filled from for each filled kind (a fluid block, or the cow). */
+    static String filledFrom(String item) {
+        return switch (item) {
+            case WATER -> "minecraft:water";
+            case LAVA -> "minecraft:lava";
+            case MILK -> "minecraft:cow";
+            default -> null;
+        };
     }
 
     /** Pickaxes by tier: 1 wood, 2 stone, 3 iron, 4 diamond. */
@@ -174,6 +194,15 @@ public final class ItemPlanner {
         for (Action a : actions) {
             switch (a.kind()) {
                 case MINE, KILL -> inv.merge(a.item(), a.count(), Integer::sum);
+                case BUCKET -> {
+                    if (inv.getOrDefault(BUCKET, 0) < a.count()) return false;
+                    inv.merge(BUCKET, -a.count(), Integer::sum);
+                    inv.merge(a.item(), a.count(), Integer::sum);
+                }
+                case CAST -> {
+                    if (inv.getOrDefault(WATER, 0) < 1) return false;
+                    inv.merge(a.item(), a.count(), Integer::sum);
+                }
                 case CRAFT -> {
                     CraftTree.Result res = CraftTree.resolve(recipes, a.item(), a.count(), inv, true);
                     if (!res.ok()) return false;
@@ -264,12 +293,13 @@ public final class ItemPlanner {
             try {
                 // cheapest way first; one that comes back round to this item (raw iron from a raw iron block made of
                 // raw iron) or can't be done: the next way
-                double[] cost = {mineCost(item, 0), smeltCost(item, 0), craftCost(item, 0), killCost(item), smithCost(item, 0)};
-                Integer[] order = {0, 1, 2, 3, 4};
+                double[] cost = {mineCost(item, 0), smeltCost(item, 0), craftCost(item, 0), killCost(item), smithCost(item, 0),
+                    bucketCost(item, 0), castCost(item, 0)};
+                Integer[] order = {0, 1, 2, 3, 4, 5, 6};
                 java.util.Arrays.sort(order, java.util.Comparator.comparingDouble(i -> cost[i]));
                 if (cost[order[0]] >= INF) throw new Stuck("No way to get " + name(item) + why(item));
                 Stuck first = null;
-                for (int k = 0; k < 5; k++) {
+                for (int k = 0; k < order.length; k++) {
                     int way = order[k];
                     if (cost[way] >= INF) break;
                     Snap before = save();
@@ -279,9 +309,11 @@ public final class ItemPlanner {
                             case 1 -> smelt(item, need, depth);
                             case 3 -> kill(item, need);
                             case 4 -> smith(item, need, depth);
+                            case 5 -> bucket(item, need, depth);
+                            case 6 -> cast(item, need, depth);
                             // only recipes cheaper than the next way (a few nuggets don't make digging for an iron block
                             // worth it over smelting)
-                            default -> craft(item, need, depth, k < 4 ? cost[order[k + 1]] : INF);
+                            default -> craft(item, need, depth, k + 1 < order.length ? cost[order[k + 1]] : INF);
                         }
                         return;
                     } catch (Stuck e) {
@@ -396,6 +428,63 @@ public final class ItemPlanner {
             fuel.forEach((f, k) -> have.merge(f, -k, Integer::sum));
             have.merge(item, n, Integer::sum);
             actions.add(new Action(Kind.SMELT, item, n, List.of()));
+        }
+
+        /** An empty bucket for each, filled from water, lava or a cow. */
+        void bucket(String item, int n, int depth) {
+            String from = filledFrom(item);
+            if (from == null || !rules.buckets()) throw new Stuck("Can't fill a bucket with " + name(item));
+            get(BUCKET, n, depth + 1);
+            have.merge(BUCKET, -n, Integer::sum);
+            have.merge(item, n, Integer::sum);
+            for (int i = 0; i < actions.size(); i++) {
+                Action a = actions.get(i);
+                if (a.kind() == Kind.BUCKET && a.item().equals(item)) {
+                    actions.set(i, new Action(Kind.BUCKET, item, a.count() + n, a.blocks()));
+                    return;
+                }
+            }
+            actions.add(new Action(Kind.BUCKET, item, n, List.of(from)));
+        }
+
+        double bucketCost(String item, int depth) {
+            String from = filledFrom(item);
+            if (from == null || !rules.buckets()) return INF;
+            double c = cost(BUCKET, depth + 1);
+            if (c >= INF) return INF;
+            // water is everywhere, lava less so, a cow has to be found (not told by the blocks around)
+            double find = from.endsWith("cow") ? 6 : (from.endsWith("water") ? 3 : 8) * nearFactor(from);
+            return c + find;
+        }
+
+        /** Obsidian made where water meets a lava source: a water bucket and a diamond pickaxe to mine it. */
+        void cast(String item, int n, int depth) {
+            if (!item.equals(OBSIDIAN) || !rules.buckets() || !rules.mine()) throw new Stuck("Can't cast " + name(item));
+            if (near != null && near.applyAsInt("minecraft:lava") == 0) throw new Stuck("No lava around to cast obsidian from");
+            if (pickTier < 4) {
+                get(PICKS[4], 1, depth + 1);
+                pickTier = 4;
+            }
+            get(WATER, 1, depth + 1);
+            reserve(WATER, 1); // the water bucket isn't used up
+            have.merge(item, n, Integer::sum);
+            for (int i = 0; i < actions.size(); i++) {
+                Action a = actions.get(i);
+                if (a.kind() == Kind.CAST && a.item().equals(item)) {
+                    actions.set(i, new Action(Kind.CAST, item, a.count() + n, a.blocks()));
+                    return;
+                }
+            }
+            actions.add(new Action(Kind.CAST, item, n, List.of("minecraft:lava")));
+        }
+
+        double castCost(String item, int depth) {
+            if (!item.equals(OBSIDIAN) || !rules.buckets() || !rules.mine()) return INF;
+            int lava = near == null ? -1 : near.applyAsInt("minecraft:lava");
+            if (lava == 0) return INF;
+            double c = cost(WATER, depth + 1);
+            if (pickTier < 4) c += cost(PICKS[4], depth + 1);
+            return c + (lava > 0 ? 2 : 6);
         }
 
         /** Upgrades at a smithing table (one near, or made and placed) with the cheapest recipe that works. */
@@ -612,6 +701,7 @@ public final class ItemPlanner {
             if (known != null) return known;
             if (depth > DEPTH || !costing.add(item)) return INF;
             double c = Math.min(Math.min(mineCost(item, depth), killCost(item)), Math.min(smeltCost(item, depth), craftCost(item, depth)));
+            c = Math.min(c, Math.min(bucketCost(item, depth), castCost(item, depth)));
             costing.remove(item);
             // some in the inventory: cheaper (use what it has), but not free, or a few nuggets look like a way to make
             // ingots and it ends up digging for an iron block to make the rest

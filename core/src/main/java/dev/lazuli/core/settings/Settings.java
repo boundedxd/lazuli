@@ -250,6 +250,8 @@ public final class Settings {
     public final Setting<Boolean> getItemSmelt = bool("getItemSmelt", true);
     /** #getitem may upgrade at a smithing table (netherite gear: template + diamond item + netherite ingot). */
     public final Setting<Boolean> getItemSmith = bool("getItemSmith", true);
+    public final Setting<Boolean> getItemBuckets = bool("getItemBuckets", true);
+    public final Setting<Integer> bucketRange = integer("bucketRange", 48, 8, 128);
     /** #smelt waits at the furnace until it's done; off: loads it, leaves, and #smelt collect goes back. */
     public final Setting<Boolean> smeltWait = bool("smeltWait", true);
     /** #smelt uses a blast furnace (ores) or smoker (food), twice as fast, when there's one near or in the inventory. */
