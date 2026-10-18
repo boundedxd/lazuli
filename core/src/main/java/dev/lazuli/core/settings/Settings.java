@@ -246,6 +246,7 @@ public final class Settings {
         s -> s.replace(" ", "")));
     /** #getitem may smelt for what it needs. */
     public final Setting<Boolean> getItemSmelt = bool("getItemSmelt", true);
+    public final Setting<Boolean> getItemSmith = bool("getItemSmith", true);
     /** #smelt waits at the furnace until it's done; off: loads it, leaves, and #smelt collect goes back. */
     public final Setting<Boolean> smeltWait = bool("smeltWait", true);
     /** #smelt uses a blast furnace (ores) or smoker (food), twice as fast, when there's one near or in the inventory. */

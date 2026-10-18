@@ -13,6 +13,7 @@ import java.util.Set;
 public final class Recipes {
     private final Map<String, List<Recipe>> byResult = new HashMap<>();
     private final Map<String, List<SmeltRecipe>> smeltByResult = new HashMap<>(), smeltByInput = new HashMap<>();
+    private final Map<String, List<SmithRecipe>> smithByResult = new HashMap<>();
 
     private Recipes() {}
 
@@ -29,6 +30,8 @@ public final class Recipes {
                 Object json = Json.parse(recipes.get(id));
                 Recipe recipe = read(id, json, tag);
                 if (recipe != null) r.byResult.computeIfAbsent(recipe.result(), k -> new ArrayList<>()).add(recipe);
+                SmithRecipe smith = readSmith(id, json, tag);
+                if (smith != null) r.smithByResult.computeIfAbsent(smith.result(), k -> new ArrayList<>()).add(smith);
                 SmeltRecipe smelt = readSmelt(id, json, tag);
                 if (smelt != null) {
                     r.smeltByResult.computeIfAbsent(smelt.result(), k -> new ArrayList<>()).add(smelt);
@@ -44,6 +47,11 @@ public final class Recipes {
     /** The recipes making {@code item} (a full id like minecraft:stick). */
     public List<Recipe> producing(String item) {
         return byResult.getOrDefault(item, List.of());
+    }
+
+    /** The smithing table recipes making {@code item}. */
+    public List<SmithRecipe> smithing(String item) {
+        return smithByResult.getOrDefault(item, List.of());
     }
 
     /** The furnace recipes making {@code item} (all furnace kinds). */
@@ -89,10 +97,22 @@ public final class Recipes {
                 for (Object i : (List<Object>) o.get("ingredients")) cells.add(ingredient(i, tag));
                 return new Recipe(id, out, count, cells.size(), 1, List.copyOf(cells), false);
             }
+            case "minecraft:crafting_transmute" -> { // dyed shulker boxes: the box and the dye
+                List<Set<String>> cells = List.of(ingredient(o.get("input"), tag), ingredient(o.get("material"), tag));
+                return new Recipe(id, out, count, 2, 1, cells, false);
+            }
             default -> {
                 return null;
             }
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static SmithRecipe readSmith(String id, Object json, java.util.function.Function<String, Set<String>> tag) {
+        Map<String, Object> o = (Map<String, Object>) json;
+        if (!"minecraft:smithing_transform".equals(o.get("type")) || !(o.get("result") instanceof Map<?, ?> result)) return null;
+        return new SmithRecipe(id, (String) result.get("id"), ingredient(o.get("template"), tag), ingredient(o.get("base"), tag),
+            ingredient(o.get("addition"), tag));
     }
 
     @SuppressWarnings("unchecked")

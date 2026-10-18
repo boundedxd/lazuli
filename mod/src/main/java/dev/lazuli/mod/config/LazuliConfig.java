@@ -221,6 +221,7 @@ public final class LazuliConfig implements WalksyLibApi {
                 .group(OptionGroup.builder("Get item")
                     .option(bool(s.getItemMine, "#getitem may mine for what it needs (logs, stone, ores...)."))
                     .option(bool(s.getItemSmelt, "#getitem may smelt for what it needs (iron ingots, glass...)."))
+                    .option(bool(s.getItemSmith, "#getitem may upgrade at a smithing table (netherite gear from a diamond item, a template and an ingot)."))
                     .option(bool(s.sortEnabled, "#sort may move items between the chests and barrels around."))
                     .option(bool(s.sortLabels, "After #sort, label each box with an item frame (carry some) showing what it holds."))
                     .option(bool(s.selEnabled, "#sel fill and #sel clear may place and break the blocks in the selected box."))
