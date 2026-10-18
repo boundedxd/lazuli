@@ -50,6 +50,34 @@ class PlannerBacklogTest {
         assertEquals(PathingSession.State.PATHING, s.snapshot().state());
     }
 
+    /** The quick mob repair finds the same cost of path as planning from scratch with the mobs where they are now. */
+    @Test
+    void mobRepairsMatchAFreshPlan() {
+        GridWorld w = GridWorld.flatFloor(0, -15, 40, 15);
+        Settings st = new Settings();
+        st.heuristicWeight.set(1.0); // optimal paths, so the two can be compared
+        java.util.Random r = new java.util.Random(7);
+        PathingSession s = new PathingSession(w, () -> -64, () -> 319, st, Runnable::run, m -> {});
+        s.start(new GoalBlock(40, 1, 0), false, Pos.pack(0, 1, 0), true);
+        for (int step = 0; step < 25; step++) {
+            List<Hazards.Hazard> mobs = new java.util.ArrayList<>();
+            for (int k = r.nextInt(3); k >= 0; k--) mobs.add(new Hazards.Hazard(5 + r.nextInt(30), 1, -6 + r.nextInt(13), 3 + r.nextInt(5), 20 + r.nextInt(60)));
+            Hazards h = Hazards.of(mobs);
+            s.setHazards(h);
+            PathingSession fresh = new PathingSession(w, () -> -64, () -> 319, st, Runnable::run, m -> {});
+            fresh.setHazards(h);
+            fresh.start(new GoalBlock(40, 1, 0), false, Pos.pack(0, 1, 0), true);
+            assertEquals(cost(w, h, fresh.snapshot().path()), cost(w, h, s.snapshot().path()), 1e-6, "step " + step);
+        }
+    }
+
+    private static double cost(GridWorld w, Hazards h, List<Long> path) {
+        var g = new dev.lazuli.core.move.MoveGraph(w, 3, true, 1.0, true).withHazards(h, 6);
+        double c = 0;
+        for (int i = 0; i + 1 < path.size(); i++) c += g.evaluate(path.get(i), path.get(i + 1));
+        return c;
+    }
+
     @Test
     void repairingAMinedVeinCostsLessThanPlanningTheTrip() {
         // digging through stone (every cell a node) with parkour on: the case that froze after a vein

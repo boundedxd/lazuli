@@ -168,13 +168,17 @@ public final class LazyDStarLite {
     }
 
     /**
-     * The cost of stepping onto cells inside these boxes changed (mobs moved), the blocks didn't: only edges into
-     * them, so only their predecessors get their rhs again (each once), and the cached block work stays.
+     * The cost of stepping onto cells inside these boxes changed (mobs moved), the blocks didn't: every edge into a
+     * cell v got {@code after(v) - before(v)} dearer. Cheaper: its predecessors may take the way through it now (one
+     * look each). Dearer: only a predecessor whose best way went through it gets its rhs again. Cells whose cost didn't
+     * change (the box corners, mostly) are skipped.
      *
-     * @return how many vertices the search had touched there
+     * @return how many vertices the search had touched there with a changed cost
      */
-    public int costsChanged(List<int[]> boxes) {
-        java.util.Set<Long> redo = new java.util.HashSet<>();
+    public int costsChanged(List<int[]> boxes, java.util.function.LongToDoubleFunction before,
+                            java.util.function.LongToDoubleFunction after) {
+        java.util.Set<Long> seen = new java.util.HashSet<>();
+        java.util.Set<Long> redo = new java.util.LinkedHashSet<>();
         int touched = 0;
         for (int[] b : boxes) {
             for (int cx = b[0] >> 4; cx <= b[3] >> 4; cx++) {
@@ -183,22 +187,27 @@ public final class LazyDStarLite {
                     if (inChunk == null) continue;
                     for (long v : inChunk) {
                         int x = Pos.x(v), y = Pos.y(v), z = Pos.z(v);
-                        if (x < b[0] || x > b[3] || y < b[1] || y > b[4] || z < b[2] || z > b[5]) continue;
+                        if (x < b[0] || x > b[3] || y < b[1] || y > b[4] || z < b[2] || z > b[5] || !seen.add(v)) continue;
+                        double d = after.applyAsDouble(v) - before.applyAsDouble(v);
+                        if (d == 0) continue;
                         touched++;
                         double gv = g(v);
                         graph.predecessors(v, p -> {
                             if (p == GOAL) return;
                             Map<Long, Double> fromP = evaluated.get(p);
-                            if (fromP != null) fromP.remove(v); // its exact cost had the old danger in it
-                            if (nodes.get(p) != null) {
-                                redo.add(p);
-                            } else if (gv < INF) {
-                                double c = cost(p, v); // never touched: maybe a way through v now
-                                if (c < INF) {
-                                    Node pn = node(p);
+                            if (fromP != null && fromP.remove(v) != null) redo.add(p); // its exact cost had the old danger in it
+                            if (gv == INF) return;
+                            Node pn = nodes.get(p);
+                            double c = cost(p, v);
+                            if (c == INF) return;
+                            if (d < 0) {
+                                if (pn == null || c + gv < pn.rhs) {
+                                    if (pn == null) pn = node(p);
                                     pn.rhs = c + gv;
                                     updateVertex(p, pn);
                                 }
+                            } else if (pn != null && pn.rhs < INF && Math.abs(pn.rhs - (c - d + gv)) <= 1e-9 * Math.max(1, pn.rhs)) {
+                                redo.add(p); // its best way was through v, now dearer
                             }
                         });
                     }

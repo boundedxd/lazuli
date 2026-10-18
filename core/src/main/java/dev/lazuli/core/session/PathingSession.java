@@ -253,7 +253,8 @@ public final class PathingSession {
             List<int[]> boxes = new ArrayList<>(before.boxes());
             boxes.addAll(now.boxes());
             // only what stepping there costs changed, not the blocks
-            if (!boxes.isEmpty() && planner.costsChanged(boxes) > 0) scheduleReplan();
+            if (!boxes.isEmpty() && planner.costsChanged(boxes, v -> before.cost(Pos.x(v), Pos.y(v), Pos.z(v)),
+                v -> now.cost(Pos.x(v), Pos.y(v), Pos.z(v))) > 0) scheduleReplan();
         });
     }
 
