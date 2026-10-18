@@ -466,6 +466,60 @@ class CommandTest {
     }
 
     @Test
+    void routineManagementCommands() {
+        CommandHandler h = handler();
+        h.handle("#routine add night mine 8 iron_ore @retry 2 ; label top ; wait 30s ; deposit all @if inv.free<4 ; jump top @unless night");
+        assertTrue(replies.get(replies.size() - 1).contains("Routine night: 5 steps"), replies.toString());
+        replies.clear();
+        h.handle("#routine show night");
+        assertEquals(List.of("1. #mine 8 iron_ore @retry 2", "2. label top", "3. wait 30s",
+            "4. #deposit all @if inv.free<4", "5. jump top @unless night"), replies);
+        replies.clear();
+        h.handle("#routine check night");
+        assertTrue(replies.get(0).contains("no problems"), replies.toString());
+        h.handle("#routine insert night 2 say hello");
+        h.handle("#routine edit night 1 mine 9 iron_ore");
+        h.handle("#routine remove night 3");
+        replies.clear();
+        h.handle("#routine show night");
+        assertEquals(List.of("1. #mine 9 iron_ore", "2. say hello", "3. wait 30s", "4. #deposit all @if inv.free<4",
+            "5. jump top @unless night"), replies);
+    }
+
+    @Test
+    void routineStepErrorsAreReportedAndNothingIsStored() {
+        CommandHandler h = handler();
+        h.handle("#routine add bad mine 8 iron_ore @retyr 3 @retry ; getitm string");
+        assertTrue(replies.stream().anyMatch(r -> r.contains("unknown command 'getitm'")), replies.toString());
+        replies.clear();
+        h.handle("#routine show bad");
+        assertTrue(replies.get(0).contains("No routine bad"), replies.toString());
+        replies.clear();
+        h.handle("#routine add ok farm");
+        h.handle("#routine insert ok 2 farm @retry");
+        assertTrue(replies.get(replies.size() - 1).contains("@retry"), replies.toString());
+        replies.clear();
+        h.handle("#routine add show farm");
+        assertTrue(replies.get(0).contains("command word"), replies.toString());
+        replies.clear();
+        h.handle("#routine rename ok fine");
+        h.handle("#routine copy fine fine2");
+        h.handle("#routine remove fine 5");
+        h.handle("#routine help");
+        assertTrue(replies.get(0).contains("renamed") || replies.get(0).contains("Renamed"), replies.toString());
+        assertTrue(replies.stream().anyMatch(r -> r.contains("@retry")), replies.toString());
+    }
+
+    @Test
+    void queueWithABadModifierDoesNotRun() {
+        CommandHandler h = handler();
+        h.handle("#queue farm @retyr 3 @retry ; deposit");
+        assertTrue(mined.isEmpty(), mined.toString());
+        h.handle("#queue farm @retry 2 ; wait 5s ; deposit all");
+        assertEquals(List.of("run null [#farm @retry 2, wait 5s, #deposit all] x1"), mined);
+    }
+
+    @Test
     void buildCommands() {
         CommandHandler h = handler();
         for (String c : new String[]{"#build house", "#build house 10 ~ -5", "#build list", "#build materials house"}) h.handle(c);

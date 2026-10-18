@@ -125,6 +125,16 @@ public final class CommandHandler {
         default void stopRoutine() {
         }
 
+        /** What the running routine is doing, one line; null when none runs. */
+        default String routineStatus() {
+            return null;
+        }
+
+        /** Whether a saved target by that name exists (null: targets aren't checked here). */
+        default java.util.function.Predicate<String> targetKnown() {
+            return null;
+        }
+
         /** Fishes at the nearest open water; minutes 0: until stopped. */
         default void fish(int minutes) {
             reply(Chat.err("Fishing isn't available here"));
@@ -353,7 +363,7 @@ public final class CommandHandler {
             // and starts again after, forever
             List<String> steps = steps(body, prefix);
             boolean endless = steps.stream().anyMatch(dev.lazuli.core.task.RoutineRunner::endless);
-            ctx.runRoutine(null, steps, endless ? 0 : 1);
+            if (valid(steps)) ctx.runRoutine(null, steps, endless ? 0 : 1);
             return true;
         }
         try {
@@ -479,7 +489,7 @@ public final class CommandHandler {
             case "queue" -> {
                 List<String> steps = steps(String.join(" ", args), prefix);
                 if (steps.isEmpty()) ctx.reply(Chat.err("Usage: queue <command> ; <command> ; ..."));
-                else ctx.runRoutine(null, steps, 1);
+                else if (valid(steps)) ctx.runRoutine(null, steps, 1);
             }
             case "routine", "routines", "r" -> routine(args, prefix);
             case "fish" -> {
@@ -572,6 +582,8 @@ public final class CommandHandler {
         ctx.reply(Chat.usage("<command> then <command> ...", "the same; a job with no end (" + p + "farm then deposit) hands over when the inventory is full, then starts again"));
         ctx.reply(Chat.usage(p + "routine (alias r) add <name> <command> ; <command> ... | <name> [times|forever] | list | del <name> | stop",
             "save a chain of commands and run it again and again"));
+        ctx.reply(Chat.usage(p + "routine show|check|status [name] | edit <name> <n> <step> | insert <name> <n> <step> | remove <name> <n> | rename <a> <b> | copy <a> <b> | help",
+            "look at and change steps; steps take modifiers (@retry 3 @timeout 5m @onfail continue @if inv.free>4 @with name=value): " + p + "routine help"));
         ctx.reply(Chat.usage(p + "fish [minutes]", "fish at the nearest open water (until stopped without minutes)"));
         ctx.reply(Chat.usage(p + "drop <item|all> [count] [item [count]...]", "throw items out of the inventory (all of them without a count)"));
         ctx.reply(Chat.usage(p + "deposit <item|all> [count] [item [count]...] [x y z]", "put items into a container (the nearest chest, barrel...)"));
@@ -613,8 +625,25 @@ public final class CommandHandler {
     /** "mine 8 iron_ore ; #smelt raw_iron 8": the commands, each with the prefix. */
     private static List<String> steps(String text, String prefix) {
         List<String> out = new ArrayList<>();
-        for (String s : dev.lazuli.core.task.Routines.split(text)) out.add(s.startsWith(prefix) ? s : prefix + s);
+        for (String s : dev.lazuli.core.task.Routines.split(text)) out.add(withPrefix(s, prefix));
         return out;
+    }
+
+    /** The step words (wait, say, label...) stay as they are; commands get the prefix. */
+    private static String withPrefix(String step, String prefix) {
+        String t = step.trim();
+        if (t.startsWith(prefix)) return t;
+        String w = t.split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
+        boolean word = java.util.Set.of("wait", "say", "notify", "skip", "end", "label", "jump").contains(w)
+            || w.equals("goto") && t.matches("(?i)goto\\s+:.*");
+        return word ? t : prefix + t;
+    }
+
+    /** Tells what's wrong with these steps, if anything; true when they're fine. */
+    private boolean valid(List<String> steps) {
+        List<String> problems = dev.lazuli.core.task.Routine.check(steps, COMMANDS::contains, ctx.targetKnown());
+        for (String p : problems) ctx.reply(Chat.err("{}", p));
+        return problems.isEmpty();
     }
 
     /** routine add <name> <cmd ; cmd> | <name> [times|forever] | run <name> [...] | list | del <name> | stop */
@@ -632,11 +661,16 @@ public final class CommandHandler {
                     ctx.reply(Chat.err(usage));
                     return;
                 }
+                if (reserved(args[1])) {
+                    ctx.reply(Chat.err("{} is a routine command word, pick another name", args[1]));
+                    return;
+                }
                 List<String> steps = steps(String.join(" ", Arrays.copyOfRange(args, 2, args.length)), prefix);
+                if (!valid(steps)) return;
                 store.set(args[1], steps);
                 ctx.reply(Chat.ok("Routine {}: {} steps ({}routine {} to run it)", args[1], steps.size(), prefix, args[1]));
             }
-            case "del", "delete", "remove" -> {
+            case "del", "delete" -> {
                 if (args.length != 2) ctx.reply(Chat.err(usage));
                 else if (store.remove(args[1])) ctx.reply(Chat.ok("Deleted routine {}", args[1]));
                 else ctx.reply(Chat.err("No routine {}", args[1]));
@@ -647,6 +681,109 @@ public final class CommandHandler {
                 all.forEach((n, s) -> ctx.reply(Chat.info("{}: {}", n, String.join(" ; ", s))));
             }
             case "stop", "cancel" -> ctx.stopRoutine();
+            case "help" -> {
+                for (String l : dev.lazuli.core.task.Routine.help(prefix)) ctx.reply(Chat.info("{}", l));
+            }
+            case "status" -> {
+                String st = ctx.routineStatus();
+                ctx.reply(st == null ? Chat.info("No routine is running") : Chat.info("{}", st));
+            }
+            case "show" -> {
+                if (args.length != 2) ctx.reply(Chat.err("Usage: routine show <name>"));
+                else if (store.get(args[1]) == null) ctx.reply(Chat.err("No routine {} ({}routine list)", args[1], prefix));
+                else {
+                    List<String> st = store.get(args[1]);
+                    if (st.isEmpty()) ctx.reply(Chat.info("{} has no steps", args[1]));
+                    for (int i = 0; i < st.size(); i++) ctx.reply(Chat.info("{}. {}", i + 1, st.get(i)));
+                }
+            }
+            case "check" -> {
+                if (args.length != 2) {
+                    ctx.reply(Chat.err("Usage: routine check <name>"));
+                    return;
+                }
+                List<String> st = store.get(args[1]);
+                if (st == null) {
+                    ctx.reply(Chat.err("No routine {} ({}routine list)", args[1], prefix));
+                    return;
+                }
+                List<String> problems = dev.lazuli.core.task.Routine.check(st, COMMANDS::contains, ctx.targetKnown());
+                if (problems.isEmpty()) ctx.reply(Chat.ok("{}: {} steps, no problems", args[1], st.size()));
+                for (String pr : problems) ctx.reply(Chat.err("{}: {}", args[1], pr));
+            }
+            case "edit", "insert" -> {
+                boolean insert = sub.equals("insert");
+                String u = "Usage: routine " + sub + " <name> <step number> <step>";
+                if (args.length < 4 || !number(args[2])) {
+                    ctx.reply(Chat.err(u));
+                    return;
+                }
+                List<String> st = store.get(args[1]);
+                if (st == null) {
+                    ctx.reply(Chat.err("No routine {} ({}routine list)", args[1], prefix));
+                    return;
+                }
+                int n = integer(args[2]);
+                int max = insert ? st.size() + 1 : st.size();
+                if (n < 1 || n > max) {
+                    ctx.reply(Chat.err("Step number must be 1 to {}", max));
+                    return;
+                }
+                String step = withPrefix(String.join(" ", Arrays.copyOfRange(args, 3, args.length)), prefix);
+                List<String> problems = new ArrayList<>(dev.lazuli.core.task.Routine.check(List.of(step), COMMANDS::contains, ctx.targetKnown()));
+                problems.removeIf(x -> x.contains("jumps to label") || x.contains("no such label"));
+                if (!problems.isEmpty()) {
+                    for (String pr : problems) ctx.reply(Chat.err("{}", pr.replaceFirst("^step 1: ", "")));
+                    return;
+                }
+                List<String> next = new ArrayList<>(st);
+                if (insert) next.add(n - 1, step);
+                else next.set(n - 1, step);
+                store.set(args[1], next);
+                ctx.reply(Chat.ok("{} step {}: {}", insert ? "Inserted" : "Changed", n, step));
+            }
+            case "remove" -> {
+                if (args.length == 2) {
+                    // "remove <name>" deletes the routine, as it always did
+                    if (store.remove(args[1])) ctx.reply(Chat.ok("Deleted routine {}", args[1]));
+                    else ctx.reply(Chat.err("No routine {}", args[1]));
+                    return;
+                }
+                if (args.length != 3 || !number(args[2])) {
+                    ctx.reply(Chat.err("Usage: routine remove <name> <step number> (or just <name> to delete the routine)"));
+                    return;
+                }
+                List<String> st = store.get(args[1]);
+                if (st == null) {
+                    ctx.reply(Chat.err("No routine {} ({}routine list)", args[1], prefix));
+                    return;
+                }
+                int n = integer(args[2]);
+                if (n < 1 || n > st.size()) {
+                    ctx.reply(Chat.err("Step number must be 1 to {}", st.size()));
+                    return;
+                }
+                List<String> next = new ArrayList<>(st);
+                String gone = next.remove(n - 1);
+                store.set(args[1], next);
+                ctx.reply(Chat.ok("Removed step {}: {}", n, gone));
+            }
+            case "rename" -> {
+                if (args.length != 3) ctx.reply(Chat.err("Usage: routine rename <name> <new name>"));
+                else if (reserved(args[2])) ctx.reply(Chat.err("{} is a routine command word, pick another name", args[2]));
+                else if (store.rename(args[1], args[2])) ctx.reply(Chat.ok("Renamed {} to {}", args[1], args[2]));
+                else ctx.reply(Chat.err("No routine {}, or {} is taken", args[1], args[2]));
+            }
+            case "copy" -> {
+                if (args.length != 3) ctx.reply(Chat.err("Usage: routine copy <name> <new name>"));
+                else if (reserved(args[2])) ctx.reply(Chat.err("{} is a routine command word, pick another name", args[2]));
+                else if (store.get(args[1]) == null) ctx.reply(Chat.err("No routine {} ({}routine list)", args[1], prefix));
+                else if (store.get(args[2]) != null) ctx.reply(Chat.err("{} exists already", args[2]));
+                else {
+                    store.set(args[2], store.get(args[1]));
+                    ctx.reply(Chat.ok("Copied {} to {}", args[1], args[2]));
+                }
+            }
             default -> {
                 int at = sub.equals("run") ? 1 : 0;
                 if (args.length <= at) {
@@ -669,9 +806,17 @@ public final class CommandHandler {
                         return;
                     }
                 }
+                if (!valid(steps)) return;
                 ctx.runRoutine(name, steps, times);
             }
         }
+    }
+
+    private static final java.util.Set<String> ROUTINE_WORDS = java.util.Set.of("add", "save", "set", "del", "delete", "remove",
+        "list", "stop", "cancel", "help", "status", "show", "check", "edit", "insert", "rename", "copy", "run");
+
+    private static boolean reserved(String name) {
+        return ROUTINE_WORDS.contains(name.toLowerCase(Locale.ROOT));
     }
 
     /** iceboat <x z | x y z> | lap [n] | record [name] | line [name|off]; bare: race the recorded line. */
