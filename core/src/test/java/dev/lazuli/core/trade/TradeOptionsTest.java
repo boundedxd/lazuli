@@ -104,4 +104,11 @@ class TradeOptionsTest {
         assertFalse(parse("--min-rate 0.5").options().rateOk(s, sell));
         assertTrue(parse("--min-rate 0.05").options().rateOk(s, sell));
     }
+
+    @Test
+    void bareWordsWorkLikeDashedOnes() {
+        var p = parse("sharpness 5 max 3 bread only-known range 40 with librarian");
+        assertEquals(parse("sharpness 5 --max 3 bread --only-known --range 40 --with librarian").options(), p.options());
+        assertEquals(java.util.List.of("sharpness", "5", "bread"), p.rest());
+    }
 }

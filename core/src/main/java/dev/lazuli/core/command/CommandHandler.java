@@ -633,7 +633,7 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "trade <enchant [level]|item [count]>...", "trade with villagers, e.g. " + p + "trade sharpness 5 (sells string, sticks... for emeralds first if need be)"));
         ctx.reply(Chat.usage(p + "trade list | scan | forget", "the trades seen so far | go look at the villagers around | forget them"));
         ctx.reply(Chat.usage(p + "trade sell <item> [count|all] | find <enchant [level]|item>", "sell for emeralds | who sells it, cheapest first"));
-        ctx.reply(Chat.usage(p + "trade ... --with <villager> --only-known --scan --max <n> --keep <item n> --min-rate <x>", "for one run: only that profession | never walk to unseen villagers | may | stop after n trades | never pay with | skip poor rates"));
+        ctx.reply(Chat.usage(p + "trade ... with <villager> only-known scan max <n> keep <item n> min-rate <x> wait-restock wait-day stay range <n> (a -- in front is fine too)", "for one run: only that profession | never walk to unseen villagers | may | stop after n trades | never pay with | skip poor rates"));
         ctx.reply(Chat.usage(p + "trade ... --wait-restock --wait-day --stay (--no-walk) --range <n>", "wait for restocks (a whole day) | don't walk | how far to look (they override the trade settings)"));
         ctx.reply(Chat.usage(p + "craft|smelt|brew|enchant|repair|combine|smith ... at <x y z>", "use that work block (numbers or ~) instead of the nearest"));
         ctx.reply(Chat.usage(p + "sleep", "sleep in the nearest bed (or one from the hotbar) until morning"));
