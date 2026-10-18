@@ -606,7 +606,11 @@ public final class TradeProcess implements Process {
         }
     }
 
+    /** Quick-moves of the trade's result in a row that left it in the slot. */
+    private int shifts;
+
     private void startTrading(LocalPlayer p) {
+        shifts = 0;
         input.release();
         reselects = 0;
         lastSelect = -100;
@@ -663,12 +667,20 @@ public final class TradeProcess implements Process {
         ItemStack result = menu.getSlot(2).getItem();
         if (!result.isEmpty()) {
             reselects = 0;
-            clicks.play(menu.containerId, List.of(Click.left(2)));
+            // one quick-move click sends the result into the inventory (no picking up and putting down); it stays
+            // there when the inventory has no room for it
+            if (++shifts > 4) {
+                close(mc, p);
+                end(Outcome.FAILED, Chat.err("Inventory full"));
+                return;
+            }
+            clicks.play(menu.containerId, List.of(Click.shift(2)));
             return;
         }
+        shifts = 0;
         // pick the trade: the game moves what it costs into the payment slots
-        if (p.tickCount - lastSelect < 10) return;
-        if (++reselects > 3) {
+        if (p.tickCount - lastSelect < 5) return;
+        if (++reselects > 5) {
             close(mc, p); // out of what it costs, or it sold out: plan again
             return;
         }

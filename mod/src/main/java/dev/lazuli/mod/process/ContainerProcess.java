@@ -115,6 +115,16 @@ public final class ContainerProcess implements Process {
         anyFailed = started = false;
         if (deposit && at == null && settings.depositSorted.get() && memory != null && settings.chestMemory.get()) {
             queue.addAll(sorted(mc, mc.player, items));
+            queueDeposit = true;
+            next(mc);
+            return;
+        }
+        // taking named items from no container in particular: from the remembered one that holds them (the nearest
+        // storage may be a barrel with none), else the nearest storage
+        if (!deposit && at == null && memory != null && settings.chestMemory.get()
+            && items.stream().noneMatch(i -> i.item().equals("all"))) {
+            queue.addAll(sortedTake(mc, mc.player, items));
+            queueDeposit = false;
             next(mc);
             return;
         }
@@ -125,9 +135,9 @@ public final class ContainerProcess implements Process {
     private void next(Minecraft mc) {
         while (!queue.isEmpty()) {
             Group g = queue.poll();
-            if (g.items().stream().anyMatch(i -> held(mc.player, i.item()) > 0)) {
+            if (!queueDeposit || g.items().stream().anyMatch(i -> held(mc.player, i.item()) > 0)) {
                 started = true;
-                run(mc, true, g.items(), g.at());
+                run(mc, queueDeposit, g.items(), g.at());
                 return;
             }
         }
@@ -169,6 +179,31 @@ public final class ContainerProcess implements Process {
         }
         List<Group> out = new ArrayList<>();
         to.forEach((at, list) -> out.add(new Group(at, list)));
+        if (!rest.isEmpty()) out.add(new Group(null, rest));
+        return out;
+    }
+
+    /** Whether the queued groups are deposits (else takes). */
+    private boolean queueDeposit = true;
+
+    /** Each item from the nearest remembered container holding it (within chestRange); the rest from the nearest storage. */
+    private List<Group> sortedTake(Minecraft mc, LocalPlayer p, List<ItemCount> items) {
+        ChestMemory m = memory.apply(mc);
+        String dim = dimension.apply(mc);
+        BlockPos f = p.blockPosition();
+        java.util.Map<BlockPos, List<ItemCount>> from = new java.util.LinkedHashMap<>();
+        List<ItemCount> rest = new ArrayList<>();
+        for (ItemCount i : items) {
+            ChestMemory.Spot s = m == null || dev.lazuli.core.inventory.ItemKeys.isInShulker(i.item()) ? null
+                : m.nearest(Inventories.id(i.item()), dim, f.getX(), f.getY(), f.getZ(), settings.chestRange.get());
+            if (s != null && storageAt(mc, new BlockPos(s.x(), s.y(), s.z()))) {
+                from.computeIfAbsent(new BlockPos(s.x(), s.y(), s.z()), k -> new ArrayList<>()).add(i);
+            } else {
+                rest.add(i);
+            }
+        }
+        List<Group> out = new ArrayList<>();
+        from.forEach((at, list) -> out.add(new Group(at, list)));
         if (!rest.isEmpty()) out.add(new Group(null, rest));
         return out;
     }
