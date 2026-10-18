@@ -130,8 +130,17 @@ public final class BrewProcess implements Process {
         return phase == Phase.IDLE ? -1 : (double) made / count;
     }
 
+    /** The brewing stand the next start uses (null: the nearest, or one it places). */
+    private BlockPos nextAt, fixedAt;
+
+    public void station(BlockPos at) {
+        nextAt = at;
+    }
+
     /** Brews {@code count} bottles of {@code potion} (fire_resistance, long_swiftness, strong_healing...). */
     public void start(Minecraft mc, String potion, Brewing.Form form, int count) {
+        fixedAt = nextAt;
+        nextAt = null;
         stop(false);
         outcome = Outcome.NONE;
         if (!Brewing.known(potion) || Brewing.id(potion).equals(WATER)) {
@@ -237,7 +246,7 @@ public final class BrewProcess implements Process {
             return;
         }
         // a stand: one near, one carried, or one made
-        if (standPos == null && Station.nearest(mc, p, Blocks.BREWING_STAND, settings.stationRange.get()) == null
+        if (standPos == null && fixedAt == null && Station.nearest(mc, p, Blocks.BREWING_STAND, settings.stationRange.get()) == null
             && inv.getOrDefault(STAND, 0) == 0) {
             if (!mayPlace()) {
                 fail("No brewing stand within " + settings.stationRange.get() + " blocks, and placing one is off");
@@ -253,7 +262,9 @@ public final class BrewProcess implements Process {
             return;
         }
         enter(Phase.STATION, p);
-        station.start(p, Blocks.BREWING_STAND, STAND, "brewing stand", m -> m instanceof BrewingStandMenu, standPos, mayPlace());
+        if (fixedAt != null) station.exact();
+        station.start(p, Blocks.BREWING_STAND, STAND, "brewing stand", m -> m instanceof BrewingStandMenu,
+            fixedAt != null ? fixedAt : standPos, mayPlace() && fixedAt == null);
     }
 
     /** Gets items with #getitem (each item once per #brew); false if that's off or they were all tried already. */

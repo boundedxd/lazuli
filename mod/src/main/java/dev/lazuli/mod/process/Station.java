@@ -47,7 +47,7 @@ final class Station {
     private Predicate<net.minecraft.world.level.block.state.BlockState> block;
     private String item, name, error;
     private Predicate<AbstractContainerMenu> menu;
-    private boolean mayPlace, acted, placeOnly;
+    private boolean mayPlace, acted, placeOnly, fixed;
     private BlockPos pos, placed, skip;
     private PlaceSpots.Spot spot;
     private List<int[]> stands;
@@ -78,6 +78,8 @@ final class Station {
         this.mayPlace = mayPlace;
         placeOnly = false;
         pos = at;
+        fixed = at != null && nextExact;
+        nextExact = false;
         skip = null;
         // one it placed earlier and hasn't picked up yet stays its own
         if (placed != null && !test(Minecraft.getInstance(), placed)) placed = null;
@@ -97,6 +99,13 @@ final class Station {
         placeOnly = true;
         enter(Phase.PLACE, p);
     }
+
+    /** The next {@code start} with a position means exactly that block (asked for by the player): no other is used if it's not there. */
+    void exact() {
+        nextExact = true;
+    }
+
+    private boolean nextExact;
 
     BlockPos pos() {
         return pos;
@@ -123,7 +132,11 @@ final class Station {
         }
         switch (phase) {
             case FIND -> {
-                if (pos != null && !test(mc, pos)) pos = null; // broken meanwhile
+                if (pos != null && !test(mc, pos)) {
+                    // a block asked for by position (at x y z) isn't swapped for the nearest one
+                    if (fixed) return fail("No " + name + " at " + pos.getX() + " " + pos.getY() + " " + pos.getZ() + " (not loaded, or another block?)");
+                    pos = null; // broken meanwhile
+                }
                 if (pos == null && !placeOnly) {
                     pos = nearest(mc, p, s -> block.test(s), settings.stationRange.get(), skip, avoid);
                     // carrying one: placing it beats a long walk to another

@@ -13,6 +13,7 @@ import dev.lazuli.mod.craft.RecipeData;
 import dev.lazuli.mod.inventory.ClickDriver;
 import dev.lazuli.mod.inventory.Inventories;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.inventory.AbstractCraftingMenu;
 import net.minecraft.world.inventory.CraftingMenu;
@@ -98,6 +99,13 @@ public final class CraftProcess implements Process {
         return outcome;
     }
 
+    /** The crafting table the next start uses (null: the nearest, or one it places). */
+    private BlockPos nextAt, fixedAt;
+
+    public void station(BlockPos at) {
+        nextAt = at;
+    }
+
     /** @param items ids and how many of each to make (a negative count: one craft) */
     public void start(Minecraft mc, List<ItemCount> items) {
         start(mc, items, false);
@@ -105,6 +113,8 @@ public final class CraftProcess implements Process {
 
     /** @param keepTable leave a table it places standing (more crafting follows: {@link #pickUpTable} after) */
     public void start(Minecraft mc, List<ItemCount> items, boolean keepTable) {
+        fixedAt = nextAt;
+        nextAt = null;
         stop(false);
         if (fetch != null) fetch.reset();
         begin(mc, items, keepTable);
@@ -134,7 +144,7 @@ public final class CraftProcess implements Process {
         List<CraftTree.Step> plan = plan(recipes, have);
         if (plan == null) return;
         if (plan.stream().anyMatch(s -> !s.recipe().fits(2))
-            && Station.nearest(mc, p, Blocks.CRAFTING_TABLE, settings.stationRange.get()) == null) {
+            && fixedAt == null && Station.nearest(mc, p, Blocks.CRAFTING_TABLE, settings.stationRange.get()) == null) {
             if (!mayPlace()) {
                 fail("No crafting table within " + settings.stationRange.get() + " blocks, and placing one is off ("
                     + (settings.allowPlace.get() ? "craftPlaceTable" : "allowPlace") + ")");
@@ -252,7 +262,8 @@ public final class CraftProcess implements Process {
         int size = (int) Math.round(Math.sqrt(menu.getInputGridSlots().size()));
         if (!step.recipe().fits(size)) {
             phase = Phase.TABLE;
-            station.start(p, Blocks.CRAFTING_TABLE, TABLE, "crafting table", m -> m instanceof CraftingMenu, null, mayPlace());
+            if (fixedAt != null) station.exact();
+            station.start(p, Blocks.CRAFTING_TABLE, TABLE, "crafting table", m -> m instanceof CraftingMenu, fixedAt, mayPlace() && fixedAt == null);
             return;
         }
         if (menu == p.inventoryMenu) clicks.keepOpen();

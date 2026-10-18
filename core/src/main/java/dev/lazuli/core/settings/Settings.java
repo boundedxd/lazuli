@@ -270,6 +270,23 @@ public final class Settings {
     public final Setting<Boolean> tradeScanUnknown = bool("tradeScanUnknown", true);
     /** #trade keeps a villager screen open for the next trade with the same villager (off: closes after each). */
     public final Setting<Boolean> tradeStayOpen = bool("tradeStayOpen", true);
+    /** #trade never walks to a villager it hasn't got trades for (off: it may, when no known villager can do the job). */
+    public final Setting<Boolean> tradeOnlyKnown = bool("tradeOnlyKnown", false);
+    /** #trade stops after this many trades in a run (0: no limit). */
+    public final Setting<Integer> tradeMaxPerRun = integer("tradeMaxPerRun", 0, 0, 100000);
+    /** Things #trade never pays with, item:amount (it keeps that many in the inventory). */
+    public final Setting<String> tradeKeepItems = register(new Setting<>("tradeKeepItems", "",
+        s -> s.replace(" ", "").toLowerCase(java.util.Locale.ROOT)));
+    /** #trade waits for restocks when villagers are sold out (also when selling), instead of finishing. */
+    public final Setting<Boolean> tradeWaitRestock = bool("tradeWaitRestock", false);
+    /** #trade waits as long as a whole day (20 minutes) for restocks, not just tradeRestockMinutes. */
+    public final Setting<Boolean> tradeWaitDay = bool("tradeWaitDay", false);
+    /** #trade doesn't walk: it only trades with villagers already within reach. */
+    public final Setting<Boolean> tradeStayPut = bool("tradeStayPut", false);
+    /** #trade skips trades giving less than this many items per item paid (0: any). */
+    public final Setting<Double> tradeMinRate = decimal("tradeMinRate", 0.0, 0.0, 64.0);
+    /** Keep chests, trades, portals, waypoints... for each server (or singleplayer world) in its own folder. */
+    public final Setting<Boolean> perServerMemory = bool("perServerMemory", true);
     /** Lets the players in chatControlPlayers run commands by saying them in chat (or whispering). */
     public final Setting<Boolean> chatControl = bool("chatControl", false);
     /** Who may (names, comma separated). */
@@ -349,8 +366,13 @@ public final class Settings {
     }
 
     public Optional<Setting<?>> byName(String name) {
-        return Optional.ofNullable(byName.get(name.toLowerCase(Locale.ROOT)));
+        String key = name.toLowerCase(Locale.ROOT);
+        Setting<?> found = byName.get(key);
+        return Optional.ofNullable(found != null ? found : byName.get(ALIASES.getOrDefault(key, key)));
     }
+
+    /** Other names for a setting (lower-case alias to lower-case name). */
+    private static final Map<String, String> ALIASES = Map.of("tradescanstrangers", "tradescanunknown");
 
     public Map<String, String> toMap() {
         Map<String, String> out = new LinkedHashMap<>();

@@ -138,7 +138,16 @@ public final class SmeltProcess implements Process {
         return true;
     }
 
+    /** The furnace the next start uses (null: the nearest, or one it places). */
+    private BlockPos nextAt, fixedAt;
+
+    public void station(BlockPos at) {
+        nextAt = at;
+    }
+
     public void start(Minecraft mc, ItemCount item, boolean wait) {
+        fixedAt = nextAt;
+        nextAt = null;
         stop(false);
         if (fetch != null) fetch.reset();
         begin(mc, item, wait);
@@ -194,11 +203,16 @@ public final class SmeltProcess implements Process {
             return;
         }
         SmeltRecipe.Furnace kind = SmeltRecipe.Furnace.FURNACE;
-        if (settings.smeltFastFurnaces.get() && sj.fast() != null) {
+        if (fixedAt != null) {
+            // the furnace asked for decides what it is (a smoker only takes food, a blast furnace ores)
+            var at = mc.level.getBlockState(fixedAt).getBlock();
+            if (at == Blocks.BLAST_FURNACE) kind = SmeltRecipe.Furnace.BLAST_FURNACE;
+            else if (at == Blocks.SMOKER) kind = SmeltRecipe.Furnace.SMOKER;
+        } else if (settings.smeltFastFurnaces.get() && sj.fast() != null) {
             SmeltRecipe.Furnace fast = sj.fast().furnace();
             if (have.getOrDefault(fast.block, 0) > 0 && mayPlace() || Station.nearest(mc, p, block(fast), settings.stationRange.get()) != null) kind = fast;
         }
-        if (kind == SmeltRecipe.Furnace.FURNACE && (have.getOrDefault(FURNACE, 0) < 1 || !mayPlace())
+        if (kind == SmeltRecipe.Furnace.FURNACE && fixedAt == null && (have.getOrDefault(FURNACE, 0) < 1 || !mayPlace())
             && Station.nearest(mc, p, Blocks.FURNACE, settings.stationRange.get()) == null) {
             if (!mayPlace()) {
                 fail("No furnace within " + settings.stationRange.get() + " blocks, and placing one is off ("
@@ -243,8 +257,10 @@ public final class SmeltProcess implements Process {
 
     private void go(LocalPlayer p, BlockPos at) {
         phase = Phase.STATION;
-        station.start(p, block(job.furnace), job.furnace.block, name(job.furnace), m -> m instanceof AbstractFurnaceMenu, at,
-            mayPlace());
+        BlockPos use = at != null ? at : fixedAt;
+        if (at == null && fixedAt != null) station.exact();
+        station.start(p, block(job.furnace), job.furnace.block, name(job.furnace), m -> m instanceof AbstractFurnaceMenu, use,
+            mayPlace() && use == null);
     }
 
     @Override

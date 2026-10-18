@@ -47,6 +47,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import java.nio.file.Path;
 import dev.lazuli.core.waypoint.Waypoints;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -228,7 +229,7 @@ public final class LazuliClient implements ClientModInitializer {
 		strongholds.useChests(containers, this::chests, LazuliClient::dimension);
 		recovery = new dev.lazuli.mod.process.DeathRecovery(session, settings, LazuliClient::dimension, this::chat);
 		iceboat = new dev.lazuli.mod.process.IceBoatProcess(settings, cache,
-			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("iceboat"), this::chat);
+			() -> memoryDir(Minecraft.getInstance(), "iceboat"), this::chat);
 		processes = java.util.List.of(iceboat, portals, strongholds, mine, follow, explore, tunnel, farm, breeds, fishing, containers, crafts, smelts, smiths, buckets, hunt, getItem,
 			trades, brews, enchants, elytra, sorts, builds, sleeps, recovery, restock, guard);
 		commands = new CommandHandler(new CommandHandler.Context() {
@@ -467,14 +468,21 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public void stationAt(int[] at) {
+				pendingStation = at == null ? null : new BlockPos(at[0], at[1], at[2]);
+			}
+
+			@Override
 			public void craft(java.util.List<ItemCount> items) {
 				LazuliClient.this.stopProcesses(false);
+				crafts.station(takeStation());
 				crafts.start(Minecraft.getInstance(), items);
 			}
 
 			@Override
 			public void smelt(ItemCount item) {
 				LazuliClient.this.stopProcesses(false);
+				smelts.station(takeStation());
 				smelts.start(Minecraft.getInstance(), item);
 			}
 
@@ -498,6 +506,7 @@ public final class LazuliClient implements ClientModInitializer {
 			@Override
 			public void smith(ItemCount item) {
 				LazuliClient.this.stopProcesses(false);
+				smiths.station(takeStation());
 				smiths.start(Minecraft.getInstance(), item);
 			}
 
@@ -515,18 +524,21 @@ public final class LazuliClient implements ClientModInitializer {
 			@Override
 			public void brew(String potion, dev.lazuli.core.craft.Brewing.Form form, int count) {
 				LazuliClient.this.stopProcesses(false);
+				brews.station(takeStation());
 				brews.start(Minecraft.getInstance(), potion, form, count);
 			}
 
 			@Override
 			public void enchant(String item, int count, int option) {
 				LazuliClient.this.stopProcesses(false);
+				enchants.station(takeStation());
 				enchants.enchant(Minecraft.getInstance(), item, count, option);
 			}
 
 			@Override
 			public void anvil(String item, String with) {
 				LazuliClient.this.stopProcesses(false);
+				enchants.station(takeStation());
 				if (with == null) enchants.repair(Minecraft.getInstance(), item);
 				else enchants.combine(Minecraft.getInstance(), item, with);
 			}
@@ -618,15 +630,36 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public void trade(java.util.List<dev.lazuli.core.trade.Want> wants, dev.lazuli.core.trade.TradeOptions options) {
+				LazuliClient.this.stopProcesses(false);
+				trades.options(options);
+				trade(wants);
+			}
+
+			@Override
 			public void tradeSell(String item, int count) {
 				LazuliClient.this.stopProcesses(false);
 				trades.sell(Minecraft.getInstance(), item, count);
 			}
 
 			@Override
+			public void tradeSell(String item, int count, dev.lazuli.core.trade.TradeOptions options) {
+				LazuliClient.this.stopProcesses(false);
+				trades.options(options);
+				tradeSell(item, count);
+			}
+
+			@Override
 			public void tradeScan() {
 				LazuliClient.this.stopProcesses(false);
 				trades.scan(Minecraft.getInstance());
+			}
+
+			@Override
+			public void tradeScan(dev.lazuli.core.trade.TradeOptions options) {
+				LazuliClient.this.stopProcesses(false);
+				trades.options(options);
+				tradeScan();
 			}
 
 			@Override
@@ -1093,20 +1126,21 @@ public final class LazuliClient implements ClientModInitializer {
 
 	/** This server's (or singleplayer world's) waypoints, each in its own file. */
 	private Waypoints waypoints(Minecraft mc) {
-		return waypointsByWorld.computeIfAbsent(worldFile(mc), f -> new Waypoints(
-			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("waypoints").resolve(f)));
+		Path file = memoryFile(mc, "waypoints");
+		return waypointsByWorld.computeIfAbsent(file.toString(), f -> new Waypoints(file));
 	}
 
 	/** What's in this server's (or world's) chests, as last seen. */
 	private dev.lazuli.core.storage.ChestMemory chests(Minecraft mc) {
-		return chestsByWorld.computeIfAbsent(worldFile(mc), f -> new dev.lazuli.core.storage.ChestMemory(
-			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("chests").resolve(f)));
+		Path file = memoryFile(mc, "chests");
+		return chestsByWorld.computeIfAbsent(file.toString(), f -> new dev.lazuli.core.storage.ChestMemory(file));
 	}
 
 	/** The nether portals seen on this server (or world); kept in memory only with portalMemory off. */
 	private dev.lazuli.core.portal.PortalMemory portalMemory(Minecraft mc) {
-		return portalsByWorld.computeIfAbsent(worldFile(mc), f -> new dev.lazuli.core.portal.PortalMemory(settings.portalMemory.get()
-			? FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("portals").resolve(f) : null));
+		Path file = settings.portalMemory.get() ? memoryFile(mc, "portals") : null;
+		return portalsByWorld.computeIfAbsent(file == null ? "memory-only:" + worldKey(mc) : file.toString(),
+			f -> new dev.lazuli.core.portal.PortalMemory(file));
 	}
 
 	/** Remembers the portal blocks in a chunk just loaded (only sections that have any are looked through). */
@@ -1129,17 +1163,60 @@ public final class LazuliClient implements ClientModInitializer {
 
 	/** Every villager's trades seen on this server (or world). */
 	private dev.lazuli.core.trade.TradeMemory tradeMemory(Minecraft mc) {
-		return tradesByWorld.computeIfAbsent(worldFile(mc), f -> new dev.lazuli.core.trade.TradeMemory(
-			FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("trades").resolve(f)));
+		Path file = memoryFile(mc, "trades");
+		return tradesByWorld.computeIfAbsent(file.toString(), f -> new dev.lazuli.core.trade.TradeMemory(file));
 	}
 
-	/** A file name for the server (or singleplayer world) being played on. */
-	private static String worldFile(Minecraft mc) {
-		String id;
-		if (mc.getCurrentServer() != null) id = "server-" + mc.getCurrentServer().ip;
-		else if (mc.getSingleplayerServer() != null) id = "world-" + mc.getSingleplayerServer().getWorldData().getLevelName();
-		else id = "unknown";
-		return id.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9._-]", "_") + ".txt";
+	/** The work block named by {@code at x y z} in the command being run (see {@code CommandHandler.Context.stationAt}). */
+	private BlockPos pendingStation;
+
+	private BlockPos takeStation() {
+		BlockPos at = pendingStation;
+		pendingStation = null;
+		return at;
+	}
+
+	private static Path lazuliDir() {
+		return FabricLoader.getInstance().getConfigDir().resolve("lazuli");
+	}
+
+	/** The old id of the server (or singleplayer world) being played on: server-<ip>, world-<name>, unknown. */
+	private static String legacyId(Minecraft mc) {
+		if (mc.getCurrentServer() != null) return "server-" + mc.getCurrentServer().ip;
+		if (mc.getSingleplayerServer() != null) return "world-" + mc.getSingleplayerServer().getWorldData().getLevelName();
+		return "unknown";
+	}
+
+	/** The key of the server (or singleplayer world) being played on (see {@link dev.lazuli.core.storage.WorldKey}). */
+	private static String worldKey(Minecraft mc) {
+		if (mc.getCurrentServer() != null) return dev.lazuli.core.storage.WorldKey.server(mc.getCurrentServer().ip);
+		if (mc.getSingleplayerServer() != null) return dev.lazuli.core.storage.WorldKey.world(mc.getSingleplayerServer().getWorldData().getLevelName());
+		return "unknown";
+	}
+
+	private static final java.util.List<String> FILE_KINDS = java.util.List.of("chests", "trades", "portals", "waypoints");
+	private final java.util.Set<String> migratedWorlds = new java.util.HashSet<>();
+
+	/** Brings the old per-kind files over to this server's folder, once per server per session (and for good, by marker). */
+	private void migrateMemory(Minecraft mc) {
+		String key = worldKey(mc);
+		if (migratedWorlds.add(key)) {
+			dev.lazuli.core.storage.WorldKey.migrate(lazuliDir(), FILE_KINDS, java.util.List.of("iceboat"), key,
+				dev.lazuli.core.storage.WorldKey.legacyName(legacyId(mc)));
+		}
+	}
+
+	/** Where a kind of memory is kept for this server (perServerMemory), else in the old shared per-world files. */
+	private Path memoryFile(Minecraft mc, String kind) {
+		if (!settings.perServerMemory.get()) return lazuliDir().resolve(kind).resolve(dev.lazuli.core.storage.WorldKey.legacyName(legacyId(mc)));
+		migrateMemory(mc);
+		return dev.lazuli.core.storage.WorldKey.file(lazuliDir(), kind, worldKey(mc));
+	}
+
+	private Path memoryDir(Minecraft mc, String kind) {
+		if (!settings.perServerMemory.get()) return lazuliDir().resolve(kind);
+		migrateMemory(mc);
+		return dev.lazuli.core.storage.WorldKey.dir(lazuliDir(), kind, worldKey(mc));
 	}
 
 	private static String dimension(Minecraft mc) {

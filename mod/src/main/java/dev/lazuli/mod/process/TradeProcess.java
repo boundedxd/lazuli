@@ -15,6 +15,7 @@ import dev.lazuli.core.settings.Settings;
 import dev.lazuli.core.storage.ChestMemory;
 import dev.lazuli.core.trade.Offer;
 import dev.lazuli.core.trade.TradeMemory;
+import dev.lazuli.core.trade.TradeOptions;
 import dev.lazuli.core.trade.TradePlanner;
 import dev.lazuli.core.trade.Trader;
 import dev.lazuli.core.trade.Want;
@@ -67,7 +68,10 @@ public final class TradeProcess implements Process {
 
     public enum Outcome { NONE, DONE, FAILED, CANCELLED }
 
-    private enum Phase { IDLE, PLAN, GATHER, LOOT, GO, OPEN, TRADE, RESTOCK }
+    private enum Phase { IDLE, PLAN, GATHER, LOOT, GO, OPEN, TRADE, RESTOCK, COOL }
+
+    /** A villager that couldn't be reached or wouldn't open is tried again after this long (ticks), up to RETRIES times. */
+    private static final int COOLDOWN = 20 * 20, RETRIES = 3;
 
     private final Settings settings;
     private final Consumer<String> chat;
@@ -101,8 +105,19 @@ public final class TradeProcess implements Process {
     /** When it started waiting for a restock (-1: not waiting). */
     private int restockSince = -1;
     private static final int RESTOCK_LOOK = 20 * 60;
-    /** Villagers that wouldn't open (busy, asleep, unreachable): skipped this run. */
+    /** Villagers given up on for this run (failed RETRIES times, or not walking to them). */
     private final Set<String> skip = new HashSet<>();
+    /** Villagers that wouldn't open (busy, asleep) or couldn't be reached: id to the tick they may be tried again. */
+    private final Map<String, Integer> coolUntil = new java.util.HashMap<>();
+    private final Map<String, Integer> fails = new java.util.HashMap<>();
+    private int now, coolWait, tradesDone, stepDone;
+    /** This run's flags over the trade settings; {@code nextOptions} is what the next start takes. */
+    private TradeOptions opts = TradeOptions.NONE, nextOptions;
+
+    /** Flags for the next start / sell / scan (they apply to that run only). */
+    public void options(TradeOptions options) {
+        nextOptions = options;
+    }
 
     public TradeProcess(PathingSession session, Settings settings, ClickDriver clicks, MineProcess mine, CraftProcess crafts,
                         SmeltProcess smelts, ContainerProcess containers, Function<Minecraft, TradeMemory> memory,
@@ -140,6 +155,7 @@ public final class TradeProcess implements Process {
         String what = scanOnly ? "Looking at villagers' trades" : sellItem != null ? "Sell " + name(sellItem) : "Trade for " + describe(wants);
         return switch (phase) {
             case RESTOCK -> what + "  waiting for a restock";
+            case COOL -> what + "  trying a villager again soon";
             case GATHER -> what + "  getting " + step.item().count() + " " + name(step.item().item());
             case LOOT -> what + "  looking in chests";
             case GO, OPEN, TRADE -> what + (step == null ? "  looking at a villager (" + toScan.size() + " more)"
@@ -150,16 +166,25 @@ public final class TradeProcess implements Process {
 
     /** Looks at the villagers around whose trades aren't known (#trade scan). */
     public void scan(Minecraft mc) {
+        adopt();
         begin(mc, List.of(), true);
     }
 
     public void start(Minecraft mc, List<Want> wants) {
+        adopt();
         sellItem = null;
         begin(mc, wants, false);
     }
 
+    /** This run's flags (set with {@link #options}), or none. */
+    private void adopt() {
+        opts = nextOptions == null ? TradeOptions.NONE : nextOptions;
+        nextOptions = null;
+    }
+
     /** Sells {@code count} of {@code item} (negative: all of it) to the best-paying villagers around. */
     public void sell(Minecraft mc, String item, int count) {
+        adopt();
         if (item.equals(TradePlanner.EMERALD)) {
             // "sell for emeralds": whatever on hand the villagers take (count: emeralds to make; all: no limit)
             sellItem = item;
@@ -171,6 +196,8 @@ public final class TradeProcess implements Process {
         sellItem = item;
         sellHad = Inventories.plainCounts(mc.player).getOrDefault(item, 0);
         sellKeep = count < 0 ? 0 : Math.max(0, sellHad - count);
+        // what --keep / tradeKeepItems holds back isn't sold either
+        sellKeep = Math.max(sellKeep, Math.min(sellHad, opts.keepItems(settings).getOrDefault(item, 0)));
         if (sellHad <= sellKeep) {
             stop(false);
             outcome = Outcome.FAILED;
@@ -181,7 +208,9 @@ public final class TradeProcess implements Process {
     }
 
     private void begin(Minecraft mc, List<Want> wants, boolean scanOnly) {
+        TradeOptions mine = opts;
         stop(false);
+        opts = mine; // (stopping a run in progress forgets its flags)
         outcome = Outcome.NONE;
         roomThrows = 0;
         this.wants = List.copyOf(wants);
@@ -189,7 +218,11 @@ public final class TradeProcess implements Process {
         scannedAll = looted = false;
         restockSince = -1;
         steps = 0;
+        tradesDone = stepDone = 0;
         skip.clear();
+        coolUntil.clear();
+        fails.clear();
+        now = mc.player == null ? 0 : mc.player.tickCount;
         refreshed.clear();
         toScan.clear();
         toLoot.clear();
@@ -220,7 +253,11 @@ public final class TradeProcess implements Process {
         if (phase == Phase.IDLE) return;
         LocalPlayer p = mc.player;
         if (p == null) return;
+        now = p.tickCount;
         switch (phase) {
+            case COOL -> {
+                if (p.tickCount >= coolWait) enter(Phase.PLAN, p);
+            }
             case PLAN -> plan(mc, p);
             case GATHER -> {
                 gather.tick(mc);
@@ -270,6 +307,11 @@ public final class TradeProcess implements Process {
             end(Outcome.FAILED, Chat.err("Gave up after {} steps", MAX_STEPS));
             return;
         }
+        int max = opts.maxTrades(settings);
+        if (max > 0 && tradesDone >= max) {
+            end(Outcome.DONE, Chat.ok("Made {} trades (the limit of {} a run)", tradesDone, max));
+            return;
+        }
         if (sellingAny()) {
             sellAnyPlan(mc, p);
             return;
@@ -278,25 +320,21 @@ public final class TradeProcess implements Process {
             sellPlan(mc, p);
             return;
         }
-        boolean wait = settings.tradeRestockMinutes.get() > 0;
-        TradePlanner.Plan plan = plan(mc, p, wants, recipes, drops, wait);
+        int wait = opts.waitMinutes(settings, true);
+        TradePlanner.Plan plan = plan(mc, p, wants, recipes, drops, wait > 0);
         if (plan.ok() && plan.steps().isEmpty() && plan.soldOut()) {
             // bought what there was: wait for the villagers to restock
-            if (restockSince < 0) {
-                restockSince = p.tickCount;
-                chat.accept(Chat.info("Sold out; waiting up to {} min for a restock", settings.tradeRestockMinutes.get()));
-            }
-            steps = 0;
-            if (merchant) p.closeContainer();
-            enter(Phase.RESTOCK, p);
+            startWaiting(p, merchant, wait, "Sold out");
             return;
         }
         if (!plan.ok()) {
-            // maybe one not looked at yet buys or sells it: look at every villager around once, then plan again
-            if (scanMore(mc)) return;
+            if (coolingDown(p)) return; // a villager that couldn't be reached a moment ago is tried again first
+            // strangers only when no villager we know of gives it at all (sold out ones are waited for, not replaced)
+            if (!knownOffers(mc, p, o -> wants.stream().anyMatch(o::gives)) && scanMore(mc)) return;
             end(Outcome.FAILED, Chat.err("Can't trade for {}: {}", describe(wants), plan.problem()));
             return;
         }
+        restockSince = -1;
         if (plan.steps().isEmpty()) {
             end(Outcome.DONE, Chat.ok("Got {}", describe(wants)));
             return;
@@ -322,6 +360,7 @@ public final class TradeProcess implements Process {
 
     /** Off to the step's villager; with its screen open already (tradeStayOpen), straight on trading. */
     private void goTrade(Minecraft mc, LocalPlayer p) {
+        restockSince = -1;
         chat.accept(Chat.info("Trading {} x{} with a {}", step.offer().describe(), step.times(), step.trader().profession()));
         target = step.trader().id();
         lastSeen = new BlockPos(step.trader().x(), step.trader().y(), step.trader().z());
@@ -362,7 +401,7 @@ public final class TradeProcess implements Process {
     }
 
     private boolean scanMore(Minecraft mc) {
-        if (scannedAll || !settings.tradeScanUnknown.get()) return false;
+        if (scannedAll || !opts.mayScan(settings) || opts.stay(settings)) return false;
         scannedAll = true;
         queueUnknown(mc, v -> true, Integer.MAX_VALUE);
         if (toScan.isEmpty()) return false;
@@ -376,6 +415,77 @@ public final class TradeProcess implements Process {
         return TradePlanner.EMERALD.equals(sellItem);
     }
 
+    /** What's been sold so far (emeralds made when selling for emeralds). */
+    private int soldSoFar(LocalPlayer p) {
+        Map<String, Integer> have = Inventories.plainCounts(p);
+        if (sellingAny()) return Math.max(0, have.getOrDefault(TradePlanner.EMERALD, 0) - sellHad);
+        return sellItem == null ? 0 : Math.max(0, sellHad - have.getOrDefault(sellItem, 0));
+    }
+
+    /** Does any villager known around (stock ignored, cooling down ones too) have an offer like this? */
+    private boolean knownOffers(Minecraft mc, LocalPlayer p, java.util.function.Predicate<Offer> like) {
+        for (Trader t : candidates(mc, p, true)) {
+            if (skip.contains(t.id())) continue;
+            if (allowed(t).offers().stream().anyMatch(like)) return true;
+        }
+        return false;
+    }
+
+    /** Known villagers that buy {@code item} (null: anything sellable) for emeralds, even sold out ones. */
+    private boolean knownBuys(Minecraft mc, LocalPlayer p, String item) {
+        return knownOffers(mc, p, o -> o.result().item().equals(TradePlanner.EMERALD) && (item == null ? maySell(o.costA().item())
+            : o.costA().item().equals(item)));
+    }
+
+    private boolean soldOutBuyer(Minecraft mc, LocalPlayer p, String item) {
+        return knownOffers(mc, p, o -> o.left() <= 0 && o.result().item().equals(TradePlanner.EMERALD)
+            && (item == null ? maySell(o.costA().item()) : o.costA().item().equals(item)));
+    }
+
+    /** Starts (or goes on) waiting for villagers to restock, up to {@code minutes} in all. */
+    private void startWaiting(LocalPlayer p, boolean merchant, int minutes, String why) {
+        if (restockSince < 0) {
+            restockSince = p.tickCount;
+            waitMinutes = minutes;
+            chat.accept(Chat.info("{}; waiting up to {} min for a restock", why, minutes));
+        }
+        steps = 0;
+        if (merchant || p.containerMenu instanceof MerchantMenu) p.closeContainer();
+        enter(Phase.RESTOCK, p);
+    }
+
+    private int waitMinutes;
+
+    /** A villager that couldn't be reached is on cooldown: wait for the first to be due again instead of giving up. */
+    private boolean coolingDown(LocalPlayer p) {
+        int until = Integer.MAX_VALUE;
+        for (Map.Entry<String, Integer> e : coolUntil.entrySet()) {
+            if (!skip.contains(e.getKey()) && e.getValue() > now) until = Math.min(until, e.getValue());
+        }
+        if (until == Integer.MAX_VALUE) return false;
+        if (p.containerMenu instanceof MerchantMenu) p.closeContainer();
+        coolWait = until;
+        chat.accept(Chat.info("Trying a villager that couldn't be used again in {} s", Math.max(1, (until - now + 19) / 20)));
+        enter(Phase.COOL, p);
+        return true;
+    }
+
+    /**
+     * Selling and nobody known can take what's left: false when the run is over. Known villagers that were sold out are
+     * looked at again (they may have restocked) and waited for when asked to; strangers are only walked to when nothing
+     * was sold yet and no known villager buys it at all.
+     */
+    private boolean sellMore(Minecraft mc, LocalPlayer p, String item) {
+        if (coolingDown(p)) return true;
+        if (refreshSoldOut(mc, p, item)) return true;
+        int wait = opts.waitMinutes(settings, false);
+        if (wait > 0 && soldOutBuyer(mc, p, item)) {
+            startWaiting(p, false, wait, "Sold out");
+            return true;
+        }
+        return soldSoFar(p) == 0 && !knownBuys(mc, p, item) && scanMore(mc);
+    }
+
     /** #trade sell emerald: whatever on hand the villagers around buy, until done or out. */
     private void sellAnyPlan(Minecraft mc, LocalPlayer p) {
         int made = Inventories.plainCounts(p).getOrDefault(TradePlanner.EMERALD, 0) - sellHad;
@@ -384,10 +494,10 @@ public final class TradeProcess implements Process {
             return;
         }
         BlockPos f = p.blockPosition();
-        TradePlanner.Plan plan = TradePlanner.sellAny(Inventories.plainCounts(p), traders(mc, p), f.getX(), f.getY(), f.getZ(),
+        TradePlanner.Plan plan = TradePlanner.sellAny(opts.spendable(settings, Inventories.plainCounts(p)), traders(mc, p), f.getX(), f.getY(), f.getZ(),
             this::maySell, sellKeep > 0 ? sellKeep - made : 0);
         if (!plan.ok()) {
-            if (refreshSoldOut(mc, p, null) || scanMore(mc)) return;
+            if (sellMore(mc, p, null)) return;
             if (made > 0) end(Outcome.DONE, Chat.ok("Made {} emeralds (nothing more on hand that they buy)", made));
             else end(Outcome.FAILED, Chat.err("Can't sell for emeralds: {}", plan.problem()));
             return;
@@ -421,6 +531,7 @@ public final class TradeProcess implements Process {
         List<Offer> ok = new ArrayList<>();
         for (Offer o : t.offers()) {
             boolean buying = o.costA().item().equals(TradePlanner.EMERALD);
+            if (!opts.rateOk(settings, o)) continue;
             if (buying && o.costA().count() > max) continue;
             if (!buying && o.result().item().equals(TradePlanner.EMERALD) && !maySell(o.costA().item())) continue;
             ok.add(o);
@@ -430,15 +541,24 @@ public final class TradeProcess implements Process {
 
     /** Waiting for a restock: every minute, look at the villagers that sell what's wanted again, then plan. */
     private void restock(Minecraft mc, LocalPlayer p) {
-        if (p.tickCount - restockSince > settings.tradeRestockMinutes.get() * 60 * 20) {
-            end(Outcome.FAILED, Chat.err("Still sold out after {} min", settings.tradeRestockMinutes.get()));
+        if (p.tickCount - restockSince > waitMinutes * 60 * 20) {
+            int sold = soldSoFar(p);
+            if (sellItem != null && sold > 0) {
+                end(Outcome.DONE, Chat.ok("Sold {} {} (still sold out after {} min)", sold, sellingAny() ? "for emeralds" : name(sellItem), waitMinutes));
+            } else if (opts.waitDay(settings) || opts.waitRestock(settings)) { // waiting was asked for: not a failure
+                end(Outcome.DONE, Chat.warn("Waited {} min and nothing restocked", waitMinutes));
+            } else {
+                end(Outcome.FAILED, Chat.err("Still sold out after {} min", waitMinutes));
+            }
             return;
         }
         if (p.tickCount - phaseStart < RESTOCK_LOOK) return;
-        BlockPos f = p.blockPosition();
-        for (Trader t : memory.apply(mc).near(dimension.apply(mc), f.getX(), f.getY(), f.getZ())) {
-            if (skip.contains(t.id()) || toScan.contains(t.id())) continue;
-            if (t.offers().stream().anyMatch(o -> wants.stream().anyMatch(o::gives))) toScan.add(t.id());
+        for (Trader t : candidates(mc, p, false)) {
+            if (toScan.contains(t.id())) continue;
+            boolean sells = wants.stream().anyMatch(w -> t.offers().stream().anyMatch(o -> o.gives(w)));
+            boolean buys = sellItem != null && t.offers().stream().anyMatch(o -> o.result().item().equals(TradePlanner.EMERALD)
+                && (sellingAny() ? maySell(o.costA().item()) : o.costA().item().equals(sellItem)));
+            if (sells || buys) toScan.add(t.id());
         }
         next(mc);
     }
@@ -454,7 +574,7 @@ public final class TradeProcess implements Process {
         TradePlanner.Plan plan = TradePlanner.sell(sellItem, have - sellKeep, Inventories.plainCounts(p), traders(mc, p),
             f.getX(), f.getY(), f.getZ());
         if (!plan.ok()) {
-            if (refreshSoldOut(mc, p, sellItem) || scanMore(mc)) return;
+            if (sellMore(mc, p, sellItem)) return;
             if (sold > 0) end(Outcome.DONE, Chat.ok("Sold {} {} ({})", sold, name(sellItem), plan.problem()));
             else end(Outcome.FAILED, Chat.err("Can't sell {}: {}", name(sellItem), plan.problem()));
             return;
@@ -465,10 +585,23 @@ public final class TradeProcess implements Process {
 
     /** The known villagers in range (not skipped this run). */
     private List<Trader> traders(Minecraft mc, LocalPlayer p) {
+        return candidates(mc, p, false);
+    }
+
+    /** Is this villager out for now: given up on, or on cooldown after not being reachable? */
+    private boolean blocked(String id) {
+        if (skip.contains(id)) return true;
+        Integer until = coolUntil.get(id);
+        return until != null && now < until;
+    }
+
+    /** Known villagers in range (and matching --with); {@code withBlocked} also the ones being skipped for now. */
+    private List<Trader> candidates(Minecraft mc, LocalPlayer p, boolean withBlocked) {
         BlockPos f = p.blockPosition();
-        int range = settings.tradeRange.get();
+        int range = opts.range(settings);
         return memory.apply(mc).near(dimension.apply(mc), f.getX(), f.getY(), f.getZ()).stream()
-            .filter(t -> t.distSq(f.getX(), f.getY(), f.getZ()) <= (double) range * range && !skip.contains(t.id())).toList();
+            .filter(t -> t.distSq(f.getX(), f.getY(), f.getZ()) <= (double) range * range && opts.allows(t.profession(), t.id())
+                && (withBlocked || !blocked(t.id()))).toList();
     }
 
     /** A plan for these wants from the trades known around (also what #getitem asks to compare with making them). */
@@ -478,10 +611,8 @@ public final class TradeProcess implements Process {
 
     private TradePlanner.Plan plan(Minecraft mc, LocalPlayer p, List<Want> wants, Recipes recipes, Drops drops, boolean partial) {
         BlockPos f = p.blockPosition();
-        int range = settings.tradeRange.get();
-        List<Trader> traders = memory.apply(mc).near(dimension.apply(mc), f.getX(), f.getY(), f.getZ()).stream()
-            .filter(t -> t.distSq(f.getX(), f.getY(), f.getZ()) <= (double) range * range && !skip.contains(t.id())).map(this::allowed).toList();
-        return TradePlanner.plan(wants, w -> TradeWatcher.count(p, w), Inventories.plainCounts(p), traders,
+        List<Trader> traders = candidates(mc, p, false).stream().map(this::allowed).toList();
+        return TradePlanner.plan(wants, w -> TradeWatcher.count(p, w), opts.spendable(settings, Inventories.plainCounts(p)), traders,
             f.getX(), f.getY(), f.getZ(), settings.tradeForEmeralds.get(), gatherCost(mc, p, recipes, drops), partial);
     }
 
@@ -512,12 +643,13 @@ public final class TradeProcess implements Process {
     private void queueUnknown(Minecraft mc, java.util.function.Predicate<AbstractVillager> which, int max) {
         LocalPlayer p = mc.player;
         TradeMemory mem = memory.apply(mc);
-        int range = settings.tradeRange.get();
+        int range = opts.range(settings);
         List<AbstractVillager> found = new ArrayList<>();
         for (Entity e : mc.level.entitiesForRendering()) {
             if (!(e instanceof AbstractVillager v) || !TradeWatcher.trades(v) || !which.test(v)) continue;
             String id = v.getUUID().toString();
-            if (mem.get(id) != null || skip.contains(id) || toScan.contains(id)) continue;
+            if (!opts.allows(TradeWatcher.profession(v), id)) continue;
+            if (mem.get(id) != null || blocked(id) || toScan.contains(id)) continue;
             if (v.distanceToSqr(p) > (double) range * range) continue;
             found.add(v);
         }
@@ -574,8 +706,13 @@ public final class TradeProcess implements Process {
                 return;
             }
         }
+        if (opts.stay(settings)) {
+            skip.add(target); // not walking: only villagers already in reach
+            giveUpOn(mc, "it's out of reach and #trade isn't set to walk (tradeStayPut / --stay)");
+            return;
+        }
         if (p.tickCount - phaseStart > GO_TICKS || lastSeen == null) {
-            giveUpOn(mc, "couldn't get to it");
+            giveUpOn(mc, "couldn't get to it in time");
             return;
         }
         // (again) when the villager wandered off from where the trip goes
@@ -595,11 +732,17 @@ public final class TradeProcess implements Process {
             giveUpOn(mc, "no way to it");
             return;
         }
+        if (how == PathingSession.State.ARRIVED && v != null && ++arrivedMisses > 3) {
+            giveUpOn(mc, "I'm next to it but can't reach or see it (something in the way?)");
+            return;
+        }
         goal = lastSeen;
-        trip.go(new GoalNear(goal.getX(), goal.getY(), goal.getZ(), 2), p, true);
+        // standing next to it but not in reach or in sight: closer the next time
+        trip.go(new GoalNear(goal.getX(), goal.getY(), goal.getZ(), arrivedMisses > 0 ? 1 : 2), p, true);
     }
 
     private BlockPos goal;
+    private int arrivedMisses;
 
     private void open(Minecraft mc, LocalPlayer p) {
         if (p.containerMenu instanceof MerchantMenu) {
@@ -641,6 +784,7 @@ public final class TradeProcess implements Process {
         reselects = 0;
         lastSelect = -100;
         gotBefore = -1;
+        stepDone = 0;
         enter(Phase.TRADE, p);
     }
 
@@ -673,8 +817,14 @@ public final class TradeProcess implements Process {
         int got = TradeWatcher.count(p, made) + (TradeWatcher.matches(menu.getCarried(), made) ? menu.getCarried().getCount() : 0);
         if (gotBefore < 0) gotBefore = got;
         int done = (got - gotBefore) / Math.max(1, o.result().count());
+        if (done > stepDone) {
+            tradesDone += done - stepDone;
+            stepDone = done;
+        }
+        int max = opts.maxTrades(settings), target = step.times();
+        if (max > 0) target = Math.min(target, max - (tradesDone - done)); // the limit for the whole run
         if (clicks.busy()) return;
-        if (done >= step.times()) {
+        if (done >= target) {
             if (settings.tradeStayOpen.get()) enter(Phase.PLAN, p); // the next trade may be with this villager too
             else close(mc, p);
             return;
@@ -775,12 +925,18 @@ public final class TradeProcess implements Process {
     private void giveUpOn(Minecraft mc, String why) {
         trip.cancel();
         input.release();
-        skip.add(target);
+        int n = fails.merge(target, 1, Integer::sum);
+        boolean forever = skip.contains(target) || scanOnly || n >= RETRIES;
+        if (forever) skip.add(target);
+        else coolUntil.put(target, now + COOLDOWN);
         if (step == null) {
+            if (!scanOnly) chat.accept(Chat.warn("Can't look at that villager: {}", why));
             next(mc); // only looking: on to the next one
             return;
         }
-        chat.accept(Chat.warn("Skipping that {}: {}", step.trader().profession(), why));
+        String who = step.trader().profession();
+        chat.accept(forever ? Chat.warn("Skipping that {} for this run: {} (tried {} time{})", who, why, n, n == 1 ? "" : "s")
+            : Chat.warn("Can't use that {} right now: {}; trying again in {} s ({}/{})", who, why, COOLDOWN / 20, n, RETRIES));
         enter(Phase.PLAN, mc.player);
     }
 
@@ -796,6 +952,7 @@ public final class TradeProcess implements Process {
         phaseStart = p.tickCount;
         clicked = false;
         goal = null;
+        arrivedMisses = 0;
     }
 
     private void end(Outcome how, String msg) {
@@ -805,6 +962,7 @@ public final class TradeProcess implements Process {
         outcome = how;
         trip.cancel();
         input.release();
+        opts = TradeOptions.NONE; // a flag lasts one run
         if (msg != null) chat.accept(msg);
     }
 

@@ -271,6 +271,25 @@ public final class CommandHandler {
             reply(Chat.err("Trading isn't available here"));
         }
 
+        /** {@link #trade(List)} with this run's flags over the trade settings. */
+        default void trade(List<dev.lazuli.core.trade.Want> wants, dev.lazuli.core.trade.TradeOptions options) {
+            trade(wants);
+        }
+
+        default void tradeSell(String item, int count, dev.lazuli.core.trade.TradeOptions options) {
+            tradeSell(item, count);
+        }
+
+        default void tradeScan(dev.lazuli.core.trade.TradeOptions options) {
+            tradeScan();
+        }
+
+        /**
+         * The next #craft / #smelt / #brew / #enchant / #repair / #combine / #smith uses the work block at {x, y, z}
+         * instead of the nearest (null: the nearest). Called right before that command's own method.
+         */
+        default void stationAt(int[] at) {}
+
         /** Every villager's trades seen so far; null when not kept. */
         default dev.lazuli.core.trade.TradeMemory trades() {
             return null;
@@ -345,7 +364,30 @@ public final class CommandHandler {
         return true;
     }
 
+    /** The commands that work at a crafting table, furnace, brewing stand... and so take {@code at x y z}. */
+    static final java.util.Set<String> STATION_COMMANDS = java.util.Set.of("craft", "smelt", "brew", "enchant", "repair", "combine", "smith");
+
+    /** Arguments with a trailing {@code at x y z} taken off: the plain arguments and the position (null: none given). */
+    record Located(String[] args, int[] at) {}
+
+    /** {@code at} must be last, followed by three coordinates (numbers, or ~ / ~n relative to the player). */
+    Located locate(String[] args) {
+        for (int i = 0; i < args.length; i++) {
+            if (!args[i].equalsIgnoreCase("at")) continue;
+            if (args.length - i != 4 || !coordinate(args[i + 1]) || !coordinate(args[i + 2]) || !coordinate(args[i + 3])) {
+                throw new IllegalArgumentException("Usage: ... at <x> <y> <z>  (numbers, or ~ for where you are)");
+            }
+            return new Located(Arrays.copyOf(args, i), coords(args, i + 1, 3, ctx.playerFeet()));
+        }
+        return new Located(args, null);
+    }
+
     private void run(String cmd, String[] args, String prefix) {
+        if (STATION_COMMANDS.contains(cmd)) {
+            Located l = locate(args);
+            args = l.args();
+            ctx.stationAt(l.at());
+        }
         switch (cmd) {
             case "goal" -> setGoal(args);
             case "path" -> startPath();
@@ -370,8 +412,14 @@ public final class CommandHandler {
                 // #settings trade: only the ones with "trade" in the name
                 String filter = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : "";
                 ctx.reply(Chat.info("Settings{} ({}set <name> <value> to change):", filter.isEmpty() ? "" : " matching " + filter, prefix));
+                List<Setting<?>> shown = new ArrayList<>();
                 for (Setting<?> s : ctx.settings().all()) {
-                    if (s.name().toLowerCase(Locale.ROOT).contains(filter)) ctx.reply(Chat.pair(s.name(), s.get()));
+                    if (s.name().toLowerCase(Locale.ROOT).contains(filter)) shown.add(s);
+                }
+                // a short list (a filter) comes with what each one does
+                for (Setting<?> s : shown) {
+                    ctx.reply(Chat.pair(s.name(), s.get()));
+                    if (shown.size() <= 8 && !s.description().isEmpty()) ctx.reply(Chat.info("  {}", s.description()));
                 }
             }
             case "record" -> record(args);
@@ -550,11 +598,14 @@ public final class CommandHandler {
         ctx.reply(Chat.usage(p + "trade <enchant [level]|item [count]>...", "trade with villagers, e.g. " + p + "trade sharpness 5 (sells string, sticks... for emeralds first if need be)"));
         ctx.reply(Chat.usage(p + "trade list | scan | forget", "the trades seen so far | go look at the villagers around | forget them"));
         ctx.reply(Chat.usage(p + "trade sell <item> [count|all] | find <enchant [level]|item>", "sell for emeralds | who sells it, cheapest first"));
+        ctx.reply(Chat.usage(p + "trade ... --with <villager> --only-known --scan --max <n> --keep <item n> --min-rate <x>", "for one run: only that profession | never walk to unseen villagers | may | stop after n trades | never pay with | skip poor rates"));
+        ctx.reply(Chat.usage(p + "trade ... --wait-restock --wait-day --stay (--no-walk) --range <n>", "wait for restocks (a whole day) | don't walk | how far to look (they override the trade settings)"));
+        ctx.reply(Chat.usage(p + "craft|smelt|brew|enchant|repair|combine|smith ... at <x y z>", "use that work block (numbers or ~) instead of the nearest"));
         ctx.reply(Chat.usage(p + "sleep", "sleep in the nearest bed (or one from the hotbar) until morning"));
         ctx.reply(Chat.usage(p + "stop (alias cancel)", "stop pathing and whatever it's doing"));
         ctx.reply(Chat.usage(p + "kill", "hard reset for when " + p + "stop isn't enough: every job, the planner thread, held keys and the view; then any command works again"));
         ctx.reply(Chat.usage(p + "set <name> [value]", "show or change a setting"));
-        ctx.reply(Chat.usage(p + "settings", "list every setting"));
+        ctx.reply(Chat.usage(p + "settings [filter]", "list the settings (a filter, like trade, also says what each does)"));
         ctx.reply(Chat.usage(p + "config", "open the settings screen"));
         ctx.reply(Chat.usage(p + "record start <name> | stop", "record a movement trace"));
     }
@@ -1009,14 +1060,17 @@ public final class CommandHandler {
     }
 
     /** trade <enchant [level]|item [count]>... | list | scan | forget */
-    private void trade(String[] args) {
-        String usage = "Usage: trade <enchant [level]|item [count]>... | list | scan | forget | sell <item> [count|all] | find <what>";
+    private void trade(String[] allArgs) {
+        String usage = "Usage: trade <enchant [level]|item [count]>... | list | scan | forget | sell <item> [count|all] | find <what> [--flags, see help]";
+        dev.lazuli.core.trade.TradeOptions.Parsed parsed = dev.lazuli.core.trade.TradeOptions.parse(allArgs);
+        dev.lazuli.core.trade.TradeOptions opts = parsed.options();
+        String[] args = parsed.rest().toArray(new String[0]);
         if (args.length == 0) {
             ctx.reply(Chat.err(usage));
             return;
         }
         switch (args[0].toLowerCase(Locale.ROOT)) {
-            case "scan" -> ctx.tradeScan();
+            case "scan" -> ctx.tradeScan(opts);
             case "sell" -> {
                 if (args.length < 2 || args.length > 3) {
                     ctx.reply(Chat.err("Usage: trade sell <item> [count|all]  (sell emerald [n|all]: sell what you have for emeralds)"));
@@ -1028,7 +1082,7 @@ public final class CommandHandler {
                 if (args.length == 3 && !args[2].equalsIgnoreCase("all")) {
                     count = count(args[2], 1);
                 }
-                ctx.tradeSell(id, count);
+                ctx.tradeSell(id, count, opts);
             }
             case "find", "search" -> {
                 var mem = ctx.trades();
@@ -1083,7 +1137,7 @@ public final class CommandHandler {
             default -> {
                 var wants = dev.lazuli.core.trade.Want.parse(args, ctx::isEnchantment);
                 if (wants == null) ctx.reply(Chat.err(usage));
-                else ctx.trade(wants);
+                else ctx.trade(wants, opts);
             }
         }
     }

@@ -42,7 +42,7 @@ public final class IceBoatProcess implements Process {
 
     private final Settings settings;
     private final BlockView world;
-    private final Path dir;
+    private final java.util.function.Supplier<Path> dir;
     private final Consumer<String> chat;
     private final InputDriver input = new InputDriver();
     private IceRacer racer;
@@ -62,7 +62,7 @@ public final class IceBoatProcess implements Process {
     private final List<double[]> recording = new ArrayList<>();
     private double travelled;
 
-    public IceBoatProcess(Settings settings, BlockView world, Path dir, Consumer<String> chat) {
+    public IceBoatProcess(Settings settings, BlockView world, java.util.function.Supplier<Path> dir, Consumer<String> chat) {
         this.settings = settings;
         this.world = world;
         this.dir = dir;
@@ -309,7 +309,7 @@ public final class IceBoatProcess implements Process {
     }
 
     private Path file(String name) {
-        return dir.resolve(name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "_") + ".txt");
+        return dir.get().resolve(name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "_") + ".txt");
     }
 
     private static AbstractBoat boat(LocalPlayer p) {

@@ -7,6 +7,7 @@ public final class Setting<T> {
     private final T defaultValue;
     private final Function<String, T> parser;
     private volatile T value;
+    private volatile String description = "";
 
     Setting(String name, T defaultValue, Function<String, T> parser) {
         this.name = name;
@@ -17,6 +18,16 @@ public final class Setting<T> {
 
     public String name() {
         return name;
+    }
+
+    /** A short explanation (shown in the config screen and by {@code #settings}); empty when none was given. */
+    public String description() {
+        return description;
+    }
+
+    public Setting<T> describe(String text) {
+        this.description = text == null ? "" : text;
+        return this;
     }
 
     public T get() {

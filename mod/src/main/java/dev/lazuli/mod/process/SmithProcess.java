@@ -69,8 +69,17 @@ public final class SmithProcess implements Process {
         return outcome;
     }
 
+    /** The smithing table the next start uses (null: the nearest, or one it places). */
+    private net.minecraft.core.BlockPos nextAt, fixedAt;
+
+    public void station(net.minecraft.core.BlockPos at) {
+        nextAt = at;
+    }
+
     /** @param item what comes out (netherite_pickaxe); the template, base item and addition must be in the inventory */
     public void start(Minecraft mc, ItemCount item) {
+        fixedAt = nextAt;
+        nextAt = null;
         stop(false);
         if (fetch != null) fetch.reset();
         begin(mc, item);
@@ -135,8 +144,9 @@ public final class SmithProcess implements Process {
         before = count(p, id);
         phase = Phase.STATION;
         chat.accept(Chat.info("Upgrading to {} {}", n, short_(id)));
-        station.start(p, Blocks.SMITHING_TABLE, "minecraft:smithing_table", "smithing table", m -> m instanceof SmithingMenu, null,
-            settings.craftPlaceTable.get() && settings.allowPlace.get());
+        if (fixedAt != null) station.exact();
+        station.start(p, Blocks.SMITHING_TABLE, "minecraft:smithing_table", "smithing table", m -> m instanceof SmithingMenu, fixedAt,
+            settings.craftPlaceTable.get() && settings.allowPlace.get() && fixedAt == null);
     }
 
     @Override

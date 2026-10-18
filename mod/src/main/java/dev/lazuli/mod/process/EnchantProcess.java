@@ -91,6 +91,13 @@ public final class EnchantProcess implements Process {
         return what + (phase == Phase.STATION ? "  (going to the " + stationName() + ")" : phase == Phase.PICKUP ? "  (picking it up)" : "");
     }
 
+    /** The table or anvil the next enchant / repair / combine uses (null: the nearest, or one it places). */
+    private BlockPos nextAt, fixedAt;
+
+    public void station(BlockPos at) {
+        nextAt = at;
+    }
+
     /** Enchants {@code count} of {@code item} (books too); {@code option} 1-3, or 0 for the best it can pay for. */
     public void enchant(Minecraft mc, String item, int count, int option) {
         begin(Mode.ENCHANT, item, null, Math.max(1, count), option - 1);
@@ -181,6 +188,10 @@ public final class EnchantProcess implements Process {
 
     private void begin(Mode mode, String item, String with, int count, int option) {
         int f = phase == Phase.FETCH ? fetches : 0; // a retry after taking from a chest keeps counting
+        if (phase != Phase.FETCH) {
+            fixedAt = nextAt;
+            nextAt = null;
+        }
         stop(false);
         fetches = f;
         outcome = Outcome.NONE;
@@ -201,9 +212,10 @@ public final class EnchantProcess implements Process {
         phase = Phase.STATION;
         boolean table = mode == Mode.ENCHANT;
         Predicate<AbstractContainerMenu> menu = table ? m -> m instanceof EnchantmentMenu : m -> m instanceof AnvilMenu;
+        if (fixedAt != null) station.exact();
         station.start(p, table ? s -> s.is(Blocks.ENCHANTING_TABLE) : s -> s.is(BlockTags.ANVIL),
-            table ? "minecraft:enchanting_table" : "minecraft:anvil", stationName(), menu, null,
-            settings.enchantPlace.get() && settings.allowPlace.get());
+            table ? "minecraft:enchanting_table" : "minecraft:anvil", stationName(), menu, fixedAt,
+            settings.enchantPlace.get() && settings.allowPlace.get() && fixedAt == null);
         chat.accept(Chat.ok(switch (mode) {
             case ENCHANT -> "Enchanting " + (count > 1 ? count + " " : "") + name(item);
             case REPAIR -> "Repairing " + name(item);
