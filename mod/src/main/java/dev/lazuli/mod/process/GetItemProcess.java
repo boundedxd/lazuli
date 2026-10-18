@@ -205,6 +205,7 @@ public final class GetItemProcess implements Process {
                 case SMITH -> smiths.stop(false);
                 case BUCKET, CAST -> buckets.stop(false);
                 case KILL -> hunt.stop(false);
+                case TAKE -> { }
             }
         }
         if (take != null) take.stop();
@@ -330,6 +331,11 @@ public final class GetItemProcess implements Process {
             case SMITH -> smiths.start(mc, new ItemCount(a.item(), a.count()));
             case BUCKET, CAST -> buckets.start(mc, a.item(), a.count());
             case KILL -> hunt.start(mc, a.item(), count(p, a.item()) + a.count(), a.blocks());
+            case TAKE -> {
+                // the chest couldn't be used after all (withdraw above would have started): plan again without it
+                noChest.add(a.item());
+                current = null;
+            }
         }
     }
 
@@ -408,7 +414,7 @@ public final class GetItemProcess implements Process {
     private final java.util.Set<String> noChest = new java.util.HashSet<>();
 
     private boolean withdraw(Minecraft mc, LocalPlayer p, String item, int n, boolean finished) {
-        if (take == null || !(finished ? settings.chestFinal.get() : settings.chestIngredients.get())) return false;
+        if (take == null || !ChestTake.allowed(settings, finished ? ChestTake.Use.FINAL : ChestTake.Use.INGREDIENT)) return false;
         String id = Inventories.id(item);
         if (noChest.contains(id)) return false;
         withdrawItem = id;
@@ -449,6 +455,22 @@ public final class GetItemProcess implements Process {
                 if (s.getMaxDamage() - s.getDamageValue() <= floor)
                     have.computeIfPresent(BuiltInRegistries.ITEM.getKey(s.getItem()).toString(), (k, v) -> Math.max(0, v - 1));
             }
+        }
+        if (chests != null) {
+            // what remembered chests hold, for what's asked for (chestFinal) and for what goes into it (chestIngredients)
+            Map<String, Integer> stored = new HashMap<>();
+            var mem = chests.apply(mc);
+            String dim = dimension.apply(mc);
+            ChestTake.stored(settings, mem, dim, p.blockPosition(), ChestTake.Use.INGREDIENT).forEach((k, n) -> {
+                boolean asked = wants.stream().anyMatch(w -> w.item().equals(k));
+                if (!asked || forIngredients) stored.put(k, n);
+            });
+            if (!forIngredients)
+                ChestTake.stored(settings, mem, dim, p.blockPosition(), ChestTake.Use.FINAL).forEach((k, n) -> {
+                    if (wants.stream().anyMatch(w -> w.item().equals(k))) stored.put(k, n);
+                });
+            stored.keySet().removeAll(noChest);
+            planner.stored(stored);
         }
         planner.smithingTable(Station.nearest(mc, p, Blocks.SMITHING_TABLE, range) != null);
         return planner.plan(wants, have, pickTier(p, wants, settings),
@@ -509,6 +531,7 @@ public final class GetItemProcess implements Process {
                 case FAILED -> Status.FAILED;
                 case CANCELLED -> Status.CANCELLED;
             };
+            case TAKE -> Status.FAILED;
             case BUCKET, CAST -> switch (buckets.outcome()) {
                 case NONE -> Status.RUNNING;
                 case DONE -> Status.OK;
@@ -644,6 +667,7 @@ public final class GetItemProcess implements Process {
             case BUCKET -> "fill";
             case CAST -> "cast";
             case KILL -> "hunt for";
+            case TAKE -> "take";
         };
     }
 

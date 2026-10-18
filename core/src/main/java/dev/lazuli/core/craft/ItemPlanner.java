@@ -17,7 +17,7 @@ import java.util.function.ToIntFunction;
  * first step and plans again from the real inventory, so the plan only has to be right, not exact.
  */
 public final class ItemPlanner {
-    public enum Kind { MINE, CRAFT, SMELT, KILL, SMITH, BUCKET, CAST }
+    public enum Kind { MINE, CRAFT, SMELT, KILL, SMITH, BUCKET, CAST, TAKE }
 
     /**
      * Mine {@code count} of {@code blocks} for {@code item}; craft or smelt {@code count} more of {@code item}; kill the
@@ -89,6 +89,7 @@ public final class ItemPlanner {
     private boolean batching, smithNear;
     private ToIntFunction<String> near;
     private MobDrops mobs;
+    private Map<String, Integer> stored = Map.of();
 
     /**
      * @param toolTier for a block id, the pickaxe tier it needs to drop anything (0: none)
@@ -126,6 +127,15 @@ public final class ItemPlanner {
     /** Whether a smithing table is near (else it makes and places one for an upgrade). */
     public ItemPlanner smithingTable(boolean near) {
         smithNear = near;
+        return this;
+    }
+
+    /**
+     * What remembered chests (and shulker boxes) hold: taken from there (a {@link Kind#TAKE} step) before anything is
+     * mined, crafted or smelted for it.
+     */
+    public ItemPlanner stored(Map<String, Integer> stored) {
+        this.stored = stored == null ? Map.of() : stored;
         return this;
     }
 
@@ -193,7 +203,7 @@ public final class ItemPlanner {
         Map<String, Integer> inv = new HashMap<>(have);
         for (Action a : actions) {
             switch (a.kind()) {
-                case MINE, KILL -> inv.merge(a.item(), a.count(), Integer::sum);
+                case MINE, KILL, TAKE -> inv.merge(a.item(), a.count(), Integer::sum);
                 case BUCKET -> {
                     if (inv.getOrDefault(BUCKET, 0) < a.count()) return false;
                     inv.merge(BUCKET, -a.count(), Integer::sum);
@@ -266,6 +276,8 @@ public final class ItemPlanner {
         boolean tableNear, furnaceNear, smithNear = ItemPlanner.this.smithNear;
         /** While trying out alternatives (see getAny): plain gets inside, no trying out again. */
         int tryingOut;
+        /** What's left in the chests to take. */
+        final Map<String, Integer> stored = new HashMap<>(ItemPlanner.this.stored);
 
         Run(Map<String, Integer> have, int pickTier, boolean tableNear, boolean furnaceNear) {
             this.have = new HashMap<>(have);
@@ -288,6 +300,12 @@ public final class ItemPlanner {
             keep.merge(item, n, Integer::sum);
             int need = n - free(item);
             if (need <= 0) return;
+            int inChests = Math.min(need, stored.getOrDefault(item, 0));
+            if (inChests > 0) {
+                take(item, inChests);
+                need -= inChests;
+                if (need <= 0) return;
+            }
             if (depth > DEPTH) throw new Stuck("Too many steps to get " + name(item));
             if (!making.add(item)) throw new Stuck("Going round in circles on " + name(item));
             try {
@@ -367,6 +385,20 @@ public final class ItemPlanner {
                 }
             }
             actions.add(new Action(Kind.MINE, item, n, usable));
+        }
+
+        /** {@code n} of {@code item} out of the chests (one trip per item). */
+        void take(String item, int n) {
+            stored.merge(item, -n, Integer::sum);
+            have.merge(item, n, Integer::sum);
+            for (int i = 0; i < actions.size(); i++) {
+                Action a = actions.get(i);
+                if (a.kind() == Kind.TAKE && a.item().equals(item)) {
+                    actions.set(i, new Action(Kind.TAKE, item, a.count() + n, List.of()));
+                    return;
+                }
+            }
+            actions.add(new Action(Kind.TAKE, item, n, List.of()));
         }
 
         void kill(String item, int n) {
@@ -634,11 +666,12 @@ public final class ItemPlanner {
 
         /** Everything a plan changes, to try something and go back. */
         record Snap(Map<String, Integer> have, Map<String, Integer> reserved, List<Action> actions, Map<String, Double> costs,
-                    int pickTier, boolean tableNear, boolean furnaceNear, boolean smithNear, Map<String, Integer> keep) {}
+                    int pickTier, boolean tableNear, boolean furnaceNear, boolean smithNear, Map<String, Integer> keep,
+                    Map<String, Integer> stored) {}
 
         Snap save() {
             return new Snap(new HashMap<>(have), new HashMap<>(reserved), new ArrayList<>(actions), new HashMap<>(costs),
-                pickTier, tableNear, furnaceNear, smithNear, new HashMap<>(keep));
+                pickTier, tableNear, furnaceNear, smithNear, new HashMap<>(keep), new HashMap<>(stored));
         }
 
         void restore(Snap s) {
@@ -656,6 +689,8 @@ public final class ItemPlanner {
             smithNear = s.smithNear();
             keep.clear();
             keep.putAll(s.keep());
+            stored.clear();
+            stored.putAll(s.stored());
         }
 
         /** A crafting table or furnace to place, made if it has none. */
@@ -703,6 +738,7 @@ public final class ItemPlanner {
             double c = Math.min(Math.min(mineCost(item, depth), killCost(item)), Math.min(smeltCost(item, depth), craftCost(item, depth)));
             c = Math.min(c, Math.min(bucketCost(item, depth), castCost(item, depth)));
             costing.remove(item);
+            if (stored.getOrDefault(item, 0) > 0) c = Math.min(c, 2); // lying in a chest: a trip there
             // some in the inventory: cheaper (use what it has), but not free, or a few nuggets look like a way to make
             // ingots and it ends up digging for an iron block to make the rest
             if (startHave.getOrDefault(item, 0) > 0) c = c >= INF ? 1 : c / 4;
