@@ -52,6 +52,18 @@ public final class Settings {
     public final Setting<Boolean> minePickup = bool("minePickup", true);
     /** #mine with a full inventory throws away junk blocks (the throwaway list) to make room for what it is after. */
     public final Setting<Boolean> mineDropJunk = bool("mineDropJunk", true);
+    /** #hunt, #farm, #fish, #tunnel and #sort with a full inventory throw a stack of junk out to make room. */
+    public final Setting<Boolean> makeRoomDropJunk = bool("makeRoomDropJunk", true);
+    /** ...else put the non-essentials (not tools, food, armor or what it's collecting) into a remembered chest. */
+    public final Setting<Boolean> makeRoomDeposit = bool("makeRoomDeposit", true);
+    /** #tunnel with water or lava next to the dig seals it with a block from the inventory (off: stops). */
+    public final Setting<Boolean> tunnelSealFluid = bool("tunnelSealFluid", true);
+    /** Seconds before a place #fish, #explore or #build gave up on is tried again (0: never). */
+    public final Setting<Integer> retrySkippedSeconds = integer("retrySkippedSeconds", 300, 0, 86400);
+    /** A non-endless routine step running longer than this many minutes is stopped as failed (0: no limit). */
+    public final Setting<Integer> routineStepTimeoutMinutes = integer("routineStepTimeoutMinutes", 0, 0, 1440);
+    /** #bucket scoops its water back up when it ends and the water is still within reach. */
+    public final Setting<Boolean> bucketScoopBack = bool("bucketScoopBack", true);
     /** #follow stops this many blocks from whoever it follows. */
     public final Setting<Integer> followRadius = integer("followRadius", 3, 1, 32);
     /** A forever routine whose whole round did nothing waits this many seconds and tries again (0: stops). */

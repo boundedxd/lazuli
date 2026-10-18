@@ -7,6 +7,7 @@ import dev.lazuli.core.settings.Settings;
 import dev.lazuli.mod.control.Aim;
 import dev.lazuli.mod.control.InputDriver;
 import dev.lazuli.mod.control.RotationDriver;
+import dev.lazuli.mod.control.Tools;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -30,16 +31,25 @@ public final class TunnelProcess implements Process {
     private final Settings settings;
     private final Consumer<String> chat;
     private final Trip trip;
+    private MakeRoom room;
     private final InputDriver input = new InputDriver();
     private boolean active, driving;
     private BlockPos origin;
     private Direction dir;
-    private int height, width, depth, step, stuck;
+    private int height, width, depth, step, stuck, sealTicks;
+    /** Ticks one stretch of sealing off fluid may take before the tunnel gives up. */
+    private static final int SEAL_TICKS = 400;
 
     public TunnelProcess(PathingSession session, Settings settings, Consumer<String> chat) {
         this.settings = settings;
         this.chat = chat;
         this.trip = new Trip(session);
+        this.room = new MakeRoom(settings, null, chat);
+    }
+
+    /** Lets a full inventory be put away in a remembered chest, not just thrown out. */
+    public void useContainers(ContainerProcess containers) {
+        room = new MakeRoom(settings, containers, chat);
     }
 
     @Override
@@ -72,6 +82,8 @@ public final class TunnelProcess implements Process {
         origin = p.blockPosition();
         step = 0;
         stuck = 0;
+        sealTicks = 0;
+        room.reset();
         active = true;
         trip.clear();
         chat.accept(Chat.ok("Tunnelling {} ({}x{}{})", dir.getName(), height, width, depth > 0 ? ", " + depth + " long" : ""));
@@ -127,18 +139,45 @@ public final class TunnelProcess implements Process {
             return;
         }
         List<BlockPos> cells = slice(step + 1);
+        BlockPos fluid = null;
         for (BlockPos c : cells) {
-            if (fluidNear(mc, c)) {
+            fluid = fluidNear(mc, c);
+            if (fluid != null) break;
+        }
+        if (fluid != null) {
+            if (!settings.tunnelSealFluid.get()) {
                 finish(Chat.warn("Lava or water ahead; stopped after {} blocks", step));
                 return;
             }
+            if (!seal(mc, player, fluid) || ++sealTicks > SEAL_TICKS) {
+                finish(Chat.err("Lava or water ahead and nothing to seal it with (or can't reach it); stopped after {} blocks", step));
+            }
+            return;
         }
+        sealTicks = 0;
         for (BlockPos c : cells) {
             BlockState s = mc.level.getBlockState(c);
             if (s.isAir() || s.getCollisionShape(mc.level, c).isEmpty() && s.getFluidState().isEmpty()) continue;
             if (s.getDestroySpeed(mc.level, c) < 0) {
                 finish(Chat.err("Unbreakable block ahead; stopped after {} blocks", step));
                 return;
+            }
+            if (s.requiresCorrectToolForDrops() && !player.getAbilities().instabuild && !hasTool(player, s)) {
+                finish(Chat.err("No tool that gets anything from {}; stopped after {} blocks", s.getBlock().getName().getString(), step));
+                return;
+            }
+            if (MakeRoom.full(player)) {
+                switch (room.tick(mc, player, null)) {
+                    case WORKING -> {
+                        release();
+                        return;
+                    }
+                    case STUCK -> {
+                        finish(room.reason() + " (stopped after " + step + " blocks)");
+                        return;
+                    }
+                    default -> { }
+                }
             }
             Aim.Result r = Aim.breakTick(mc, player, c, input, settings);
             driving = true;
@@ -157,14 +196,38 @@ public final class TunnelProcess implements Process {
         trip.go(new GoalBlock(next.getX(), next.getY(), next.getZ()), player);
     }
 
-    /** Lava or water in or right next to a cell about to be opened. */
-    private static boolean fluidNear(Minecraft mc, BlockPos c) {
-        for (Direction d : Direction.values()) {
-            var f = mc.level.getFluidState(c.relative(d));
-            if (f.is(FluidTags.LAVA) || f.is(FluidTags.WATER)) return true;
-        }
+    private static boolean hasTool(LocalPlayer p, BlockState s) {
+        for (int i = 0; i < 36; i++) if (p.getInventory().getItem(i).isCorrectToolForDrops(s)) return true;
+        return false;
+    }
+
+    /** A lava or water block in or right next to a cell about to be opened (null: none). */
+    private static BlockPos fluidNear(Minecraft mc, BlockPos c) {
         var f = mc.level.getFluidState(c);
-        return f.is(FluidTags.LAVA) || f.is(FluidTags.WATER);
+        if (f.is(FluidTags.LAVA) || f.is(FluidTags.WATER)) return c;
+        for (Direction d : Direction.values()) {
+            BlockPos n = c.relative(d);
+            f = mc.level.getFluidState(n);
+            if (f.is(FluidTags.LAVA) || f.is(FluidTags.WATER)) return n;
+        }
+        return null;
+    }
+
+    /** One tick of filling the fluid block {@code f} with a block from the hotbar. False: can't (no blocks, none in reach). */
+    private boolean seal(Minecraft mc, LocalPlayer player, BlockPos f) {
+        int slot = Tools.throwaway(player, settings);
+        if (slot < 0) return false;
+        player.getInventory().setSelectedSlot(slot);
+        for (Direction d : Direction.values()) {
+            BlockPos n = f.relative(d);
+            Direction face = d.getOpposite();
+            if (!mc.level.getFluidState(n).isEmpty() || !mc.level.getBlockState(n).isFaceSturdy(mc.level, n, face)) continue;
+            if (Aim.at(mc, player, n, face) == null) continue;
+            driving = true;
+            Aim.useOn(mc, player, n, face, input, settings);
+            return true;
+        }
+        return false;
     }
 
     private void release() {

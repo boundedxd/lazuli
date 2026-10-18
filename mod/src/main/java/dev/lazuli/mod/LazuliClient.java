@@ -183,6 +183,9 @@ public final class LazuliClient implements ClientModInitializer {
 		containers.useMemory(this::chests, LazuliClient::dimension);
 		getItem.useChests(containers, this::chests, LazuliClient::dimension);
 		hunt = new dev.lazuli.mod.process.HuntProcess(session, settings, this::chat);
+		hunt.useContainers(containers);
+		farm.useContainers(containers);
+		tunnel.useContainers(containers);
 		getItem.useHunt(hunt);
 		smiths = new dev.lazuli.mod.process.SmithProcess(session, settings, clicks, this::chat);
 		getItem.useSmith(smiths);
@@ -213,6 +216,7 @@ public final class LazuliClient implements ClientModInitializer {
 		restock.skipWhen(() -> follow.active() && !settings.restockFollow.get());
 		breeds = new dev.lazuli.mod.process.BreedProcess(session, settings, this::chat);
 		fishing = new dev.lazuli.mod.process.FishProcess(session, settings, this::chat);
+		fishing.useContainers(containers);
 		portals = new dev.lazuli.mod.process.PortalProcess(session, settings, cache, this::portalMemory, LazuliClient::dimension, this::chat);
 		portals.useGetItem(getItem);
 		strongholds = new dev.lazuli.mod.process.StrongholdProcess(session, settings,

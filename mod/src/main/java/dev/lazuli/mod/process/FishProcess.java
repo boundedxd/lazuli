@@ -40,8 +40,10 @@ public final class FishProcess implements Process {
     private final Settings settings;
     private final Consumer<String> chat;
     private final Trip trip;
+    private MakeRoom room;
     private final InputDriver input = new InputDriver();
-    private final Set<BlockPos> badSpots = new HashSet<>();
+    /** Spots that kept failing, and the tick each was given up on (they're tried again after retrySkippedSeconds). */
+    private final java.util.Map<BlockPos, Integer> badSpots = new java.util.HashMap<>();
     private boolean active;
     private int endTick, castTick, reelAt, waitUntil, catches, misses;
     private BlockPos water, stand;
@@ -50,6 +52,12 @@ public final class FishProcess implements Process {
         this.settings = settings;
         this.chat = chat;
         this.trip = new Trip(session);
+        this.room = new MakeRoom(settings, null, chat);
+    }
+
+    /** Lets a full inventory be put away in a remembered chest, not just thrown out. */
+    public void useContainers(ContainerProcess containers) {
+        room = new MakeRoom(settings, containers, chat);
     }
 
     /** @param minutes how long (0: until stopped) */
@@ -66,6 +74,7 @@ public final class FishProcess implements Process {
         waitUntil = 0;
         water = stand = null;
         badSpots.clear();
+        room.reset();
         trip.clear();
         active = true;
         chat.accept(Chat.info("Fishing{}", minutes > 0 ? " for " + minutes + " min" : ""));
@@ -100,12 +109,27 @@ public final class FishProcess implements Process {
             end(Chat.err("No fishing rod left ({} caught)", catches));
             return;
         }
+        if (p.fishing == null && MakeRoom.full(p)) {
+            // nowhere for a catch to go: make room before casting
+            switch (room.tick(mc, p, id -> id.equals("minecraft:fishing_rod"))) {
+                case WORKING -> {
+                    trip.cancel();
+                    input.release();
+                    return;
+                }
+                case STUCK -> {
+                    end(room.reason() + " (" + catches + " caught)");
+                    return;
+                }
+                default -> { }
+            }
+        }
         if (trip.running()) return;
         if (stand == null || !p.blockPosition().equals(stand)) {
             if (stand != null && trip.ended() == PathingSession.State.ARRIVED && p.blockPosition().distSqr(stand) <= 2) {
                 stand = p.blockPosition(); // close enough
             } else {
-                if (stand != null && trip.ended() != null) badSpots.add(stand);
+                if (stand != null && trip.ended() != null) badSpots.put(stand, p.tickCount);
                 if (!findSpot(mc, p)) {
                     end(Chat.err("No open water to fish in around here"));
                     return;
@@ -114,8 +138,8 @@ public final class FishProcess implements Process {
                 return;
             }
         }
-        if (!Hands.hold(p, ClickDriver.get(), this::rod)) return;
         FishingHook hook = p.fishing;
+        if (!Hands.hold(p, ClickDriver.get(), this::rod)) return;
         if (hook == null) {
             reelAt = -1;
             if (p.tickCount < waitUntil) return;
@@ -145,11 +169,22 @@ public final class FishProcess implements Process {
             use(mc, p); // reel in and try again
             waitUntil = p.tickCount + 10;
             if (landed && ++misses >= MISSES_PER_SPOT) {
-                badSpots.add(stand);
+                badSpots.put(stand, p.tickCount);
                 stand = null;
                 misses = 0;
             }
         }
+    }
+
+    private boolean isBad(BlockPos s, LocalPlayer p) {
+        Integer at = badSpots.get(s);
+        if (at == null) return false;
+        int retry = settings.retrySkippedSeconds.get();
+        if (retry > 0 && p.tickCount - at > retry * 20) {
+            badSpots.remove(s);
+            return false;
+        }
+        return true;
     }
 
     private static void use(Minecraft mc, LocalPlayer p) {
@@ -180,7 +215,7 @@ public final class FishProcess implements Process {
                     if (d2 < 4 || d2 > 16) continue;
                     for (int dy = 0; dy <= 2; dy++) {
                         BlockPos s = w.offset(dx, dy + 1, dz);
-                        if (badSpots.contains(s) || !standable(level, s)) continue;
+                        if (isBad(s, p) || !standable(level, s)) continue;
                         double cost = s.distSqr(me);
                         if (cost >= best) continue;
                         Vec3 eye = Vec3.atBottomCenterOf(s).add(0, p.getEyeHeight(), 0);

@@ -34,6 +34,7 @@ public final class HuntProcess implements Process {
     private final Settings settings;
     private final Consumer<String> chat;
     private final Trip trip;
+    private MakeRoom room;
     private final InputDriver input = new InputDriver();
     private boolean active;
     private Outcome outcome = Outcome.NONE;
@@ -55,6 +56,23 @@ public final class HuntProcess implements Process {
         this.settings = settings;
         this.chat = chat;
         this.trip = new Trip(session);
+        this.room = new MakeRoom(settings, null, chat);
+    }
+
+    /** Lets a full inventory be put away in a remembered chest, not just thrown out. */
+    public void useContainers(ContainerProcess containers) {
+        room = new MakeRoom(settings, containers, chat);
+    }
+
+    private static final java.util.Set<String> PASSIVE = java.util.Set.of("minecraft:cow", "minecraft:pig", "minecraft:sheep",
+        "minecraft:chicken", "minecraft:rabbit", "minecraft:squid", "minecraft:glow_squid", "minecraft:cod", "minecraft:salmon");
+
+    private static boolean hasWeapon(LocalPlayer p) {
+        for (int i = 0; i < 36; i++) {
+            String id = BuiltInRegistries.ITEM.getKey(p.getInventory().getItem(i).getItem()).getPath();
+            if (id.endsWith("_sword") || id.endsWith("_axe")) return true;
+        }
+        return false;
     }
 
     /** Kills {@code mobs} (entity ids, best first) until the inventory holds {@code target} of {@code item}. */
@@ -72,8 +90,14 @@ public final class HuntProcess implements Process {
         prey = null;
         goal = null;
         outcome = Outcome.NONE;
-        active = true;
+        room.reset();
         trip.clear();
+        if (!mobs.isEmpty() && !mc.player.getAbilities().instabuild && !hasWeapon(mc.player) && !PASSIVE.containsAll(mobs)) {
+            outcome = Outcome.FAILED;
+            chat.accept(Chat.err("No sword or axe to hunt {} with", name(mobs.get(0))));
+            return;
+        }
+        active = true;
     }
 
     public Outcome outcome() {
@@ -109,6 +133,21 @@ public final class HuntProcess implements Process {
         if (p.tickCount - startTick > settings.huntMinutes.get() * 60 * 20) {
             end(Outcome.FAILED, Chat.err("Couldn't find enough {} to get {} in {} min", name(mobs.get(0)), name(item), settings.huntMinutes.get()));
             return;
+        }
+        // nowhere to put what it kills drops: make room (throw junk out, or put things away), else stop saying so
+        if (MakeRoom.full(p, item)) {
+            switch (room.tick(mc, p, id -> id.equals(item))) {
+                case WORKING -> {
+                    trip.cancel();
+                    input.release();
+                    return;
+                }
+                case STUCK -> {
+                    end(Outcome.FAILED, room.reason() + " (" + have(p) + " of " + target + " " + name(item) + ")");
+                    return;
+                }
+                default -> { }
+            }
         }
         // its drops first: walk over them
         ItemEntity drop = mc.level.getEntitiesOfClass(ItemEntity.class, p.getBoundingBox().inflate(LOOT_RANGE),

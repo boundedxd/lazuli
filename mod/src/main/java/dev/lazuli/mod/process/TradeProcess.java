@@ -183,6 +183,7 @@ public final class TradeProcess implements Process {
     private void begin(Minecraft mc, List<Want> wants, boolean scanOnly) {
         stop(false);
         outcome = Outcome.NONE;
+        roomThrows = 0;
         this.wants = List.copyOf(wants);
         this.scanOnly = scanOnly;
         scannedAll = looted = false;
@@ -657,7 +658,8 @@ public final class TradeProcess implements Process {
         if (!carried.isEmpty()) {
             int slot = room(menu, carried);
             if (slot < 0) {
-                close(mc, p); // the inventory's full
+                if (throwJunk(mc, p)) return; // the inventory's full: a stack of junk goes, then on
+                close(mc, p);
                 end(Outcome.FAILED, Chat.err("Inventory full"));
                 return;
             }
@@ -670,6 +672,8 @@ public final class TradeProcess implements Process {
             // one quick-move click sends the result into the inventory (no picking up and putting down); it stays
             // there when the inventory has no room for it
             if (++shifts > 4) {
+                shifts = 0;
+                if (throwJunk(mc, p)) return;
                 close(mc, p);
                 end(Outcome.FAILED, Chat.err("Inventory full"));
                 return;
@@ -723,6 +727,20 @@ public final class TradeProcess implements Process {
     }
 
     /** Closes the screen and plans again (only looking: on to the next villager). */
+    /** Junk stacks thrown out to make room in this run (makeRoomDropJunk). */
+    private int roomThrows;
+
+    /** Full inventory: closes the trade screen and throws a stack of junk out, then trading goes on. False: none to throw. */
+    private boolean throwJunk(Minecraft mc, LocalPlayer p) {
+        if (!settings.makeRoomDropJunk.get() || roomThrows >= 12) return false;
+        int junk = dev.lazuli.mod.control.Tools.junkSlot(p, settings);
+        if (junk < 0) return false;
+        roomThrows++;
+        close(mc, p);
+        clicks.add(p.inventoryMenu.containerId, List.of(Click.throwAll(junk)));
+        return true;
+    }
+
     private void close(Minecraft mc, LocalPlayer p) {
         p.closeContainer();
         if (step == null) next(mc);

@@ -56,6 +56,7 @@ public final class SortProcess implements Process {
     private final Settings settings;
     private final Consumer<String> chat;
     private final ContainerProcess containers;
+    private final MakeRoom room;
     private Phase phase = Phase.IDLE;
     /** The boxes (a double chest by its lower-corner half) and what's in each, kept up to date as things move. */
     private final Map<BlockPos, Map<String, Integer>> boxes = new LinkedHashMap<>();
@@ -74,6 +75,7 @@ public final class SortProcess implements Process {
         this.settings = settings;
         this.chat = chat;
         this.containers = new ContainerProcess(session, settings, clicks, s -> {});
+        this.room = new MakeRoom(settings, null, chat);
         containers.onOpen((pos, menu) -> {
             if (phase == Phase.SCAN) read(pos, menu);
         });
@@ -186,9 +188,12 @@ public final class SortProcess implements Process {
         }
         List<ItemCount> take = fit(p, misplaced(from));
         if (take.isEmpty()) {
+            // full: throw a stack of junk out (makeRoomDropJunk), else say so
+            if (room.tick(mc, p, null) == MakeRoom.State.WORKING) return;
             end(Chat.err("Inventory full: make some room to sort"));
             return;
         }
+        room.reset();
         run(mc, p, from, false, take);
     }
 

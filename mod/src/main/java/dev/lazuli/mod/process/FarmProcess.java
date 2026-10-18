@@ -49,6 +49,7 @@ public final class FarmProcess implements Process {
     private final Settings settings;
     private final Consumer<String> chat;
     private final Trip trip;
+    private MakeRoom room;
     private final InputDriver input = new InputDriver();
     private final List<Job> jobs = new ArrayList<>();
     /** Jobs that failed, and the tick until which they're left alone. */
@@ -62,6 +63,17 @@ public final class FarmProcess implements Process {
         this.settings = settings;
         this.chat = chat;
         this.trip = new Trip(session);
+        this.room = new MakeRoom(settings, null, chat);
+    }
+
+    /** Lets a full inventory be put away in a remembered chest, not just thrown out. */
+    public void useContainers(ContainerProcess containers) {
+        room = new MakeRoom(settings, containers, chat);
+    }
+
+    /** What it replants from: never put away. */
+    private static boolean plantable(String id) {
+        return id.endsWith("_seeds") || id.endsWith("carrot") || id.endsWith("potato") || id.endsWith("nether_wart");
     }
 
     @Override
@@ -84,6 +96,7 @@ public final class FarmProcess implements Process {
         harvested = 0;
         lastScan = -RESCAN_TICKS;
         idleSaid = false;
+        room.reset();
         active = true;
         PathExecutor.gentle = true;
         trip.clear();
@@ -139,10 +152,21 @@ public final class FarmProcess implements Process {
             }
             case HARVEST -> {
                 if (trip.running()) return;
-                if (player.getInventory().getFreeSlot() < 0) {
-                    stop(false);
-                    chat.accept(Chat.warn("Inventory full: stopped farming ({} harvested)", harvested));
-                    return;
+                if (MakeRoom.full(player)) {
+                    switch (room.tick(mc, player, FarmProcess::plantable)) {
+                        case WORKING -> {
+                            release();
+                            trip.cancel();
+                            return;
+                        }
+                        case STUCK -> {
+                            stop(false);
+                            chat.accept(room.reason());
+                            chat.accept(Chat.warn("Stopped farming ({} harvested)", harvested));
+                            return;
+                        }
+                        default -> { }
+                    }
                 }
                 Block crop = mc.level.getBlockState(job.pos()).getBlock();
                 if (crop instanceof CropBlock || crop instanceof NetherWartBlock) lastCrop = crop;
