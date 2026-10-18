@@ -131,6 +131,12 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
 - `#build <file>` -> `mod/process/BuildProcess.startSchematic` (per-spot block states), `core/schematic/Schematic`
   (.litematic/.schem/.nbt via its own `Nbt` reader). `#getitem ... dry` -> `GetItemProcess.dryRun` + `core/craft/PlanEstimate`.
 - `#queue` / `#routine` / `a then b` -> `core/task/RoutineRunner` (step done = busy then idle; endless jobs like #farm hand over when the inventory is full, `RoutineRunner.endless`), `Routines` (`config/lazuli/routines.txt`); a forever routine whose whole round did nothing waits `routineIdleWaitSeconds` and gives up after `routineIdleRounds` such rounds; GUI: Routines tab (`LazuliConfig.routinePage`, WalksyLib page list).
+- Routine language: a step is `command @retry 3 @timeout 5m @onfail stop|continue|skip-rest|goto <label> @times 3 @before 5s @after 5s @if/@unless/@until <cond> @with name=value @off`
+  (`core/task/Step` record, parse/print lossless; a `@word` that isn't a modifier before the first modifier is a target name in the command). Conditions `core/task/Cond`
+  (`inv.<item>>n chest.<item> inv.free inv.full has.<item> health hunger day night time dim busy`, and/or/not), step words `wait say notify skip end label jump` (no prefix).
+  `RoutineRunner` runs `Step`s through a `Host` (run/stop/world/say/notify); only steps with @retry/@onfail react to `failStep` (chat errors), plain ones behave as before; `@with`
+  overrides settings for that step and restores them. `Routine.check` validates (`#routine check`); `#routine show|edit|insert|remove|rename|copy|check|status|help`.
+  GUI editor: `mod/config/RoutineEditor` (step page list, per-step widgets; model helpers `core/task/Forms` + `CondForm`), hooked from `LazuliConfig.routinePage`.
 - HUD -> `mod/render/LazuliRenderer` (Material 3 card via `Material`), `Minimap`.
 - `#bucket` -> `mod/process/BucketProcess`; `#hunt <item> [count]` -> `HuntProcess` (mobs from `MobDrops`, like #getitem); `#smith <item>` -> `SmithProcess`.
 - Command parsing helpers in `CommandHandler`: `integer/count/coords` (errors say "must be a number", `~` relative coordinates). `#stop` prints "Stopped" itself (only if something ran); `#kill` is the hard reset when `#stop` isn't enough.

@@ -106,32 +106,9 @@ public final class LazuliConfig implements WalksyLibApi {
         for (String n : names) if (routines.get(n) == null) routines.set(n, java.util.List.of());
     }
 
-    /** One routine's page: its steps (in order), how many runs, Run and Stop. */
+    /** One routine's page: the step list and editor, how many runs, Run, Stop (see {@link RoutineEditor}). */
     private static java.util.List<Option<?>> routinePage(String name) {
-        String prefix = SETTINGS.prefix.get();
-        Option<java.util.List<String>> steps = Options.ofStringList("Steps", () -> {
-            java.util.List<String> st = routines == null ? null : routines.get(name);
-            java.util.List<String> out = new java.util.ArrayList<>();
-            if (st != null) for (String c : st) out.add(c.startsWith(prefix) ? c.substring(prefix.length()) : c);
-            return out;
-        }, java.util.List.of(), v -> {
-            if (routines == null) return;
-            java.util.List<String> out = new java.util.ArrayList<>();
-            // a blank one is a step still being typed (the add button makes one): kept, skipped when run
-            for (String c : v) {
-                String t = c.trim();
-                out.add(t.isEmpty() || t.startsWith(prefix) ? t : prefix + t);
-            }
-            routines.set(name, out);
-        }).reorderable().allowDuplicates()
-            .description(OptionDescription.ofText(() -> "Commands without the " + prefix + ", in order (drag to reorder): mine 8 iron_ore, smelt raw_iron 8, deposit...")).build();
-        Option<Integer> times = Options.ofNumber("Times", () -> routineTimes.getOrDefault(name, 1), 1, v -> routineTimes.put(name, v))
-            .range(0, 64, 1).description(OptionDescription.ofText(() -> "How many times Run goes through it (0: forever).")).build();
-        Option<Runnable> run = Options.ofButton("Run", () -> runRoutine.accept(name, routineTimes.getOrDefault(name, 1)))
-            .description(OptionDescription.ofText(() -> "Start it now.")).build();
-        Option<Runnable> stop = Options.ofButton("Stop", () -> stopAction.run())
-            .description(OptionDescription.ofText(() -> "Stop whatever's running.")).build();
-        return java.util.List.of(steps, times, run, stop);
+        return RoutineEditor.page(name);
     }
 
     public static void save() {

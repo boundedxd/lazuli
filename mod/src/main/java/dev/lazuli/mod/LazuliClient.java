@@ -159,6 +159,11 @@ public final class LazuliClient implements ClientModInitializer {
 			else startRoutine(name, steps, times);
 		};
 		dev.lazuli.mod.config.RoutineEditor.status = () -> routine.detail();
+		dev.lazuli.mod.config.RoutineEditor.reply = m -> chat(Chat.info("{}", m));
+		dev.lazuli.mod.config.RoutineEditor.playerPos = () -> {
+			var p = Minecraft.getInstance().player;
+			return p == null ? null : new int[]{p.blockPosition().getX(), p.blockPosition().getY(), p.blockPosition().getZ()};
+		};
 		recorder = new TraceRecorder(FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("traces"), this::chat);
 
 		session = new PathingSession(cache, cache::minY, cache::maxY, settings, worker, this::chat,
