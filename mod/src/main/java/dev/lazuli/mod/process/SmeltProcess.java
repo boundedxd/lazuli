@@ -41,7 +41,7 @@ public final class SmeltProcess implements Process {
     /** Ticks with the furnace out and nothing happening before it gives up. */
     private static final int STALL_TICKS = 100;
 
-    private enum Phase { IDLE, MAKE_FURNACE, STATION, LOAD, LEAVE, WAIT, PICKUP }
+    private enum Phase { IDLE, MAKE_FURNACE, STATION, LOAD, LEAVE, WAIT, PICKUP, FETCH }
 
     public enum Outcome { NONE, DONE, FAILED, CANCELLED }
 
@@ -97,6 +97,7 @@ public final class SmeltProcess implements Process {
             case LOAD -> "loading";
             case LEAVE, WAIT -> "cooking";
             case PICKUP -> "picking up the furnace";
+            case FETCH -> "taking from a chest";
             case IDLE -> "";
         };
         return "Smelt " + asked.count() + " " + asked.item().replace("minecraft:", "") + "  (" + doing + ")";
@@ -120,8 +121,33 @@ public final class SmeltProcess implements Process {
     /** Starting again after a busy furnace: the furnaces to avoid stay. */
     private boolean retrying;
 
+    /** Takes missing input and fuel out of remembered chests before giving up (see {@link Fetch}). */
+    private Fetch fetch;
+    private ItemCount lastItem;
+    private boolean lastWait;
+
+    public void useChests(ContainerProcess containers, java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests,
+                          java.util.function.Function<Minecraft, String> dimension) {
+        this.fetch = new Fetch(settings, containers, chests, dimension);
+    }
+
+    private boolean fetchFor(Minecraft mc, Map<String, Integer> missing) {
+        if (fetch == null || !fetch.start(mc, mc.player, missing)) return false;
+        chat.accept(Chat.info("Taking {} from a chest first", String.join(", ", missing.keySet().stream().map(SmeltProcess::short_).toList())));
+        phase = Phase.FETCH;
+        return true;
+    }
+
     public void start(Minecraft mc, ItemCount item, boolean wait) {
         stop(false);
+        if (fetch != null) fetch.reset();
+        begin(mc, item, wait);
+    }
+
+    private void begin(Minecraft mc, ItemCount item, boolean wait) {
+        stop(false);
+        lastItem = item;
+        lastWait = wait;
         if (!retrying) station.clearAvoid();
         this.wait = wait;
         outcome = Outcome.NONE;
@@ -141,12 +167,16 @@ public final class SmeltProcess implements Process {
         Map<String, Integer> have = Inventories.plainCounts(p);
         Smelting.Job sj = Smelting.job(recipes, id, have);
         if (sj == null) {
+            Map<String, Integer> inputs = new LinkedHashMap<>();
+            for (SmeltRecipe r : recipes.smelting(id)) for (String in : r.input()) inputs.put(in, Math.max(1, item.count()));
+            if (fetchFor(mc, inputs)) return;
             if (recipes.smelting(id).isEmpty() && recipes.smeltingFrom(id).isEmpty()) fail("There's no furnace recipe for " + id);
             else fail("Nothing to smelt into " + short_(id) + ": needs " + inputs(recipes, id));
             return;
         }
         int haveIn = have.getOrDefault(sj.input(), 0), n = item.count() < 0 ? haveIn : item.count();
         if (haveIn < n) {
+            if (fetchFor(mc, Map.of(sj.input(), n - haveIn))) return;
             fail("Only have " + haveIn + " " + short_(sj.input()));
             return;
         }
@@ -154,6 +184,12 @@ public final class SmeltProcess implements Process {
         fuelHave.merge(sj.input(), -n, Integer::sum); // don't burn what's being cooked
         Map<String, Integer> fuel = Smelting.fuel(fuels(), fuelHave, burn(mc), n);
         if (fuel == null) {
+            Map<String, Integer> fuelNeed = new LinkedHashMap<>();
+            for (String f : fuels()) {
+                int b = burn(mc).applyAsInt(f);
+                if (b > 0) fuelNeed.put(f, (int) Math.ceil((double) n * Smelting.ITEM_TICKS / b));
+            }
+            if (fetchFor(mc, fuelNeed)) return;
             fail("Not enough fuel for " + n + " items (fuels are set in the config, Inventory tab)");
             return;
         }
@@ -215,6 +251,7 @@ public final class SmeltProcess implements Process {
     public void stop(boolean announce) {
         if (phase == Phase.IDLE) return;
         if (phase == Phase.MAKE_FURNACE) crafts.stop(false);
+        if (phase == Phase.FETCH && fetch != null) fetch.stop();
         end(Outcome.CANCELLED, announce ? Chat.warn("Stopped") : null);
     }
 
@@ -231,6 +268,16 @@ public final class SmeltProcess implements Process {
         if (phase == Phase.IDLE) return;
         LocalPlayer p = mc.player;
         switch (phase) {
+            case FETCH -> {
+                switch (fetch.tick(mc, p)) {
+                    case RUNNING -> {}
+                    case CANCELLED -> end(Outcome.CANCELLED, null);
+                    case DONE -> {
+                        phase = Phase.IDLE;
+                        begin(mc, lastItem, lastWait);
+                    }
+                }
+            }
             case MAKE_FURNACE -> {
                 switch (crafts.outcome()) {
                     case DONE -> start(mc, asked, wait);

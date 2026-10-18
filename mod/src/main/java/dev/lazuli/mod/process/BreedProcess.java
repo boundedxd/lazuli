@@ -50,6 +50,44 @@ public final class BreedProcess implements Process {
     /** The kind the pair being fed is (its first one has been fed), or null. */
     private String pairKind;
 
+    /** Food from remembered chests when the inventory has none for the animals around (see {@link Fetch}). */
+    private Fetch fetch;
+    private boolean fetching;
+    private java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests;
+    private java.util.function.Function<Minecraft, String> dimension;
+
+    public void useChests(ContainerProcess containers, java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests,
+                          java.util.function.Function<Minecraft, String> dimension) {
+        this.fetch = new Fetch(settings, containers, chests, dimension);
+        this.chests = chests;
+        this.dimension = dimension;
+    }
+
+    /** Starts taking food out of a chest if none of the animals around has its food in the inventory but a chest holds some. */
+    private boolean fetchFood(Minecraft mc, LocalPlayer p) {
+        if (fetch == null || !ChestTake.allowed(settings, ChestTake.Use.INGREDIENT)) return false;
+        List<Animal> animals = new ArrayList<>();
+        int r = settings.breedRange.get();
+        for (Animal a : mc.level.getEntitiesOfClass(Animal.class, p.getBoundingBox().inflate(r), Animal::isAlive)) {
+            if (a.isBaby() || a.blockPosition().distSqr(center) > (double) r * r) continue;
+            if (a instanceof TamableAnimal t && !t.isTame() || a instanceof AbstractHorse h && !h.isTamed()) continue;
+            if (!kinds.isEmpty() && !kinds.contains(id(a))) continue;
+            if (Hands.has(p, a::isFood)) return false; // has food for some already
+            animals.add(a);
+        }
+        if (animals.size() < 2) return false;
+        Map<String, Integer> food = new java.util.LinkedHashMap<>();
+        ChestTake.stored(settings, chests.apply(mc), dimension.apply(mc), p.blockPosition(), ChestTake.Use.INGREDIENT).forEach((item, n) -> {
+            var id = net.minecraft.resources.Identifier.tryParse(item);
+            var it = id == null ? null : BuiltInRegistries.ITEM.getOptional(id).orElse(null);
+            if (it != null && animals.stream().anyMatch(a -> a.isFood(new net.minecraft.world.item.ItemStack(it)))) food.put(item, Math.min(n, 16));
+        });
+        if (!fetch.start(mc, p, food)) return false;
+        chat.accept(Chat.info("Taking food from a chest first"));
+        fetching = true;
+        return true;
+    }
+
     public BreedProcess(PathingSession session, Settings settings, Consumer<String> chat) {
         this.settings = settings;
         this.chat = chat;
@@ -69,6 +107,9 @@ public final class BreedProcess implements Process {
         goal = null;
         trip.clear();
         active = true;
+        if (fetch != null) fetch.reset();
+        fetching = false;
+        fetchFood(mc, mc.player);
         chat.accept(Chat.info("Breeding {}", kinds.isEmpty() ? "animals" : String.join(", ", kinds.stream().map(BreedProcess::name).toList())));
     }
 
@@ -79,7 +120,7 @@ public final class BreedProcess implements Process {
 
     @Override
     public String status() {
-        return active ? "Breeding (" + pairs + (wanted > 0 ? "/" + wanted : "") + " pairs)" : null;
+        return fetching ? "Taking food from a chest" : active ? "Breeding (" + pairs + (wanted > 0 ? "/" + wanted : "") + " pairs)" : null;
     }
 
     @Override
@@ -90,6 +131,7 @@ public final class BreedProcess implements Process {
     @Override
     public void stop(boolean announce) {
         if (!active) return;
+        if (fetching && fetch != null) fetch.stop();
         end(announce ? Chat.warn("Stopped breeding") : null);
     }
 
@@ -98,6 +140,18 @@ public final class BreedProcess implements Process {
         if (!active) return;
         LocalPlayer p = mc.player;
         if (p == null || mc.level == null) return;
+        if (fetching) {
+            switch (fetch.tick(mc, p)) {
+                case RUNNING -> {
+                    return;
+                }
+                case CANCELLED -> {
+                    end(null);
+                    return;
+                }
+                case DONE -> fetching = false;
+            }
+        }
         if (wanted > 0 && pairs >= wanted && pairKind == null) {
             end(Chat.ok("Bred {} pairs", pairs));
             return;

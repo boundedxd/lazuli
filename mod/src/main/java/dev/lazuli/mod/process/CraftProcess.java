@@ -35,7 +35,7 @@ public final class CraftProcess implements Process {
     private static final String TABLE = "minecraft:crafting_table";
     private static final int RESULT_TICKS = 40, TAKE_TICKS = 20, CLEAR_TICKS = 100;
 
-    private enum Phase { IDLE, CRAFT, TABLE, PICKUP }
+    private enum Phase { IDLE, CRAFT, TABLE, PICKUP, FETCH }
 
     /** The steps of one batch in the grid: empty it, lay out the ingredients, wait for the result, take it. */
     private enum Batch { CLEAR, FILL, RESULT, TAKE }
@@ -57,6 +57,24 @@ public final class CraftProcess implements Process {
     /** Crafts left in the current step, crafts in this batch, the result count before it. */
     private int stepLeft, batch, before, batchStart;
 
+    /** Takes missing ingredients out of remembered chests before giving up (see {@link Fetch}). */
+    private Fetch fetch;
+    private Minecraft mcNow;
+    private List<ItemCount> lastItems = List.of();
+
+    public void useChests(ContainerProcess containers, java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests,
+                          java.util.function.Function<Minecraft, String> dimension) {
+        this.fetch = new Fetch(settings, containers, chests, dimension);
+    }
+
+    /** Missing ingredients lie in a remembered chest: go and take one, then start over. */
+    private boolean fetchFor(Map<String, Integer> missing) {
+        if (fetch == null || mcNow == null || mcNow.player == null || !fetch.start(mcNow, mcNow.player, missing)) return false;
+        chat.accept(Chat.info("Taking {} from a chest first", String.join(", ", missing.keySet().stream().map(i -> i.replace("minecraft:", "")).toList())));
+        phase = Phase.FETCH;
+        return true;
+    }
+
     public CraftProcess(PathingSession session, Settings settings, ClickDriver clicks, Consumer<String> chat) {
         this.settings = settings;
         this.chat = chat;
@@ -68,7 +86,7 @@ public final class CraftProcess implements Process {
     public String status() {
         if (phase == Phase.IDLE) return null;
         return "Craft " + String.join(", ", asked.stream().map(i -> i.count() + " " + i.item().replace("minecraft:", "")).toList())
-            + (phase == Phase.TABLE ? "  (going to a table)" : phase == Phase.PICKUP ? "  (picking up the table)" : "");
+            + (phase == Phase.FETCH ? "  (taking from a chest)" : phase == Phase.TABLE ? "  (going to a table)" : phase == Phase.PICKUP ? "  (picking up the table)" : "");
     }
 
     @Override
@@ -88,6 +106,14 @@ public final class CraftProcess implements Process {
     /** @param keepTable leave a table it places standing (more crafting follows: {@link #pickUpTable} after) */
     public void start(Minecraft mc, List<ItemCount> items, boolean keepTable) {
         stop(false);
+        if (fetch != null) fetch.reset();
+        begin(mc, items, keepTable);
+    }
+
+    private void begin(Minecraft mc, List<ItemCount> items, boolean keepTable) {
+        stop(false);
+        this.mcNow = mc;
+        this.lastItems = items;
         this.keepTable = keepTable;
         outcome = Outcome.NONE;
         LocalPlayer p = mc.player;
@@ -119,6 +145,7 @@ public final class CraftProcess implements Process {
             if (have.getOrDefault(TABLE, 0) < 1) {
                 CraftTree.Result t = CraftTree.resolve(recipes, TABLE, 1, have, settings.craftIngredients.get());
                 if (!t.ok()) {
+                    if (fetchFor(t.missing())) return;
                     fail("Needs a crafting table, and one can't be made: missing " + ItemCount.describe(missing(t)));
                     return;
                 }
@@ -165,6 +192,7 @@ public final class CraftProcess implements Process {
         for (ItemCount i : asked) {
             CraftTree.Result r = CraftTree.resolve(recipes, i.item(), i.count(), left, settings.craftIngredients.get());
             if (!r.ok()) {
+                if (fetchFor(r.missing())) return null;
                 fail("Can't craft " + i.item() + ": missing " + ItemCount.describe(missing(r)));
                 return null;
             }
@@ -181,6 +209,7 @@ public final class CraftProcess implements Process {
     @Override
     public void stop(boolean announce) {
         if (phase == Phase.IDLE) return;
+        if (phase == Phase.FETCH && fetch != null) fetch.stop();
         end(Outcome.CANCELLED, announce ? Chat.warn("Stopped") : null);
     }
 
@@ -189,6 +218,16 @@ public final class CraftProcess implements Process {
         if (phase == Phase.IDLE) return;
         LocalPlayer p = mc.player;
         switch (phase) {
+            case FETCH -> {
+                switch (fetch.tick(mc, p)) {
+                    case RUNNING -> {}
+                    case CANCELLED -> end(Outcome.CANCELLED, null);
+                    case DONE -> {
+                        phase = Phase.IDLE;
+                        begin(mc, lastItems, keepTable);
+                    }
+                }
+            }
             case CRAFT -> craft(p);
             case TABLE -> {
                 switch (station.tick(mc, p)) {

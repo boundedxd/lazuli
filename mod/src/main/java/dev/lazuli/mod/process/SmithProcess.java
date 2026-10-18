@@ -31,7 +31,7 @@ import java.util.function.Consumer;
 public final class SmithProcess implements Process {
     private static final int TIMEOUT_TICKS = 80;
 
-    private enum Phase { IDLE, STATION, LOAD, WAIT_RESULT, WAIT_CLEAR, PICKUP }
+    private enum Phase { IDLE, STATION, LOAD, WAIT_RESULT, WAIT_CLEAR, PICKUP, FETCH }
 
     public enum Outcome { NONE, DONE, FAILED, CANCELLED }
 
@@ -72,6 +72,22 @@ public final class SmithProcess implements Process {
     /** @param item what comes out (netherite_pickaxe); the template, base item and addition must be in the inventory */
     public void start(Minecraft mc, ItemCount item) {
         stop(false);
+        if (fetch != null) fetch.reset();
+        begin(mc, item);
+    }
+
+    /** Takes a missing template, base item or addition out of remembered chests before giving up (see {@link Fetch}). */
+    private Fetch fetch;
+    private ItemCount lastItem;
+
+    public void useChests(ContainerProcess containers, java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests,
+                          java.util.function.Function<Minecraft, String> dimension) {
+        this.fetch = new Fetch(settings, containers, chests, dimension);
+    }
+
+    private void begin(Minecraft mc, ItemCount item) {
+        stop(false);
+        lastItem = item;
         outcome = Outcome.NONE;
         LocalPlayer p = mc.player;
         if (!settings.getItemSmith.get()) {
@@ -100,6 +116,16 @@ public final class SmithProcess implements Process {
             }
         }
         if (recipe == null) {
+            // the first recipe's parts that aren't in the inventory, from a chest
+            java.util.Map<String, Integer> parts = new java.util.LinkedHashMap<>();
+            for (SmithRecipe r : recipes.smithing(id))
+                for (java.util.Set<String> g : List.of(r.template(), r.base(), r.addition()))
+                    if (pick(g, have) == null) for (String o : g) parts.put(o, n);
+            if (fetch != null && fetch.start(mc, p, parts)) {
+                chat.accept(Chat.info("Taking what the upgrade needs from a chest first"));
+                phase = Phase.FETCH;
+                return;
+            }
             fail(recipes.smithing(id).isEmpty() ? "There's no smithing recipe for " + short_(id)
                 : "Missing a template, base item or addition for " + short_(id));
             return;
@@ -116,6 +142,7 @@ public final class SmithProcess implements Process {
     @Override
     public void stop(boolean announce) {
         if (phase == Phase.IDLE) return;
+        if (phase == Phase.FETCH && fetch != null) fetch.stop();
         end(Outcome.CANCELLED, announce ? Chat.warn("Stopped") : null);
     }
 
@@ -124,6 +151,16 @@ public final class SmithProcess implements Process {
         if (phase == Phase.IDLE) return;
         LocalPlayer p = mc.player;
         switch (phase) {
+            case FETCH -> {
+                switch (fetch.tick(mc, p)) {
+                    case RUNNING -> {}
+                    case CANCELLED -> end(Outcome.CANCELLED, null);
+                    case DONE -> {
+                        phase = Phase.IDLE;
+                        begin(mc, lastItem);
+                    }
+                }
+            }
             case STATION -> {
                 switch (station.tick(mc, p)) {
                     case OPEN -> phase = Phase.LOAD;

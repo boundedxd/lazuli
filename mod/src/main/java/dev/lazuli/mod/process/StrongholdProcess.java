@@ -33,7 +33,7 @@ import java.util.function.Consumer;
  * (digging down as the path needs). Saves a "stronghold" waypoint either way.
  */
 public final class StrongholdProcess implements Process {
-    private enum Phase { IDLE, THROW, WATCH, PICKUP, SIDESTEP, TRAVEL, SEARCH, TO_ROOM }
+    private enum Phase { IDLE, THROW, WATCH, PICKUP, SIDESTEP, TRAVEL, SEARCH, TO_ROOM, FETCH }
 
     /** Ticks of flight read for the direction; ticks to wait for a thrown eye to show; to look for its drop. */
     private static final int READ_TICKS = 30, SHOW_TICKS = 20, DROP_TICKS = 40, PICKUP_TICKS = 200;
@@ -56,6 +56,25 @@ public final class StrongholdProcess implements Process {
     /** Where it thinks the stronghold is; the portal frame block it found. */
     private BlockPos target, room;
 
+    /** Eyes of ender from remembered chests when it has too few (see {@link Fetch}). */
+    private Fetch fetch;
+    /** After the fetch: begin the job (it was missing eyes at the start), else go on throwing. */
+    private boolean restart;
+
+    public void useChests(ContainerProcess containers, java.util.function.Function<Minecraft, dev.lazuli.core.storage.ChestMemory> chests,
+                          java.util.function.Function<Minecraft, String> dimension) {
+        this.fetch = new Fetch(settings, containers, chests, dimension);
+    }
+
+    private boolean fetchEyes(Minecraft mc, LocalPlayer p, int have, boolean atStart) {
+        if (fetch == null || !fetch.start(mc, p, java.util.Map.of("minecraft:ender_eye", Math.max(1, 12 - have)))) return false;
+        chat.accept(Chat.info("Taking eyes of ender from a chest"));
+        restart = atStart;
+        trip.clear();
+        enter(Phase.FETCH, p);
+        return true;
+    }
+
     public StrongholdProcess(PathingSession session, Settings settings, BiConsumer<Minecraft, BlockPos> remember, Consumer<String> chat) {
         this.settings = settings;
         this.chat = chat;
@@ -77,10 +96,17 @@ public final class StrongholdProcess implements Process {
             case TRAVEL -> "Going to the stronghold at " + target.getX() + " " + target.getZ();
             case SEARCH -> "Looking for the portal room";
             case TO_ROOM -> "Going to the end portal";
+            case FETCH -> "Taking eyes of ender from a chest";
         };
     }
 
     public void start(Minecraft mc) {
+        stop(false);
+        if (fetch != null) fetch.reset();
+        begin(mc);
+    }
+
+    private void begin(Minecraft mc) {
         stop(false);
         LocalPlayer p = mc.player;
         if (p == null) return;
@@ -89,6 +115,7 @@ public final class StrongholdProcess implements Process {
             return;
         }
         int eyes = Hands.count(p, s -> s.is(Items.ENDER_EYE));
+        if (eyes < 2 && fetchEyes(mc, p, eyes, true)) return;
         if (eyes < 2) {
             chat.accept(Chat.err("#stronghold takes at least 2 eyes of ender (have {})", eyes));
             return;
@@ -104,6 +131,7 @@ public final class StrongholdProcess implements Process {
     @Override
     public void stop(boolean announce) {
         if (phase == Phase.IDLE) return;
+        if (phase == Phase.FETCH && fetch != null) fetch.stop();
         end(announce ? Chat.warn("Stopped") : null);
     }
 
@@ -127,11 +155,27 @@ public final class StrongholdProcess implements Process {
         if (p == null || mc.level == null) return;
         int age = p.tickCount - since;
         switch (phase) {
+            case FETCH -> {
+                switch (fetch.tick(mc, p)) {
+                    case RUNNING -> {}
+                    case CANCELLED -> end(null);
+                    case DONE -> {
+                        if (restart) {
+                            phase = Phase.IDLE;
+                            begin(mc);
+                        } else if (Hands.has(p, s -> s.is(Items.ENDER_EYE))) {
+                            enter(Phase.THROW, p);
+                        } else {
+                            end(Chat.err("Out of eyes of ender"));
+                        }
+                    }
+                }
+            }
             case THROW -> {
                 if (trip.running()) return;
                 input.release();
                 if (!Hands.hold(p, ClickDriver.get(), s -> s.is(Items.ENDER_EYE))) {
-                    if (!Hands.has(p, s -> s.is(Items.ENDER_EYE))) end(Chat.err("Out of eyes of ender"));
+                    if (!Hands.has(p, s -> s.is(Items.ENDER_EYE)) && !fetchEyes(mc, p, 0, false)) end(Chat.err("Out of eyes of ender"));
                     return;
                 }
                 from = p.position();
