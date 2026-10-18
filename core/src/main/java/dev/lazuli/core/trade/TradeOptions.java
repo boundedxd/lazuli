@@ -30,7 +30,8 @@ public record TradeOptions(String with, Boolean onlyKnown, Boolean scan, Integer
             String a = args[i];
             boolean dashed = a.startsWith("--") && a.length() > 2;
             String word = (dashed ? a.substring(2) : a).toLowerCase(Locale.ROOT);
-            if (!dashed && !WORDS.contains(word)) {
+            // a bare "scan" before anything else is the subcommand (trade scan), not the flag
+            if (!dashed && (!WORDS.contains(word) || word.equals("scan") && rest.isEmpty())) {
                 rest.add(a);
                 continue;
             }
@@ -59,6 +60,12 @@ public record TradeOptions(String with, Boolean onlyKnown, Boolean scan, Integer
                 case "--wait-restock" -> waitRestock = true;
                 case "--wait-day" -> waitDay = true;
                 case "--stay", "--no-walk" -> stay = true;
+                // explicit off, over a setting that is on
+                case "--no-only-known" -> onlyKnown = false;
+                case "--no-scan" -> scan = false;
+                case "--no-wait-restock" -> waitRestock = false;
+                case "--no-wait-day" -> waitDay = false;
+                case "--no-stay", "--walk" -> stay = false;
                 default -> throw new IllegalArgumentException("Unknown trade flag " + a
                     + " (with, only-known, scan, max, keep, min-rate, wait-restock, wait-day, stay, no-walk, range)");
             }
@@ -68,7 +75,7 @@ public record TradeOptions(String with, Boolean onlyKnown, Boolean scan, Integer
 
     /** The options, written bare ({@code trade sell string with fisherman max 64}) or with dashes. */
     public static final java.util.Set<String> WORDS = java.util.Set.of("with", "only-known", "scan", "max", "range", "min-rate",
-        "keep", "wait-restock", "wait-day", "stay", "no-walk");
+        "keep", "wait-restock", "wait-day", "stay", "no-walk", "no-only-known", "no-scan", "no-wait-restock", "no-wait-day", "no-stay", "walk");
 
     private static String value(String[] args, int i, String flag) {
         if (i >= args.length || args[i].startsWith("--") || WORDS.contains(args[i].toLowerCase(Locale.ROOT))) throw new IllegalArgumentException(flag + " needs a value");

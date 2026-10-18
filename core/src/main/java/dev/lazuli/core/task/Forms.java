@@ -35,6 +35,8 @@ public final class Forms {
         TEXT,
         /** A label name. */
         LABEL,
+        /** A trade: item, villager and the option words (see {@code TradeForm}). */
+        TRADE,
         /** Anything else: only the text. */
         RAW
     }
@@ -69,7 +71,7 @@ public final class Forms {
         add("withdraw", "Withdraw", Layout.ITEM_ALL_COUNT);
         add("drop", "Drop", Layout.ITEM_ALL_COUNT);
         add("find", "Find in chests", Layout.ITEM_COUNT);
-        add("trade", "Trade", Layout.RAW);
+        add("trade", "Trade", Layout.TRADE);
         add("repair", "Repair", Layout.RAW);
         add("combine", "Combine", Layout.RAW);
         number("farm", "Farm", "Range", 64);
@@ -102,6 +104,81 @@ public final class Forms {
         add("addvar", "Add to variable", Layout.RAW);
         add("break", "Break (leave the loop)", Layout.NONE);
         add("continue", "Continue (next turn)", Layout.NONE);
+    }
+
+    /** The commands that work at a station and take a trailing {@code at x y z}. */
+    public static boolean takesAt(String word) {
+        return switch (word) {
+            case "craft", "smelt", "brew", "enchant", "repair", "combine", "smith" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * The tail words some commands take, split off the arguments so the item fields can read the rest:
+     * {@code at x y z} (stations; numbers or ~), {@code dry}, {@code deposit} and {@code then <place>} (getitem).
+     */
+    public record Extras(String rest, String[] at, boolean dry, boolean deposit, String then) {
+        public Extras withRest(String r) {
+            return new Extras(r, at, dry, deposit, then);
+        }
+
+        public Extras withAt(String[] a) {
+            return new Extras(rest, a, dry, deposit, then);
+        }
+
+        public Extras withDry(boolean d) {
+            return new Extras(rest, at, d, deposit, then);
+        }
+
+        public Extras withDeposit(boolean d) {
+            return new Extras(rest, at, dry, d, then);
+        }
+
+        public Extras withThen(String t) {
+            return new Extras(rest, at, dry, deposit, t == null ? "" : t);
+        }
+    }
+
+    public static Extras splitExtras(String word, String args) {
+        String[] t = args.isBlank() ? new String[0] : args.trim().split("\\s+");
+        int n = t.length;
+        String[] at = null;
+        boolean dry = false, deposit = false;
+        String then = "";
+        if (takesAt(word)) {
+            for (int i = 0; i < n; i++) {
+                if (t[i].equalsIgnoreCase("at") && n - i == 4) {
+                    at = new String[]{t[i + 1], t[i + 2], t[i + 3]};
+                    n = i;
+                    break;
+                }
+            }
+        } else if (word.equals("getitem")) {
+            if (n > 1 && (t[n - 1].equalsIgnoreCase("dry") || t[n - 1].equalsIgnoreCase("plan"))) {
+                dry = true;
+                n--;
+            }
+            if (n > 1 && t[n - 1].equalsIgnoreCase("deposit")) {
+                deposit = true;
+                n--;
+            }
+            if (n > 2 && t[n - 2].equalsIgnoreCase("then")) {
+                then = t[n - 1];
+                n -= 2;
+            }
+        }
+        return new Extras(String.join(" ", java.util.Arrays.copyOf(t, n)), at, dry, deposit, then);
+    }
+
+    public static String joinExtras(Extras e) {
+        List<String> out = new ArrayList<>();
+        if (!e.rest().isBlank()) out.add(e.rest().trim());
+        if (!e.then().isBlank()) out.add("then " + e.then());
+        if (e.deposit()) out.add("deposit");
+        if (e.dry()) out.add("dry");
+        if (e.at() != null) out.add("at " + String.join(" ", e.at()));
+        return String.join(" ", out);
     }
 
     /** The picker words that make a block (an {@code if}, {@code while} or {@code repeat} with its {@code end}). */
