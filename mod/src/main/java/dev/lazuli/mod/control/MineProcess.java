@@ -184,6 +184,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
         stop(false);
         cancelled = false;
         failed = false;
+        noTool = false;
         targets = Set.copyOf(blocks);
         hidden = blocks.stream().filter(b -> dev.lazuli.core.mine.OreDepth.isOre(BuiltInRegistries.BLOCK.getKey(b).toString()))
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
@@ -573,6 +574,7 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
             release();
             return;
         }
+        if (!hasTool(mc, player)) return; // the pickaxe broke mid-vein: nothing it breaks now would drop
         if (breakTicks == 0 && !canTake(mc, player)) return;
         if (++breakTicks > BREAK_TIMEOUT) {
             blacklist.add(Pos.pack(breaking.getX(), breaking.getY(), breaking.getZ()));
@@ -605,18 +607,22 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
      * Before breaking: a tool that gets the block's drop (iron ore by hand gives nothing) and room for it. False (and
      * finished, saying why) when not.
      */
+    /** Checked every tick of a break: a tool that gets the drop is still in the inventory. Finishes as "no tool" if not. */
+    private boolean hasTool(Minecraft mc, LocalPlayer player) {
+        var state = mc.level.getBlockState(breaking);
+        if (!state.requiresCorrectToolForDrops() || player.getAbilities().instabuild) return true;
+        var inv = player.getInventory();
+        for (int i = 0; i < 36; i++) if (inv.getItem(i).isCorrectToolForDrops(state)) return true;
+        finish(Chat.err("No tool that gets anything from {} ({} mined)", state.getBlock().getName().getString(), mined));
+        failed = true;
+        noTool = true;
+        release();
+        return false;
+    }
+
     private boolean canTake(Minecraft mc, LocalPlayer player) {
         var state = mc.level.getBlockState(breaking);
         var inv = player.getInventory();
-        if (state.requiresCorrectToolForDrops()) {
-            boolean tool = false;
-            for (int i = 0; i < 36 && !tool; i++) tool = inv.getItem(i).isCorrectToolForDrops(state);
-            if (!tool) {
-                finish(Chat.err("No tool that gets anything from {} ({} mined)", state.getBlock().getName().getString(), mined));
-                failed = true;
-                return false;
-            }
-        }
         if (inv.getFreeSlot() < 0) {
             net.minecraft.world.item.Item drop = state.getBlock().asItem();
             boolean room = false;
@@ -661,6 +667,13 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
 
     public boolean failed() {
         return failed;
+    }
+
+    /** The last run stopped because no tool that drops the block was left (a pickaxe broke): craft one and go on. */
+    private boolean noTool;
+
+    public boolean noTool() {
+        return noTool;
     }
 
     private void pickupTick(Minecraft mc, LocalPlayer player) {

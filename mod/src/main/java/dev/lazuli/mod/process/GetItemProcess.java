@@ -171,7 +171,7 @@ public final class GetItemProcess implements Process {
         running = true;
         current = null;
         lastStep = null;
-        steps = repeats = 0;
+        steps = repeats = noToolRetries = 0;
         done = planned = 0;
         trading = null;
         noTrade.clear();
@@ -345,7 +345,7 @@ public final class GetItemProcess implements Process {
         dev.lazuli.core.trade.TradePlanner.Plan tp = trade.plan(mc, p, List.of(w), recipes, drops);
         if (!tp.ok() || tp.steps().isEmpty()) return false;
         if (plan.ok()) {
-            double make = planner.cost(need.item(), Inventories.plainCounts(p), pickTier(p)) * missing;
+            double make = planner.cost(need.item(), Inventories.plainCounts(p), pickTier(p, wants, settings)) * missing;
             double buy = trade.cost(p, tp, trade.gatherCost(mc, p, recipes, drops));
             if (buy >= make) return false;
         }
@@ -438,8 +438,20 @@ public final class GetItemProcess implements Process {
             ItemStack s = p.getItemBySlot(e);
             if (!s.isEmpty()) have.merge(BuiltInRegistries.ITEM.getKey(s.getItem()).toString(), s.getCount(), Integer::sum);
         }
+        if (settings.mineSpareTool.get()) {
+            // a nearly broken pickaxe doesn't count as had for this job: a fresh one is made (the old stays a last resort)
+            int blocks = 0;
+            for (ItemCount w : wants) blocks += Math.max(1, w.count());
+            int floor = dev.lazuli.core.craft.ToolChoice.floor(blocks);
+            for (int i = 0; i < 36; i++) {
+                ItemStack s = p.getInventory().getItem(i);
+                if (s.isEmpty() || !BuiltInRegistries.ITEM.getKey(s.getItem()).getPath().endsWith("_pickaxe")) continue;
+                if (s.getMaxDamage() - s.getDamageValue() <= floor)
+                    have.computeIfPresent(BuiltInRegistries.ITEM.getKey(s.getItem()).toString(), (k, v) -> Math.max(0, v - 1));
+            }
+        }
         planner.smithingTable(Station.nearest(mc, p, Blocks.SMITHING_TABLE, range) != null);
-        return planner.plan(wants, have, pickTier(p),
+        return planner.plan(wants, have, pickTier(p, wants, settings),
             Station.nearest(mc, p, Blocks.CRAFTING_TABLE, range) != null, Station.nearest(mc, p, Blocks.FURNACE, range) != null);
     }
 
@@ -476,6 +488,8 @@ public final class GetItemProcess implements Process {
     private Status status(ItemPlanner.Action a) {
         return switch (a.kind()) {
             case MINE -> mine.active() ? Status.RUNNING : mine.cancelled() ? Status.CANCELLED
+                // the pickaxe broke: not a stuck step; plan again from what's in the inventory (a new pickaxe, then mining)
+                : mine.noTool() && noToolRetries++ < 3 ? Status.OK
                 : mine.mined() > 0 && !mine.failed() ? Status.OK : Status.FAILED;
             case CRAFT -> switch (crafts.outcome()) {
                 case NONE -> Status.RUNNING;
@@ -533,9 +547,24 @@ public final class GetItemProcess implements Process {
         return s.is(BlockTags.MINEABLE_WITH_PICKAXE) ? 1 : 9;
     }
 
-    /** The best pickaxe in the inventory (worn ones count): 0 none, 1 wood or gold ... 4 diamond or netherite. */
+    /** Times a mining step ended with no tool left and the plan was redone (a pickaxe broke mid-vein). */
+    private int noToolRetries;
+
+    /** The pickaxe tier to plan with: nearly broken ones don't count for a long job (mineSpareTool). */
+    static int pickTier(LocalPlayer p, List<ItemCount> wants, Settings settings) {
+        int blocks = 0;
+        for (ItemCount w : wants) blocks += Math.max(1, w.count());
+        return dev.lazuli.core.craft.ToolChoice.pickTier(picks(p), blocks, settings.mineSpareTool.get());
+    }
+
+    /** The best pickaxe in the inventory, worn ones counting. */
     static int pickTier(LocalPlayer p) {
-        int best = 0;
+        return dev.lazuli.core.craft.ToolChoice.pickTier(picks(p), 1, false);
+    }
+
+    /** The pickaxes in the inventory with their tier and durability left. */
+    static List<dev.lazuli.core.craft.ToolChoice.Pick> picks(LocalPlayer p) {
+        List<dev.lazuli.core.craft.ToolChoice.Pick> out = new java.util.ArrayList<>();
         for (int i = 0; i < 36; i++) {
             ItemStack s = p.getInventory().getItem(i);
             if (s.isEmpty()) continue;
@@ -548,9 +577,9 @@ public final class GetItemProcess implements Process {
                 case "diamond_pickaxe", "netherite_pickaxe" -> 4;
                 default -> 0;
             };
-            best = Math.max(best, t);
+            out.add(new dev.lazuli.core.craft.ToolChoice.Pick(t, s.getMaxDamage() - s.getDamageValue()));
         }
-        return best;
+        return out;
     }
 
     /** Any of {@code item} in the main inventory and hotbar, enchanted or worn too, and what's worn or in the offhand. */

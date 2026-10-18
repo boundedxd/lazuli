@@ -289,6 +289,8 @@ public final class Settings {
     public final Setting<Boolean> smeltPlaceFurnace = bool("smeltPlaceFurnace", true);
     /** Never use a tool's last few points of durability. */
     public final Setting<Boolean> saveTools = bool("saveTools", true);
+    /** Mining swaps to a fresh tool of the same tier over a nearly broken one, and #getitem plans a spare pickaxe. */
+    public final Setting<Boolean> mineSpareTool = bool("mineSpareTool", true);
     public final Setting<Integer> evalHorizon = integer("evalHorizon", 32, 1, 4096);
     public final Setting<Double> heuristicWeight = decimal("heuristicWeight", 1.2, 1.0, 10.0);
     public final Setting<Boolean> renderPath = bool("renderPath", true);

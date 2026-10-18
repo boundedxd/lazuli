@@ -119,6 +119,7 @@ public final class LazuliConfig implements WalksyLibApi {
                 .group(OptionGroup.builder("Tools and armor")
                     .option(bool(s.allowInventory, "Move the best tool for the job from the inventory into the hotbar."))
                     .option(bool(s.saveTools, "Never use a tool's last few points of durability."))
+                    .option(bool(s.mineSpareTool, "Mining prefers a fresh tool over a nearly broken one, and #getitem makes a spare pickaxe for a long job."))
                     .option(bool(s.autoArmor, "Put on better armor from the inventory while busy."))
                     .build())
                 .group(OptionGroup.builder("Crafting")

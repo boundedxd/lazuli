@@ -105,11 +105,26 @@ public final class Tools {
         return wornOut(stack) ? INF : ticks(stack, s, eff, haste);
     }
 
+    /** Set from the settings each tick: prefer a fresh tool over a nearly broken one (mineSpareTool). */
+    public static volatile boolean spareTool = true;
+
     /** Slot among the first {@code slots} inventory slots that breaks {@code s} fastest (the selected one on ties). */
     private static int best(Player p, BlockState s, int slots) {
         Holder<Enchantment> eff = efficiency(p);
         float haste = haste(p);
         int sel = p.getInventory().getSelectedSlot();
+        if (s.requiresCorrectToolForDrops()) {
+            // a block that drops nothing without the right tool: only a tool that gets the drop, never a faster wrong one
+            java.util.List<dev.lazuli.core.craft.ToolChoice.Cand> cands = new java.util.ArrayList<>();
+            for (int i = 0; i < slots; i++) {
+                ItemStack st = p.getInventory().getItem(i);
+                if (st.isEmpty() || !st.isCorrectToolForDrops(s)) continue;
+                int left = st.isDamageableItem() ? st.getMaxDamage() - st.getDamageValue() : Integer.MAX_VALUE;
+                cands.add(new dev.lazuli.core.craft.ToolChoice.Cand(i, true, ticks(st, s, eff, haste), left));
+            }
+            int slot = dev.lazuli.core.craft.ToolChoice.best(cands, sel, true, SPARE_DURABILITY, spareTool);
+            if (slot >= 0) return slot;
+        }
         int best = sel;
         double bestTicks = usableTicks(p.getInventory().getItem(sel), s, eff, haste);
         if (wornOut(p.getInventory().getItem(sel))) bestTicks = ticks(ItemStack.EMPTY, s, eff, haste) + 0.5;
@@ -133,6 +148,7 @@ public final class Tools {
      */
     public static void equipBestTool(net.minecraft.client.Minecraft mc, Player p, BlockState s, Settings settings) {
         saveTools = settings.saveTools.get();
+        spareTool = settings.mineSpareTool.get();
         int slot = best(p, s, settings.allowInventory.get() && mc.screen == null ? 36 : 9);
         if (slot >= 9) {
             // swap it into the selected hotbar slot (menu slots: 9-35 are the main inventory); the click driver may
