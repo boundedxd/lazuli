@@ -906,6 +906,11 @@ public final class CommandHandler {
         "getitem", "get", "smelt", "brew", "enchant", "repair", "combine", "fly", "sel", "sort", "craft", "bucket", "hunt",
         "smith", "help");
 
+    /** Whether a command word exists (routine checks and the routine editor use it). */
+    public static boolean isCommand(String word) {
+        return COMMANDS.contains(word.toLowerCase(Locale.ROOT));
+    }
+
     /** getitem <item> [count] [item [count]...] [then back|<waypoint>] [deposit] */
     private void getItem(String[] args) {
         boolean dry = args.length > 0 && (args[args.length - 1].equalsIgnoreCase("dry") || args[args.length - 1].equalsIgnoreCase("plan"));

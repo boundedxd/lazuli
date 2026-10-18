@@ -8,12 +8,28 @@ public final class Setting<T> {
     private final Function<String, T> parser;
     private volatile T value;
     private volatile String description = "";
+    private Number min, max;
 
     Setting(String name, T defaultValue, Function<String, T> parser) {
         this.name = name;
         this.defaultValue = defaultValue;
         this.parser = parser;
         this.value = defaultValue;
+    }
+
+    /** Allowed range of a number setting (null for other kinds). */
+    public Number min() {
+        return min;
+    }
+
+    public Number max() {
+        return max;
+    }
+
+    Setting<T> bounds(Number min, Number max) {
+        this.min = min;
+        this.max = max;
+        return this;
     }
 
     public String name() {

@@ -79,8 +79,9 @@ public final class RoutineRunner {
     private int pause;
     /** The step running: how many times it ran, retries used, a failure the game reported, ended because of the inventory. */
     private int iter, attempt;
-    private boolean failRequested, handedOver, untilMet;
-    private String failReason = "";
+    private volatile boolean failRequested;
+    private boolean handedOver, untilMet;
+    private volatile String failReason = "";
     private int jumps;
     private Settings settings;
     private final Map<String, String> saved = new LinkedHashMap<>();
@@ -187,8 +188,8 @@ public final class RoutineRunner {
     public void failStep(String why) {
         Step c = current();
         if (phase == Phase.RUN && c != null && c.caresAboutFailure()) {
-            failRequested = true;
             failReason = why == null ? "failed" : why;
+            failRequested = true;
         }
     }
 

@@ -152,14 +152,13 @@ public final class LazuliClient implements ClientModInitializer {
 		instance = this;
 		LazuliConfig.stopAction = () -> stopAll(true);
 		LazuliConfig.routines = routines;
+		routine.setSettings(settings);
 		LazuliConfig.runRoutine = (name, times) -> {
 			java.util.List<String> steps = routines.get(name);
 			if (steps == null || steps.stream().allMatch(String::isBlank)) chat(Chat.err("Routine {} has no steps", name));
-			else {
-				routine.start(name, steps, times);
-				chat(Chat.ok("Routine {}: {} steps{}", name, steps.size(), times <= 0 ? ", forever" : times > 1 ? ", " + times + " times" : ""));
-			}
+			else startRoutine(name, steps, times);
 		};
+		dev.lazuli.mod.config.RoutineEditor.status = () -> routine.detail();
 		recorder = new TraceRecorder(FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("traces"), this::chat);
 
 		session = new PathingSession(cache, cache::minY, cache::maxY, settings, worker, this::chat,
@@ -379,9 +378,12 @@ public final class LazuliClient implements ClientModInitializer {
 
 			@Override
 			public void runRoutine(String name, java.util.List<String> steps, int times) {
-				routine.start(name, steps, times);
-				chat(Chat.ok("{}: {} steps{}", name == null ? "Queue" : "Routine " + name, steps.size(),
-					times == 0 ? ", forever" : times > 1 ? ", " + times + " times" : ""));
+				startRoutine(name, steps, times);
+			}
+
+			@Override
+			public String routineStatus() {
+				return routine.detail();
 			}
 
 			@Override
@@ -966,6 +968,75 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 	}
 
+	/** Starts a routine (or a queue, name null); says why when its steps don't parse. */
+	private void startRoutine(String name, java.util.List<String> steps, int times) {
+		try {
+			routine.start(name, steps, times);
+		} catch (IllegalArgumentException e) {
+			chat(Chat.err("{}: {}", name == null ? "Queue" : "Routine " + name, e.getMessage()));
+			return;
+		}
+		chat(Chat.ok("{}: {} steps{}", name == null ? "Queue" : "Routine " + name, steps.size(),
+			times <= 0 ? ", forever" : times > 1 ? ", " + times + " times" : ""));
+	}
+
+	/** What the routine runner needs from the game. */
+	private final dev.lazuli.core.task.RoutineRunner.Host routineHost = new dev.lazuli.core.task.RoutineRunner.Host() {
+		private final RoutineGame game = new RoutineGame(() -> settings.chestMemory.get() ? chests(Minecraft.getInstance()) : null,
+			() -> dimension(Minecraft.getInstance()), LazuliClient.this::busy);
+
+		@Override
+		public boolean run(String line) {
+			// a step's own command (#come, #stop inside a routine) mustn't end the routine running it
+			runningRoutineStep = true;
+			stepErrored = false;
+			try {
+				runCommand(line);
+			} catch (RuntimeException e) {
+				chat(Chat.err("Routine step {} failed: {}", line, e.getMessage()));
+				return false;
+			} finally {
+				runningRoutineStep = false;
+			}
+			return !stepErrored;
+		}
+
+		@Override
+		public void stop() {
+			// an endless step handing over (inventory full), or one that timed out: stop it, the routine goes on
+			tasks.cancel();
+			clicks.cancel();
+			stopProcesses(false);
+			var session = LazuliClient.this.session;
+			if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
+		}
+
+		@Override
+		public dev.lazuli.core.task.Cond.World world() {
+			return game;
+		}
+
+		@Override
+		public void say(String text) {
+			var mc = Minecraft.getInstance();
+			if (mc.player == null) return;
+			if (text.startsWith("/")) mc.player.connection.sendCommand(text.substring(1));
+			else mc.player.connection.sendChat(text);
+		}
+
+		@Override
+		public void notify(String text) {
+			chat(Chat.ok("{}", text));
+			var mc = Minecraft.getInstance();
+			mc.execute(() -> {
+				if (mc.player != null) mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 1f);
+			});
+		}
+	};
+
+	/** An error went to chat while a step ran (set by {@link #chat}); read right after the command starts. */
+	private volatile boolean stepErrored;
+
 	/** Handles a chat line as a command (false: not one). */
 	private boolean runCommand(String line) {
 		return commands.handle(line);
@@ -1077,24 +1148,7 @@ public final class LazuliClient implements ClientModInitializer {
 		boolean full = mc.player != null && mc.player.getInventory().getFreeSlot() < 0;
 		routine.setIdlePolicy(settings.routineIdleWaitSeconds.get() * 20, settings.routineIdleRounds.get(), m -> chat(Chat.info(m)));
 		routine.setStepTimeout(settings.routineStepTimeoutMinutes.get() * 60 * 20);
-		String routineDone = routine.tick(busy(), full, line -> {
-			// a step's own command (#come, #stop inside a routine) mustn't end the routine running it
-			runningRoutineStep = true;
-			try {
-				runCommand(line);
-			} catch (RuntimeException e) {
-				chat(Chat.err("Routine step {} failed: {}", line, e.getMessage()));
-			} finally {
-				runningRoutineStep = false;
-			}
-		}, () -> {
-			// an endless step handing over (inventory full): stop it, the routine goes on
-			chat(Chat.info("Inventory full: next step"));
-			tasks.cancel();
-			clicks.cancel();
-			stopProcesses(false);
-			if (session.snapshot().state() == PathingSession.State.PATHING || session.planning()) session.stop(true);
-		});
+		String routineDone = routine.tick(busy(), full, routineHost);
 		if (routineDone != null) chat(Chat.ok(routineDone));
 		chestWatcher.tick(mc);
 		tradeWatcher.tick(mc);
@@ -1230,6 +1284,11 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private void chat(String msg) {
+		if (msg.startsWith(Chat.RED)) {
+			// an error while a routine step runs: steps that asked to care (@retry, @onfail) take it as a failure
+			stepErrored = true;
+			if (routine.running()) routine.failStep(Chat.strip(msg));
+		}
 		Minecraft mc = Minecraft.getInstance();
 		mc.execute(() -> mc.gui.getChat().addMessage(Component.literal(PREFIX + msg)));
 	}

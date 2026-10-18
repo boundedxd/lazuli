@@ -416,7 +416,7 @@ public final class Settings {
             }
             if (v < min || v > max) throw new IllegalArgumentException(name + " must be between " + min + " and " + max);
             return v;
-        }));
+        }).bounds(min, max));
     }
 
     private Setting<Double> decimal(String name, double def, double min, double max) {
@@ -429,6 +429,6 @@ public final class Settings {
             }
             if (!(v >= min && v <= max)) throw new IllegalArgumentException(name + " must be between " + min + " and " + max);
             return v;
-        }));
+        }).bounds(min, max));
     }
 }
