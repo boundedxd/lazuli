@@ -84,10 +84,6 @@ public final class ProcessesTab {
                 Ui.bool(s.selEnabled, "#sel fill and #sel clear may place and break the blocks in the selected box.")),
             Ui.folded("Stronghold",
                 Ui.num(s.strongholdBaseline, 30, 1000, 10, "#stronghold walks this far sideways between its two eye throws (longer: more exact)."),
-                Ui.bool(s.strongholdPickupEyes, "#stronghold picks the thrown eyes of ender back up when they drop.")),
-            Ui.folded("Advanced: routine limits",
-                Ui.num(s.routineStepTimeoutMinutes, 0, 1440, 5, "A routine step that isn't endless and runs longer than this is stopped as failed. 0: no limit."),
-                Ui.num(s.routineIdleWaitSeconds, 0, 3600, 5, "A forever routine whose whole round did nothing (an empty chest...) waits this long and tries again. 0: stops instead."),
-                Ui.num(s.routineIdleRounds, 1, 10000, 1, "A forever routine stops after this many idle rounds in a row.")));
+                Ui.bool(s.strongholdPickupEyes, "#stronghold picks the thrown eyes of ender back up when they drop.")));
     }
 }
