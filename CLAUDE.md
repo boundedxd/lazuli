@@ -56,9 +56,17 @@ Keep MC-specific code in `mod/` (a port to 26.x is planned later).
 
 ## Key mod pieces
 - `LazuliClient` — wires everything: session, executor, processes, commands context, tick order, the API impl (`Api`).
-- `dev/lazuli/api/Lazuli` — public API for other mods: `Lazuli.get().goTo/mine/container/drop/craft/smelt/getItem/stop/busy/command`.
-- `process/*` — `Process` = something running on top of pathing (one at a time): MineProcess (in control/),
-  Follow, Explore, Tunnel, Farm, ContainerProcess (#deposit/#withdraw), CraftProcess (#craft), SmeltProcess (#smelt), GetItemProcess (#getitem), Upkeep (auto eat/armor). `Trip` = a quiet trip.
+- `dev/lazuli/api/Lazuli` — public API for other mods; each returns a `Task`: `goTo/mine/container/drop/craft/smelt/getItem/brew/trade/tradeSell/bucket/hunt/smith`,
+  plus `stop/busy/current/command` (sort, build, portal, stronghold have no outcome to poll yet: use `command("sort")` etc.).
+- `process/*` — `Process` = something running on top of pathing (one at a time, all listed in `LazuliClient.processes`): MineProcess (in control/),
+  Follow, Explore, Tunnel, Farm, Breed (#breed), Fish, ContainerProcess (#deposit/#withdraw), CraftProcess (#craft), SmeltProcess (#smelt),
+  SmithProcess (#smith, smithing table), BucketProcess (#bucket: fill water/lava/milk buckets, cast obsidian), HuntProcess (#hunt <item>: kills the
+  mobs from `MobDrops`), GetItemProcess (#getitem), BrewProcess (#brew), TradeProcess (#trade), EnchantProcess (#enchant/#repair/#combine),
+  ElytraProcess (far #goto / #fly), SortProcess (#sort), BuildProcess (#build/#sel), SleepProcess, DeathRecovery, RestockProcess, Guard (safety),
+  Upkeep (auto eat/armor). `Trip` = a quiet trip. A new command needs: a case in `CommandHandler.run` (and the word in `COMMANDS`; `CommandTest` checks
+  they match), a `Context` method, the override in `LazuliClient`, help text, and an API method if it makes sense.
+- `core/craft/ToolChoice` — which tool mines a block (drops it, durability to spare, fastest). Full inventory while mining: `MineProcess` throws a
+  junk stack out (`Tools.junkSlot`, setting `mineDropJunk`) instead of stopping.
 - `inventory/Inventories` (game menu → core `Menu`, item keys like `minecraft:dirt#<componentsHash>`),
   `ClickDriver` (sends planned clicks, `clicksPerTick` per tick).
 - `control/Aim` — legit looking: find a visible point, turn at rotationSpeed, act only when the crosshair is on it
@@ -98,7 +106,7 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
   + `mod/inventory/ChestWatcher`; taking from remembered chests for other jobs: `mod/process/ChestTake`.
 - `#craft` -> `mod/process/CraftProcess` + `core/craft/CraftTree`/`Crafter`; recipes from the game jar `mod/craft/RecipeData`.
 - `#smelt` -> `mod/process/SmeltProcess` + `core/craft/Smelting`. Tables/furnaces/stands/anvils: `mod/process/Station`.
-- `#getitem` -> `mod/process/GetItemProcess` + `core/craft/ItemPlanner` (mine/smelt/craft/trade/kill steps, `Drops`,
+- `#getitem` -> `mod/process/GetItemProcess` + `core/craft/ItemPlanner` (mine/smelt/craft/trade/kill/smith steps, plus `Kind.BUCKET` (water/lava/milk buckets) and `Kind.CAST` (obsidian) run by `BucketProcess`, `Drops`,
   `MobDrops`, `ItemSets`, `ItemRequest`).
 - `#trade` -> `mod/process/TradeProcess`, `core/trade/*`, `mod/inventory/TradeWatcher`.
 - `#brew` -> `mod/process/BrewProcess` + `core/craft/Brewing`. `#enchant`/`#repair`/`#combine` -> `mod/process/EnchantProcess`
@@ -117,8 +125,10 @@ elytra) and stay alive (eat, armor, flee/fight, clutch). Port to MC 26.x later.
   `RecordedLine` (driven once, `config/lazuli/iceboat/`). Courses drawn as ASCII maps in `RaceCourseTest`.
 - `#build <file>` -> `mod/process/BuildProcess.startSchematic` (per-spot block states), `core/schematic/Schematic`
   (.litematic/.schem/.nbt via its own `Nbt` reader). `#getitem ... dry` -> `GetItemProcess.dryRun` + `core/craft/PlanEstimate`.
-- `#queue` / `#routine` / `a then b` -> `core/task/RoutineRunner` (step done = busy then idle; endless jobs like #farm hand over when the inventory is full, `RoutineRunner.endless`), `Routines` (`config/lazuli/routines.txt`); GUI: Routines tab (`LazuliConfig.routinePage`, WalksyLib page list).
+- `#queue` / `#routine` / `a then b` -> `core/task/RoutineRunner` (step done = busy then idle; endless jobs like #farm hand over when the inventory is full, `RoutineRunner.endless`), `Routines` (`config/lazuli/routines.txt`); a forever routine whose whole round did nothing waits `routineIdleWaitSeconds` and gives up after `routineIdleRounds` such rounds; GUI: Routines tab (`LazuliConfig.routinePage`, WalksyLib page list).
 - HUD -> `mod/render/LazuliRenderer` (Material 3 card via `Material`), `Minimap`.
+- `#bucket` -> `mod/process/BucketProcess`; `#hunt <item> [count]` -> `HuntProcess` (mobs from `MobDrops`, like #getitem); `#smith <item>` -> `SmithProcess`.
+- Command parsing helpers in `CommandHandler`: `integer/count/coords` (errors say "must be a number", `~` relative coordinates). `#stop` prints "Stopped" itself (only if something ran); `#kill` is the hard reset when `#stop` isn't enough.
 - Others: Follow, Explore, Tunnel, Farm, Hunt processes in `mod/process/`; chat commands from other players `mod/ChatControl`.
 - Item keys (`minecraft:dirt#hash`, potions `@minecraft:swiftness`) -> `core/inventory/ItemKeys`, `mod/inventory/Inventories`.
 - `#sel pos1|pos2|fill|clear|reset` -> `core/area/Selection`, `mod/process/BuildProcess` (box drawn by `LazuliRenderer`).

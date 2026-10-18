@@ -470,6 +470,29 @@ public final class LazuliClient implements ClientModInitializer {
 			}
 
 			@Override
+			public boolean busy() {
+				return LazuliClient.this.busy();
+			}
+
+			@Override
+			public void bucket(String item, int n) {
+				LazuliClient.this.stopProcesses(false);
+				buckets.start(Minecraft.getInstance(), item, n);
+			}
+
+			@Override
+			public void hunt(String item, int count) {
+				LazuliClient.this.stopProcesses(false);
+				startHunt(item, count);
+			}
+
+			@Override
+			public void smith(ItemCount item) {
+				LazuliClient.this.stopProcesses(false);
+				smiths.start(Minecraft.getInstance(), item);
+			}
+
+			@Override
 			public void getItem(dev.lazuli.core.craft.ItemRequest request) {
 				LazuliClient.this.stopProcesses(false);
 				getItem.start(Minecraft.getInstance(), request);
@@ -743,8 +766,13 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 
 		@Override
-		public void drop(java.util.List<ItemCount> items) {
-			LazuliClient.this.drop(items);
+		public Task drop(java.util.List<ItemCount> items) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				LazuliClient.this.drop(items);
+				// the clicks are played over the next ticks
+				return new Task("drop", () -> clicks.busy() ? null : Task.Result.DONE, clicks::cancel);
+			});
 		}
 
 		@Override
@@ -787,6 +815,90 @@ public final class LazuliClient implements ClientModInitializer {
 					case FAILED -> Task.Result.FAILED;
 					case CANCELLED -> Task.Result.CANCELLED;
 				}, () -> getItem.stop(false));
+			});
+		}
+
+		@Override
+		public Task brew(String potion, dev.lazuli.core.craft.Brewing.Form form, int count) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				brews.start(Minecraft.getInstance(), potion, form, count);
+				return new Task("brew " + potion, () -> switch (brews.outcome()) {
+					case NONE -> null;
+					case DONE -> Task.Result.DONE;
+					case FAILED -> Task.Result.FAILED;
+					case CANCELLED -> Task.Result.CANCELLED;
+				}, () -> brews.stop(false));
+			});
+		}
+
+		@Override
+		public Task trade(java.util.List<dev.lazuli.core.trade.Want> wants) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				trades.start(Minecraft.getInstance(), wants);
+				return new Task("trade", () -> switch (trades.outcome()) {
+					case NONE -> null;
+					case DONE -> Task.Result.DONE;
+					case FAILED -> Task.Result.FAILED;
+					case CANCELLED -> Task.Result.CANCELLED;
+				}, () -> trades.stop(false));
+			});
+		}
+
+		@Override
+		public Task tradeSell(String item, int count) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				trades.sell(Minecraft.getInstance(), item, count);
+				return new Task("sell " + item, () -> switch (trades.outcome()) {
+					case NONE -> null;
+					case DONE -> Task.Result.DONE;
+					case FAILED -> Task.Result.FAILED;
+					case CANCELLED -> Task.Result.CANCELLED;
+				}, () -> trades.stop(false));
+			});
+		}
+
+		@Override
+		public Task bucket(String item, int n) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				buckets.start(Minecraft.getInstance(), item, n);
+				return new Task("bucket " + item, () -> switch (buckets.outcome()) {
+					case NONE -> null;
+					case DONE -> Task.Result.DONE;
+					case FAILED -> Task.Result.FAILED;
+					case CANCELLED -> Task.Result.CANCELLED;
+				}, () -> buckets.stop(false));
+			});
+		}
+
+		@Override
+		public Task hunt(String item, int count) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				startHunt(item, count);
+				return new Task("hunt " + item, () -> switch (hunt.outcome()) {
+					case NONE -> null;
+					case DONE -> Task.Result.DONE;
+					case FAILED -> Task.Result.FAILED;
+					case CANCELLED -> Task.Result.CANCELLED;
+				}, () -> hunt.stop(false));
+			});
+		}
+
+		@Override
+		public Task smith(String item, int count) {
+			return tasks.run(() -> {
+				stopProcesses(false);
+				smiths.start(Minecraft.getInstance(), new ItemCount(item, count));
+				return new Task("smith " + item, () -> switch (smiths.outcome()) {
+					case NONE -> null;
+					case DONE -> Task.Result.DONE;
+					case FAILED -> Task.Result.FAILED;
+					case CANCELLED -> Task.Result.CANCELLED;
+				}, () -> smiths.stop(false));
 			});
 		}
 
@@ -844,6 +956,29 @@ public final class LazuliClient implements ClientModInitializer {
 		if (plan.isEmpty()) return;
 		clicks.play(p.inventoryMenu.containerId, plan);
 		chat(Chat.ok("Dropping {}", ItemCount.describe(dropped)));
+	}
+
+	/** #hunt: kills the mobs that drop {@code item} (as #getitem would pick them) until {@code count} more are in the inventory. */
+	private void startHunt(String item, int count) {
+		Minecraft mc = Minecraft.getInstance();
+		String id = Inventories.id(item);
+		dev.lazuli.core.craft.MobDrops drops;
+		try {
+			drops = dev.lazuli.mod.craft.RecipeData.mobDrops().join();
+		} catch (RuntimeException e) {
+			chat(Chat.err("Could not read the loot tables: {}", e.getMessage()));
+			return;
+		}
+		var who = new java.util.ArrayList<>(drops.sources(id).stream()
+			.filter(s -> dev.lazuli.core.craft.MobDrops.rarity(s.mob()) < dev.lazuli.core.craft.Drops.UNKNOWN).toList());
+		who.sort(java.util.Comparator.comparingDouble(s -> dev.lazuli.core.craft.MobDrops.rarity(s.mob()) / s.perKill()));
+		if (who.isEmpty()) {
+			chat(Chat.err("No mob worth hunting drops {}", id.replace("minecraft:", "")));
+			return;
+		}
+		int have = Inventories.plainCounts(mc.player).getOrDefault(id, 0);
+		hunt.start(mc, id, have + Math.max(1, count), who.stream().map(dev.lazuli.core.craft.MobDrops.Source::mob).toList());
+		chat(Chat.info("Hunting {} for {} {}", who.get(0).mob().replace("minecraft:", ""), Math.max(1, count), id.replace("minecraft:", "")));
 	}
 
 	private void stopProcesses(boolean announce) {

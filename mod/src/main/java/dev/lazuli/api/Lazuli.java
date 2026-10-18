@@ -51,12 +51,12 @@ public interface Lazuli {
     Task container(boolean deposit, List<ItemCount> items, int[] at);
 
     /** Throws out {@code count} of an item ("all": anything) from the inventory; negative: all of it. */
-    default void drop(String item, int count) {
-        drop(List.of(new ItemCount(item, count)));
+    default Task drop(String item, int count) {
+        return drop(List.of(new ItemCount(item, count)));
     }
 
-    /** Throws out several items at once. */
-    void drop(List<ItemCount> items);
+    /** Throws out several items at once; done once the clicks have been played. */
+    Task drop(List<ItemCount> items);
 
     /**
      * Crafts {@code count} of an item (an id like {@code stick}), crafting the ingredients first if the
@@ -80,6 +80,27 @@ public interface Lazuli {
      * tools, fuel, crafting table and furnace included, planning again after every step.
      */
     Task getItem(String item, int count);
+
+    /** Brews {@code count} bottles of a potion (fire_resistance, long_swiftness...) in a brewing stand. */
+    Task brew(String potion, dev.lazuli.core.craft.Brewing.Form form, int count);
+
+    /** Trades with villagers for these (selling things for emeralds first if need be). */
+    Task trade(List<dev.lazuli.core.trade.Want> wants);
+
+    /** Sells {@code count} of an item (an id like {@code minecraft:string}; negative: all of it) to villagers for emeralds. */
+    Task tradeSell(String item, int count);
+
+    /**
+     * Fills {@code n} more buckets or casts obsidian. {@code item}: {@code minecraft:water_bucket}, {@code lava_bucket},
+     * {@code milk_bucket} (from empty buckets in the inventory) or {@code minecraft:obsidian} (needs a water bucket).
+     */
+    Task bucket(String item, int n);
+
+    /** Kills the mobs that drop an item until {@code count} more are in the inventory (like {@code #hunt string 20}). */
+    Task hunt(String item, int count);
+
+    /** Upgrades at a smithing table (netherite_pickaxe...); the template, base item and addition must be in the inventory. */
+    Task smith(String item, int count);
 
     /** The running job, or null. */
     Task current();
