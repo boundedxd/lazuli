@@ -88,8 +88,8 @@ public final class MakeRoom {
         }
         if (settings.makeRoomDropJunk.get() && throwsDone < MAX_THROWS) {
             int junk = Tools.junkSlot(p, settings);
-            if (junk >= 0) {
-                clicks.add(p.inventoryMenu.containerId, List.of(Click.throwAll(junk)));
+            if (junk >= 0 && dev.lazuli.mod.LazuliClient.throwAwayMenuSlot(junk)) {
+                // hotbar + Q, not a throw click on a main-inventory slot
                 throwsDone++;
                 return State.WORKING;
             }

@@ -635,10 +635,8 @@ public final class MineProcess implements dev.lazuli.mod.process.Process {
                 int junk = Tools.junkSlot(player, settings);
                 var clicks = dev.lazuli.mod.inventory.ClickDriver.get();
                 if (junk >= 0 && dropTries < 12) {
-                    if (!clicks.busy()) {
-                        clicks.add(player.inventoryMenu.containerId, java.util.List.of(dev.lazuli.core.inventory.Click.throwAll(junk)));
-                        dropTries++;
-                    }
+                    // hotbar + Q (never a throw click on a main-inventory slot: anticheats flag those)
+                    if (dev.lazuli.mod.LazuliClient.throwAwayMenuSlot(junk)) dropTries++;
                     return false;
                 }
             }

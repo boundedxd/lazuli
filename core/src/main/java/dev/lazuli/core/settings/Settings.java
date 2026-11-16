@@ -304,6 +304,8 @@ public final class Settings {
         s -> s.replace(" ", "")));
     /** Allow the localhost MCP bridge to control Lazuli. */
     public final Setting<Boolean> mcpEnabled = bool("mcpEnabled", false);
+    /** MCP actions are paced like a player: capped turning, one break tick per call, no instant block destruction. */
+    public final Setting<Boolean> mcpPacedActions = bool("mcpPacedActions", true);
     /** Port for the localhost MCP bridge. */
     public final Setting<Integer> mcpPort = integer("mcpPort", 8765, 1024, 65535);
     /** #getitem may smelt for what it needs. */

@@ -60,7 +60,7 @@ TOOLS = [
     },
     {
         "name": "look",
-        "description": "FALLBACK ONLY: directly set player yaw and pitch when Lazuli has no supported look action. Do not use while a Lazuli job is active.",
+        "description": "FALLBACK ONLY: turn toward yaw/pitch gradually at the rotation speed, like a player looking. No instant snap, so it takes a few ticks. Do not use while a Lazuli job is active.",
         "inputSchema": {"type": "object", "properties": {"yaw": {"type": "number"}, "pitch": {"type": "number", "minimum": -90, "maximum": 90}}, "required": ["yaw", "pitch"], "additionalProperties": False},
         "annotations": {"destructiveHint": True},
     },
@@ -78,7 +78,7 @@ TOOLS = [
     },
     {
         "name": "attack",
-        "description": "FALLBACK ONLY: attack a nearby entity by UUID or the current crosshair target when Lazuli has no supported combat/job command.",
+        "description": "FALLBACK ONLY: hit an entity within reach and line of sight, respecting the vanilla attack cooldown (returns attacked=false while it recharges).",
         "inputSchema": {"type": "object", "properties": {"uuid": {"type": "string"}}, "additionalProperties": False},
         "annotations": {"destructiveHint": True},
     },
@@ -90,13 +90,13 @@ TOOLS = [
     },
     {
         "name": "break_block",
-        "description": "FALLBACK ONLY: directly break one reachable block when Lazuli has no supported command. Prefer mine, tunnel, build, or sel first.",
+        "description": "FALLBACK ONLY: mine one tick per call with vanilla start/continue destroy, aimed first. Call repeatedly until done is true. Prefer mine/tunnel/build/sel. (Instant destroy only if mcpPacedActions is off.)",
         "inputSchema": {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}, "z": {"type": "integer"}}, "required": ["x", "y", "z"], "additionalProperties": False},
         "annotations": {"destructiveHint": True},
     },
     {
         "name": "place_block",
-        "description": "FALLBACK ONLY: directly place the selected block against a reachable block face when Lazuli has no supported command.",
+        "description": "FALLBACK ONLY: place the held block at a spot, against a neighbouring block that is actually in sight. It may turn first, so call again if placed is false. Prefer build/sel.",
         "inputSchema": {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}, "z": {"type": "integer"}, "face": {"type": "string", "enum": ["DOWN", "UP", "NORTH", "SOUTH", "WEST", "EAST"]}}, "required": ["x", "y", "z"], "additionalProperties": False},
         "annotations": {"destructiveHint": True},
     },
@@ -114,7 +114,7 @@ TOOLS = [
     },
     {
         "name": "move_item",
-        "description": "Move items in the player's own inventory using Lazuli's click planner. Default puts the item in the hotbar (a stack of it, else an empty slot). to=hotbar|offhand|drop|<slot 9-44>. count omitted or -1 moves all it has. This is how you equip a tool; no manual slot clicking needed.",
+        "description": "Move items in the player's own inventory using Lazuli's click planner. Default puts the item in the hotbar (a stack of it, else an empty slot). to=hotbar|offhand|drop|<slot 9-44>. count omitted or -1 moves all it has. to=drop throws the stack with the drop key after moving it into the hotbar (never window clicks from main inventory, which anticheats flag). This is how you equip a tool; no manual slot clicking needed.",
         "inputSchema": {"type": "object", "properties": {
             "item": {"type": "string", "description": "Item id, namespace optional, e.g. iron_pickaxe"},
             "count": {"type": "integer"},

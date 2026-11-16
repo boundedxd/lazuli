@@ -1106,7 +1106,15 @@ public final class LazuliClient implements ClientModInitializer {
 	/** A routine is running one of its steps right now. */
 	private boolean runningRoutineStep;
 
-	/** Throws out items ("all": anything) from the main inventory and hotbar; a negative count: all of it. */
+	/** Waiting drops, one key press at a time (see {@link #tickDrops}). */
+	private final java.util.ArrayDeque<ItemCount> dropQueue = new java.util.ArrayDeque<>();
+	private int dropCooldown, dropTries;
+
+	/**
+	 * Throws items out the way a player does: the stack goes into the hotbar (window clicks with the inventory open, as
+	 * anyone moving an item does), then Q is pressed. Throwing straight out of a main-inventory slot with window clicks
+	 * is what some anticheats flag, so that is never done.
+	 */
 	private void drop(java.util.List<ItemCount> items) {
 		var p = Minecraft.getInstance().player;
 		if (p == null) return;
@@ -1114,21 +1122,92 @@ public final class LazuliClient implements ClientModInitializer {
 			chat(Chat.err("Close the open menu first"));
 			return;
 		}
-		// each item is planned on the menu as the ones before it leave it
-		var sim = Inventories.read(p.inventoryMenu, p);
-		var plan = new java.util.ArrayList<dev.lazuli.core.inventory.Click>();
-		var dropped = new java.util.ArrayList<ItemCount>();
-		for (ItemCount i : items) {
-			int before = sim.dropped();
-			var part = Moves.drop(sim, Inventories.PLAYER_MAIN, Inventories.matcher(i.item()), i.count());
-			sim.applyAll(part);
-			plan.addAll(part);
-			if (part.isEmpty()) chat(Chat.err("No {} to drop", i.item()));
-			else dropped.add(new ItemCount(i.item(), sim.dropped() - before));
+		dropQueue.clear();
+		for (ItemCount i : items) if (i.count() != 0) dropQueue.add(i);
+		dropTries = 0;
+		dropCooldown = 0;
+		if (!dropQueue.isEmpty()) chat(Chat.ok("Dropping {}", ItemCount.describe(items)));
+	}
+
+	/** Adds one item (count -1: whole stacks) to the drop queue. */
+	private void queueDrop(String item, int count) {
+		dropQueue.add(new ItemCount(item, count));
+		dropCooldown = 0;
+	}
+
+	/**
+	 * Processes making room throw a stack out the way a player does: the queue moves it into the hotbar and presses Q.
+	 * A THROW window click on a main-inventory slot is what anticheats flag, so none of them do that any more.
+	 *
+	 * @param menuSlot a slot of the player's own menu; false when it holds nothing
+	 */
+	public static boolean throwAwayMenuSlot(int menuSlot) {
+		LazuliClient self = instance;
+		Minecraft mc = Minecraft.getInstance();
+		if (self == null || mc.player == null) return false;
+		var slots = mc.player.inventoryMenu.slots;
+		if (menuSlot < 0 || menuSlot >= slots.size()) return false;
+		var stack = slots.get(menuSlot).getItem();
+		if (stack.isEmpty()) return false;
+		self.queueDrop(Inventories.key(stack), -1);
+		return true;
+	}
+
+	/** True while something is still waiting to be thrown out. */
+	public static boolean dropping() {
+		return instance != null && !instance.dropQueue.isEmpty();
+	}
+
+	/** One drop step every few ticks: select the hotbar slot, press Q, wait a human moment. */
+	private void tickDrops(Minecraft mc) {
+		var p = mc.player;
+		if (p == null || dropQueue.isEmpty() || mc.screen != null) return;
+		if (dropCooldown > 0) {
+			dropCooldown--;
+			return;
 		}
-		if (plan.isEmpty()) return;
-		clicks.play(p.inventoryMenu.containerId, plan);
-		chat(Chat.ok("Dropping {}", ItemCount.describe(dropped)));
+		ItemCount want = dropQueue.peekFirst();
+		var matcher = Inventories.matcher(want.item());
+		var inv = p.getInventory();
+		int hotbar = -1, elsewhere = -1;
+		for (int i = 0; i < 36; i++) {
+			var stack = inv.getItem(i);
+			if (stack.isEmpty() || !matcher.test(Inventories.key(stack))) continue;
+			if (i < 9) { hotbar = i; break; }
+			if (elsewhere < 0) elsewhere = i;
+		}
+		if (hotbar < 0) {
+			if (elsewhere < 0) {
+				dropQueue.pollFirst();
+				dropCooldown = 2;
+				chat(Chat.err("No {} to drop", want.item()));
+				return;
+			}
+			// not in the hotbar: move one stack there with a number-key swap (the click driver opens the inventory)
+			if (++dropTries > 80) {
+				dropQueue.pollFirst();
+				dropTries = 0;
+				chat(Chat.err("Couldn't get {} into the hotbar to drop it", want.item()));
+				return;
+			}
+			if (!clicks.busy()) clicks.add(p.inventoryMenu.containerId,
+				java.util.List.of(dev.lazuli.core.inventory.Click.swap(elsewhere, inv.getSelectedSlot())));
+			dropCooldown = 1;
+			return;
+		}
+		dropTries = 0;
+		inv.setSelectedSlot(hotbar);
+		var stack = inv.getItem(hotbar);
+		int size = stack.getCount();
+		boolean all = want.count() < 0;
+		boolean wholeStack = all || want.count() >= size;
+		p.drop(wholeStack);
+		dropQueue.pollFirst();
+		if (!all) {
+			int left = want.count() - (wholeStack ? size : 1);
+			if (left > 0) dropQueue.addFirst(new ItemCount(want.item(), left));
+		}
+		dropCooldown = 2 + p.getRandom().nextInt(3);
 	}
 
 	/** #hunt: kills the mobs that drop {@code item} (as #getitem would pick them) until {@code count} more are in the inventory. */
@@ -1223,6 +1302,7 @@ public final class LazuliClient implements ClientModInitializer {
 		recovery.watch(mc);
 		wasDead = dead;
 		clicks.tick(mc, settings.clicksPerTick.get());
+		tickDrops(mc);
 		if (ticks % 10 == 0) session.setHazards(mc.player == null || !settings.avoidMobs.get() || hunt.active() || !busy()
 			? dev.lazuli.core.move.Hazards.NONE : dev.lazuli.mod.process.Guard.hazards(mc, mc.player, settings));
 		renderer.tick(mc);
@@ -1572,15 +1652,26 @@ public final class LazuliClient implements ClientModInitializer {
 		return McpHttpBridge.success(java.util.Map.of("messages", out));
 	}
 
+	private boolean mcpTurning;
+	private float mcpTowardYaw, mcpTowardPitch;
+
+	/** Looks somewhere over the next ticks at the rotation speed: an instant snap is a giveaway. */
 	private com.google.gson.JsonObject mcpLook(com.google.gson.JsonObject args, Minecraft mc) {
 		String error = fallbackReady(mc);
 		if (error != null) return McpHttpBridge.error(error);
 		float yaw = (float) doubleArg(args, "yaw", mc.player.getYRot());
 		float pitch = (float) Math.max(-90, Math.min(90, doubleArg(args, "pitch", mc.player.getXRot())));
-		mc.player.setYRot(yaw);
-		mc.player.setXRot(pitch);
-		mc.player.setYHeadRot(yaw);
-		return McpHttpBridge.success(java.util.Map.of("yaw", yaw, "pitch", pitch));
+		if (!settings.mcpPacedActions.get()) {
+			mc.player.setYRot(yaw);
+			mc.player.setXRot(pitch);
+			mc.player.setYHeadRot(yaw);
+			return McpHttpBridge.success(java.util.Map.of("yaw", yaw, "pitch", pitch));
+		}
+		mcpTowardYaw = yaw;
+		mcpTowardPitch = pitch;
+		mcpTurning = true;
+		return McpHttpBridge.success(java.util.Map.of("turning", true, "yaw", yaw, "pitch", pitch,
+			"note", "Turning at rotationSpeed over the next ticks"));
 	}
 
 	private com.google.gson.JsonObject mcpMove(com.google.gson.JsonObject args, Minecraft mc) {
@@ -1613,8 +1704,17 @@ public final class LazuliClient implements ClientModInitializer {
 		net.minecraft.world.entity.Entity target = entityArg(args, mc);
 		if (target == null && mc.hitResult instanceof net.minecraft.world.phys.EntityHitResult hit) target = hit.getEntity();
 		if (target == null) return McpHttpBridge.error("No target entity or crosshair entity");
-		mc.gameMode.attack(mc.player, target);
-		mc.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+		var p = mc.player;
+		if (p.distanceTo(target) > dev.lazuli.mod.control.Melee.REACH)
+			return McpHttpBridge.error("Too far to hit; walk closer first");
+		if (!p.hasLineOfSight(target)) return McpHttpBridge.error("No line of sight to that entity");
+		if (p.getAttackStrengthScale(0.5f) < 0.95f)
+			return McpHttpBridge.success(java.util.Map.of("attacked", false, "note", "Attack cooldown not full; call again shortly"));
+		double dx = target.getX() - p.getX(), dy = target.getEyeY() - p.getEyeY(), dz = target.getZ() - p.getZ();
+		dev.lazuli.mod.control.Legit.aimTick(mc, p, (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0),
+			(float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz))), settings);
+		mc.gameMode.attack(p, target);
+		p.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
 		return McpHttpBridge.success(java.util.Map.of("attacked", true, "uuid", target.getUUID().toString()));
 	}
 
@@ -1632,22 +1732,40 @@ public final class LazuliClient implements ClientModInitializer {
 		String error = fallbackReady(mc);
 		if (error != null) return McpHttpBridge.error(error);
 		BlockPos pos = blockArg(args);
-		if (mc.player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > 36) return McpHttpBridge.error("Block is out of reach");
-		boolean broken = mc.gameMode.destroyBlock(pos);
-		return McpHttpBridge.success(java.util.Map.of("broken", broken, "position", pos.toShortString()));
+		if (mc.player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > 36)
+			return McpHttpBridge.error("Block is out of reach; walk closer first");
+		if (!settings.mcpPacedActions.get()) {
+			boolean broken = mc.gameMode.destroyBlock(pos);
+			return McpHttpBridge.success(java.util.Map.of("broken", broken, "position", pos.toShortString()));
+		}
+		var result = dev.lazuli.mod.control.Legit.breakTick(mc, mc.player, pos, settings);
+		java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+		out.put("position", pos.toShortString());
+		out.put("result", result.name());
+		out.put("done", result == dev.lazuli.mod.control.Legit.Break.DONE);
+		if (result == dev.lazuli.mod.control.Legit.Break.OUT_OF_SIGHT) out.put("note", "No line of sight; break it from another side");
+		if (result == dev.lazuli.mod.control.Legit.Break.WORKING) out.put("note", "One mining tick per call, like holding the mouse; call again until done");
+		return McpHttpBridge.success(out);
 	}
 
 	private com.google.gson.JsonObject mcpPlaceBlock(com.google.gson.JsonObject args, Minecraft mc) {
 		String error = fallbackReady(mc);
 		if (error != null) return McpHttpBridge.error(error);
 		BlockPos pos = blockArg(args);
-		String faceName = args.has("face") ? args.get("face").getAsString().toUpperCase(java.util.Locale.ROOT) : "UP";
-		net.minecraft.core.Direction face = net.minecraft.core.Direction.byName(faceName);
-		if (face == null) return McpHttpBridge.error("Unknown face: " + faceName);
-		var hit = new net.minecraft.world.phys.BlockHitResult(net.minecraft.world.phys.Vec3.atCenterOf(pos), face, pos, false);
-		var result = mc.gameMode.useItemOn(mc.player, net.minecraft.world.InteractionHand.MAIN_HAND, hit);
-		if (result.consumesAction()) mc.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
-		return McpHttpBridge.success(java.util.Map.of("placed", result.consumesAction(), "position", pos.toShortString(), "face", faceName));
+		if (mc.player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > 36)
+			return McpHttpBridge.error("That spot is out of reach; walk closer first");
+		if (!settings.mcpPacedActions.get()) {
+			String faceName = args.has("face") ? args.get("face").getAsString().toUpperCase(java.util.Locale.ROOT) : "UP";
+			net.minecraft.core.Direction face = net.minecraft.core.Direction.byName(faceName);
+			if (face == null) return McpHttpBridge.error("Unknown face: " + faceName);
+			var hit = new net.minecraft.world.phys.BlockHitResult(net.minecraft.world.phys.Vec3.atCenterOf(pos), face, pos, false);
+			var result = mc.gameMode.useItemOn(mc.player, net.minecraft.world.InteractionHand.MAIN_HAND, hit);
+			if (result.consumesAction()) mc.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+			return McpHttpBridge.success(java.util.Map.of("placed", result.consumesAction(), "position", pos.toShortString(), "face", faceName));
+		}
+		boolean placed = dev.lazuli.mod.control.Legit.placeAt(mc, mc.player, pos, settings);
+		return McpHttpBridge.success(java.util.Map.of("placed", placed, "position", pos.toShortString(),
+			"note", placed ? "Placed against a neighbour in sight" : "Turning toward it, or nothing to place against; call again"));
 	}
 
 	private com.google.gson.JsonObject mcpInteractEntity(com.google.gson.JsonObject args, Minecraft mc) {
@@ -1724,12 +1842,15 @@ public final class LazuliClient implements ClientModInitializer {
 			if (key.equals(stack.item())) available += stack.count();
 		}
 		if (key == null) return McpHttpBridge.error("No " + item + " in the inventory");
+		if (to.equals("drop")) {
+			drop(java.util.List.of(new ItemCount(item, count)));
+			return McpHttpBridge.success(java.util.Map.of("moved", true, "item", key, "to", "drop",
+				"note", "Thrown out with the drop key, hotbar first; poll get_state to confirm."));
+		}
 		java.util.List<dev.lazuli.core.inventory.Click> plan;
 		int targetSlot = -1;
 		try {
-			if (to.equals("drop")) {
-				plan = dev.lazuli.core.inventory.Moves.drop(sim, carried, matcher, count);
-			} else {
+			{
 				targetSlot = switch (to) {
 					case "hotbar" -> dev.lazuli.core.inventory.PlayerSlots.hotbarFor(sim, key);
 					case "offhand" -> dev.lazuli.core.inventory.PlayerSlots.OFFHAND;
@@ -2052,6 +2173,15 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private void tickMcpControls() {
+		if (mcpTurning) {
+			var p = Minecraft.getInstance().player;
+			if (p == null || Minecraft.getInstance().screen != null) {
+				mcpTurning = false;
+				RotationDriver.end();
+			} else if (dev.lazuli.mod.control.Legit.aimTick(Minecraft.getInstance(), p, mcpTowardYaw, mcpTowardPitch, settings)) {
+				mcpTurning = false;
+			}
+		}
 		if (mcpControlTicks == 0) return;
 		mcpControlTicks--;
 		if (mcpControlTicks > 0) return;

@@ -25,6 +25,7 @@ public final class ControlsTab {
                 Ui.nameList(s.chatControlPlayers, ListEntries.onlinePlayers(), "Who may run commands from chat (pick online players or type a name).")),
             Ui.folded("MCP",
                 Ui.bool(s.mcpEnabled, "Allow Pi and other local MCP clients to read game state and run Lazuli commands."),
-                Ui.num(s.mcpPort, 1024, 65535, 1, "Localhost-only MCP bridge port.")));
+                Ui.num(s.mcpPort, 1024, 65535, 1, "Localhost-only MCP bridge port."),
+                Ui.bool(s.mcpPacedActions, "Pace MCP actions like a player: turn at the rotation speed, break one tick per call, never destroy a block instantly.")));
     }
 }

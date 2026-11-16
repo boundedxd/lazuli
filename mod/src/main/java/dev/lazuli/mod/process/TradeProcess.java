@@ -912,8 +912,8 @@ public final class TradeProcess implements Process {
         if (junk < 0) return false;
         roomThrows++;
         close(mc, p);
-        clicks.add(p.inventoryMenu.containerId, List.of(Click.throwAll(junk)));
-        return true;
+        // hotbar + Q after the screen is closed, never a throw click on a main-inventory slot
+        return dev.lazuli.mod.LazuliClient.throwAwayMenuSlot(junk);
     }
 
     private void close(Minecraft mc, LocalPlayer p) {
