@@ -43,6 +43,8 @@ public final class HuntProcess implements Process {
     private List<String> mobs = List.of();
     private LivingEntity prey;
     private BlockPos goal;
+    /** Tick the current walk trip was planned on (see {@link dev.lazuli.core.process.Rechase}). */
+    private int plannedTick;
     /** Drops it couldn't get to in time: left alone. */
     private final java.util.Set<Integer> skipDrops = new java.util.HashSet<>();
     /** Mobs it couldn't get to within {@link #PREY_TICKS}: left alone this run. */
@@ -159,7 +161,7 @@ public final class HuntProcess implements Process {
                 dropTicks = 0;
             }
             if (++dropTicks > DROP_TICKS) skipDrops.add(dropId);
-            input.release();
+            // the path executor drives these walks: releasing here would cancel the movement it just chose
             walk(p, drop.blockPosition(), 0);
             return;
         }
@@ -169,7 +171,6 @@ public final class HuntProcess implements Process {
         }
         if (prey == null) {
             // none around: look elsewhere
-            input.release();
             if (!trip.running()) {
                 if (wanders++ == 0) chat.accept(Chat.info("No {} around; looking for some", name(mobs.get(0))));
                 double a = p.getRandom().nextDouble() * Math.PI * 2;
@@ -189,7 +190,6 @@ public final class HuntProcess implements Process {
                 input.release();
                 return;
             }
-            input.release();
             walk(p, prey.blockPosition(), 1);
             return;
         }
@@ -200,10 +200,15 @@ public final class HuntProcess implements Process {
         Melee.tick(mc, p, prey, input, settings);
     }
 
-    /** A trip to near {@code to}, made again when it has moved off a few blocks. */
+    /**
+     * A trip to near {@code to}. The current walk is kept while it still serves: a mob wandering a couple of blocks
+     * must not make every tick plan again (the trip would restart endlessly and never be followed).
+     */
     private void walk(LocalPlayer p, BlockPos to, int radius) {
-        if (trip.running() && goal != null && goal.distSqr(to) <= 9) return;
+        double moved = goal == null ? Double.MAX_VALUE : goal.distSqr(to);
+        if (dev.lazuli.core.process.Rechase.keep(trip.running(), moved, p.tickCount - plannedTick)) return;
         goal = to;
+        plannedTick = p.tickCount;
         trip.go(radius == 0 ? new GoalBlock(to.getX(), to.getY(), to.getZ()) : new GoalNear(to.getX(), to.getY(), to.getZ(), radius), p, true);
     }
 

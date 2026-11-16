@@ -1420,6 +1420,8 @@ public final class LazuliClient implements ClientModInitializer {
 			case "break_block" -> mcpBreakBlock(args, mc);
 			case "place_block" -> mcpPlaceBlock(args, mc);
 			case "interact_entity" -> mcpInteractEntity(args, mc);
+			case "open_inventory" -> mcpOpenInventory(mc);
+			case "move_item" -> mcpMoveItem(args, mc);
 			case "surroundings" -> mcpSurroundings(args, mc);
 			case "find_block" -> mcpFindBlock(args, mc);
 			case "inspect_block" -> mcpInspectBlock(args, mc);
@@ -1688,6 +1690,81 @@ public final class LazuliClient implements ClientModInitializer {
 		return McpHttpBridge.success(java.util.Map.of("entities", out));
 	}
 
+	private com.google.gson.JsonObject mcpOpenInventory(Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		var p = mc.player;
+		if (p == null) return McpHttpBridge.error("Join a world first");
+		if (p.containerMenu != p.inventoryMenu) return McpHttpBridge.error("A container screen is open; close_gui first");
+		if (!(mc.screen instanceof net.minecraft.client.gui.screens.inventory.InventoryScreen))
+			mc.setScreen(new net.minecraft.client.gui.screens.inventory.InventoryScreen(p));
+		return McpHttpBridge.success(java.util.Map.of("opened", true,
+			"note", "inspect_gui lists the slots; slots 36-44 are the hotbar, 9-35 the inventory"));
+	}
+
+	/** Moves items in the player's own menu with the tested click planner (#8 in MovesTest): no hand-written slot maths. */
+	private com.google.gson.JsonObject mcpMoveItem(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		var p = mc.player;
+		if (p == null) return McpHttpBridge.error("Join a world first");
+		if (p.containerMenu != p.inventoryMenu) return McpHttpBridge.error("Close the open container first (close_gui)");
+		String item = requiredString(args, "item");
+		int count = intArg(args, "count", -1);
+		String to = args.has("to") ? args.get("to").getAsString().toLowerCase(java.util.Locale.ROOT) : "hotbar";
+		var sim = Inventories.read(p.inventoryMenu, p);
+		var matcher = Inventories.matcher(item);
+		int[] carried = dev.lazuli.core.inventory.PlayerSlots.carried();
+		String key = null;
+		int available = 0;
+		for (int s : carried) {
+			var stack = sim.get(s);
+			if (stack.empty() || !matcher.test(stack.item())) continue;
+			if (key == null) key = stack.item();
+			if (key.equals(stack.item())) available += stack.count();
+		}
+		if (key == null) return McpHttpBridge.error("No " + item + " in the inventory");
+		java.util.List<dev.lazuli.core.inventory.Click> plan;
+		int targetSlot = -1;
+		try {
+			if (to.equals("drop")) {
+				plan = dev.lazuli.core.inventory.Moves.drop(sim, carried, matcher, count);
+			} else {
+				targetSlot = switch (to) {
+					case "hotbar" -> dev.lazuli.core.inventory.PlayerSlots.hotbarFor(sim, key);
+					case "offhand" -> dev.lazuli.core.inventory.PlayerSlots.OFFHAND;
+					default -> Integer.parseInt(to); // an explicit player-menu slot from inspect_gui
+				};
+				if (targetSlot < 0) return McpHttpBridge.error("No room in the hotbar; pass to=<menu slot 9-44> (inspect_gui shows them)");
+				int wanted = count < 0 ? available : Math.min(count, available);
+				int already = key.equals(sim.get(targetSlot).item()) ? sim.get(targetSlot).count() : 0;
+				if (already >= wanted) return McpHttpBridge.success(java.util.Map.of("moved", false, "slot", targetSlot, "note", "Already there"));
+				plan = dev.lazuli.core.inventory.Moves.put(sim, without(carried, targetSlot), targetSlot, key, wanted - already);
+			}
+		} catch (IllegalStateException | NumberFormatException e) {
+			return McpHttpBridge.error(e.getMessage() == null ? "That slot doesn't work" : e.getMessage());
+		}
+		if (plan.isEmpty()) return McpHttpBridge.success(java.util.Map.of("moved", false, "note", "Nothing to move"));
+		if (!(mc.screen instanceof net.minecraft.client.gui.screens.inventory.InventoryScreen))
+			mc.setScreen(new net.minecraft.client.gui.screens.inventory.InventoryScreen(p));
+		clicks.play(p.inventoryMenu.containerId, plan);
+		java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+		out.put("moved", true);
+		out.put("item", key);
+		out.put("to", to);
+		if (targetSlot >= 0) out.put("slot", targetSlot);
+		out.put("clicks", plan.size());
+		out.put("note", "The clicks play over the next ticks; poll get_state to confirm the slot changed.");
+		return McpHttpBridge.success(out);
+	}
+
+	private static int[] without(int[] slots, int skip) {
+		int[] out = new int[slots.length];
+		int n = 0;
+		for (int s : slots) if (s != skip) out[n++] = s;
+		return java.util.Arrays.copyOf(out, n);
+	}
+
 	private com.google.gson.JsonObject mcpSurroundings(com.google.gson.JsonObject args, Minecraft mc) {
 		if (mc.level == null || mc.player == null) return McpHttpBridge.error("Join a world first");
 		int radius = Math.max(0, Math.min(8, intArg(args, "radius", 4)));
@@ -1893,7 +1970,9 @@ public final class LazuliClient implements ClientModInitializer {
 		for (int i = 0; i < menu.slots.size(); i++) {
 			var slot = menu.slots.get(i);
 			var stack = slot.getItem();
-			slots.add(mcpItemSlot(i, slot.getContainerSlot(), stack));
+			slots.add(mcpItemSlot(i, slot.getContainerSlot(), stack,
+				menu == mc.player.inventoryMenu ? dev.lazuli.core.inventory.PlayerSlots.zone(i)
+					: slot.container == mc.player.getInventory() ? "player" : "container"));
 		}
 		out.put("slots", slots);
 		out.put("carried", mcpItem(mc.player.containerMenu.getCarried()));
@@ -1941,10 +2020,11 @@ public final class LazuliClient implements ClientModInitializer {
 		return McpHttpBridge.success(java.util.Map.of("closed", mc.screen != screen));
 	}
 
-	private static java.util.Map<String, Object> mcpItemSlot(int slot, int containerSlot, net.minecraft.world.item.ItemStack stack) {
+	private static java.util.Map<String, Object> mcpItemSlot(int slot, int containerSlot, net.minecraft.world.item.ItemStack stack, String zone) {
 		java.util.Map<String, Object> out = new java.util.LinkedHashMap<>(mcpItem(stack));
 		out.put("slot", slot);
 		out.put("containerSlot", containerSlot);
+		out.put("zone", zone);
 		return out;
 	}
 
