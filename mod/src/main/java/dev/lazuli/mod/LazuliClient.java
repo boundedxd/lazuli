@@ -149,6 +149,7 @@ public final class LazuliClient implements ClientModInitializer {
 	private final Tasks tasks = new Tasks();
 	private ClickDriver clicks;
 	private McpHttpBridge mcpBridge;
+	private final McpScreens mcpScreens = new McpScreens();
 	private final ThreadLocal<java.util.List<String>> mcpReplies = new ThreadLocal<>();
 	private final java.util.concurrent.ConcurrentLinkedDeque<String> mcpMessages = new java.util.concurrent.ConcurrentLinkedDeque<>();
 	private int mcpControlTicks;
@@ -1428,6 +1429,14 @@ public final class LazuliClient implements ClientModInitializer {
 			case "inspect_gui" -> mcpInspectGui(mc);
 			case "click_gui_slot" -> mcpClickGuiSlot(args, mc);
 			case "click_gui_button" -> mcpClickGuiButton(args, mc);
+			case "set_gui_text" -> {
+				String error = fallbackReady(mc);
+				yield error == null ? McpHttpBridge.success(mcpScreens.text(mc, args)) : McpHttpBridge.error(error);
+			}
+			case "scroll_gui" -> {
+				String error = fallbackReady(mc);
+				yield error == null ? McpHttpBridge.success(mcpScreens.scroll(mc, args)) : McpHttpBridge.error(error);
+			}
 			case "close_gui" -> mcpCloseGui(mc);
 			case "stop" -> { stopAll(false); yield McpHttpBridge.success(java.util.Map.of("stopped", true)); }
 			default -> McpHttpBridge.error("Unknown Lazuli tool: " + name);
@@ -1817,6 +1826,7 @@ public final class LazuliClient implements ClientModInitializer {
 		out.put("container", container);
 		out.put("screen", mc.screen.getClass().getSimpleName());
 		out.put("title", mc.screen.getTitle().getString());
+		out.putAll(mcpScreens.inspect(mc.screen));
 		if (!container) {
 			out.put("slots", java.util.List.of());
 			return McpHttpBridge.success(out);
@@ -1857,7 +1867,8 @@ public final class LazuliClient implements ClientModInitializer {
 	private com.google.gson.JsonObject mcpClickGuiButton(com.google.gson.JsonObject args, Minecraft mc) {
 		String error = fallbackReady(mc);
 		if (error != null) return McpHttpBridge.error(error);
-		if (mc.screen == null || mc.player == null || !(mc.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>)) return McpHttpBridge.error("No container GUI is open");
+		if (args.has("control")) return McpHttpBridge.success(mcpScreens.click(mc, args));
+		if (mc.screen == null || mc.player == null || !(mc.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>)) return McpHttpBridge.error("For dialog widgets, pass control and snapshot from inspect_gui");
 		int button = intArg(args, "button", -1);
 		if (button < 0) return McpHttpBridge.error("button must be non-negative");
 		mc.gameMode.handleInventoryButtonClick(mc.player.containerMenu.containerId, button);
@@ -1865,9 +1876,13 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private com.google.gson.JsonObject mcpCloseGui(Minecraft mc) {
-		if (mc.player == null || mc.screen == null) return McpHttpBridge.success(java.util.Map.of("closed", false));
-		mc.player.closeContainer();
-		return McpHttpBridge.success(java.util.Map.of("closed", true));
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		if (mc.screen == null) return McpHttpBridge.success(java.util.Map.of("closed", false));
+		var screen = mc.screen;
+		if (!screen.shouldCloseOnEsc()) return McpHttpBridge.error("This dialog requires its own action or cancel button; inspect_gui and click that control");
+		screen.onClose(); // Dialogs must run their native close action, not send a container-close packet.
+		return McpHttpBridge.success(java.util.Map.of("closed", mc.screen != screen));
 	}
 
 	private static java.util.Map<String, Object> mcpItemSlot(int slot, int containerSlot, net.minecraft.world.item.ItemStack stack) {
