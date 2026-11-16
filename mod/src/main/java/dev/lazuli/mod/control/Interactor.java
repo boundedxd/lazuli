@@ -103,7 +103,7 @@ public final class Interactor implements Builder.Hands {
         placeCooldown = PLACE_COOLDOWN;
         if (mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit).consumesAction()) {
             player.swing(InteractionHand.MAIN_HAND);
-            placeCooldown = 1; // it worked: the next block can go right away
+            // keep the full gap: a place every tick is the classic fast-bridge tell
         }
     }
 

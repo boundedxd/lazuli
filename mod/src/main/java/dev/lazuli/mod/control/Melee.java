@@ -19,9 +19,13 @@ public final class Melee {
 
     /** One tick of fighting {@code t}. */
     public static void tick(Minecraft mc, LocalPlayer p, LivingEntity t, InputDriver input, Settings settings) {
+        int heldBefore = p.getInventory().getSelectedSlot();
         weapon(p);
+        // swapping the weapon and swinging in the same tick is two actions at once: swing from the next tick
+        boolean switched = p.getInventory().getSelectedSlot() != heldBefore;
         boolean onIt = face(mc, p, t, input, settings, 1.5);
-        if (onIt && p.distanceTo(t) <= REACH && !p.isUsingItem() && p.hasLineOfSight(t) && p.getAttackStrengthScale(0.5f) >= 0.95f) {
+        if (!switched && onIt && p.distanceTo(t) <= REACH && !p.isUsingItem() && p.hasLineOfSight(t)
+            && p.getAttackStrengthScale(0.5f) >= 0.95f) {
             mc.gameMode.attack(p, t);
             p.swing(InteractionHand.MAIN_HAND);
         }
@@ -34,8 +38,10 @@ public final class Melee {
     public static boolean face(Minecraft mc, LocalPlayer p, LivingEntity t, InputDriver input, Settings settings, double stopAt) {
         Vec3 at = t.position().add(0, t.getBbHeight() * 0.6, 0);
         double dx = at.x - p.getX(), dy = at.y - p.getEyeY(), dz = at.z - p.getZ();
-        float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
-        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz)));
+        // a touch of aim noise: dead-centre, frame-perfect tracking is the giveaway, not the reaction time
+        float jitter = (p.getRandom().nextFloat() - 0.5f) * 1.2f;
+        float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0) + jitter;
+        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz))) + jitter;
         float maxTurn = settings.rotationSpeed.get().floatValue();
         float yaw0 = RotationDriver.yaw(p), pitch0 = RotationDriver.pitch(p);
         float nyaw = InputPlanner.approach(yaw0, yaw, maxTurn);

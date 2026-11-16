@@ -50,7 +50,10 @@ public final class ClickDriver {
 
     /** Queues more clicks after the ones waiting (dropping those if they were for another menu). */
     public void add(int containerId, List<Click> clicks) {
-        if (this.containerId != containerId) queue.clear();
+        if (this.containerId != containerId) {
+            queue.clear();
+            settle = 2; // a menu that just opened needs a couple of ticks before its slots are trusted
+        }
         queue.addAll(clicks);
         this.containerId = containerId;
     }

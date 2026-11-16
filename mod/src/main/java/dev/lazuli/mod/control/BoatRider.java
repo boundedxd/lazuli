@@ -320,7 +320,9 @@ final class BoatRider {
         }
         float[] aim = angles(p, boat.position().add(0, 0.3, 0));
         boolean onIt = Math.abs(Mth.wrapDegrees(aim[0] - RotationDriver.yaw(p))) < 8 && Math.abs(aim[1] - RotationDriver.pitch(p)) < 8;
-        if (onIt && ticks % 5 == 0) {
+        // a hit only lands within 3 blocks, on a full cooldown, with the boat in sight: anything else is a wasted packet
+        if (onIt && ticks % 5 == 0 && p.getAttackStrengthScale(0.5f) >= 0.95f
+            && boat.getBoundingBox().inflate(0.1).distanceToSqr(p.getEyePosition()) <= 9.0 && p.hasLineOfSight(boat)) {
             mc.gameMode.attack(p, boat);
             p.swing(InteractionHand.MAIN_HAND);
         }

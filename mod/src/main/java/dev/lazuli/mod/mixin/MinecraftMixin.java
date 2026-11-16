@@ -26,16 +26,24 @@ public abstract class MinecraftMixin {
 
     @Inject(method = "startAttack", at = @At("HEAD"), cancellable = true)
     private void lazuli$click(CallbackInfoReturnable<Boolean> cir) {
+        if (dev.lazuli.mod.inventory.ClickDriver.holding()) {
+            cir.setReturnValue(false); // clicking in a menu: no swing/attack in the same tick
+            return;
+        }
         if (ClickGoal.click((Minecraft) (Object) this)) cir.setReturnValue(false);
     }
 
     @Inject(method = "startUseItem", at = @At("HEAD"), cancellable = true)
     private void lazuli$noUseInFreecam(CallbackInfo ci) {
-        if (FreeCam.active()) ci.cancel();
+        if (FreeCam.active() || dev.lazuli.mod.inventory.ClickDriver.holding()) ci.cancel();
     }
 
     @Inject(method = "continueAttack", at = @At("HEAD"), cancellable = true)
     private void lazuli$mine(boolean attacking, CallbackInfo ci) {
+        if (dev.lazuli.mod.inventory.ClickDriver.holding()) {
+            ci.cancel(); // one action per tick: clicks and digging never overlap
+            return;
+        }
         if (ClickGoal.swallowHeld(attacking)) {
             ci.cancel();
             return;

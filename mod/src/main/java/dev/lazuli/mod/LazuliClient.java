@@ -1108,7 +1108,7 @@ public final class LazuliClient implements ClientModInitializer {
 
 	/** Waiting drops, one key press at a time (see {@link #tickDrops}). */
 	private final java.util.ArrayDeque<ItemCount> dropQueue = new java.util.ArrayDeque<>();
-	private int dropCooldown, dropTries;
+	private int dropCooldown, dropTries, dropSelected = -1;
 
 	/**
 	 * Throws items out the way a player does: the stack goes into the hotbar (window clicks with the inventory open, as
@@ -1196,7 +1196,13 @@ public final class LazuliClient implements ClientModInitializer {
 			return;
 		}
 		dropTries = 0;
-		inv.setSelectedSlot(hotbar);
+		if (dropSelected != hotbar) {
+			// choosing the slot and pressing Q in one tick is two actions at once: pick it this tick, drop the next
+			inv.setSelectedSlot(hotbar);
+			dropSelected = hotbar;
+			dropCooldown = 1;
+			return;
+		}
 		var stack = inv.getItem(hotbar);
 		int size = stack.getCount();
 		boolean all = want.count() < 0;
@@ -1207,6 +1213,7 @@ public final class LazuliClient implements ClientModInitializer {
 			int left = want.count() - (wholeStack ? size : 1);
 			if (left > 0) dropQueue.addFirst(new ItemCount(want.item(), left));
 		}
+		dropSelected = -1;
 		dropCooldown = 2 + p.getRandom().nextInt(3);
 	}
 
@@ -1301,7 +1308,7 @@ public final class LazuliClient implements ClientModInitializer {
 		if (dead && !wasDead) recovery.died(mc, mc.player.blockPosition());
 		recovery.watch(mc);
 		wasDead = dead;
-		clicks.tick(mc, settings.clicksPerTick.get());
+		clicks.tick(mc, Math.min(2, settings.clicksPerTick.get()));
 		tickDrops(mc);
 		if (ticks % 10 == 0) session.setHazards(mc.player == null || !settings.avoidMobs.get() || hunt.active() || !busy()
 			? dev.lazuli.core.move.Hazards.NONE : dev.lazuli.mod.process.Guard.hazards(mc, mc.player, settings));
@@ -1711,8 +1718,11 @@ public final class LazuliClient implements ClientModInitializer {
 		if (p.getAttackStrengthScale(0.5f) < 0.95f)
 			return McpHttpBridge.success(java.util.Map.of("attacked", false, "note", "Attack cooldown not full; call again shortly"));
 		double dx = target.getX() - p.getX(), dy = target.getEyeY() - p.getEyeY(), dz = target.getZ() - p.getZ();
-		dev.lazuli.mod.control.Legit.aimTick(mc, p, (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0),
+		boolean onTarget = dev.lazuli.mod.control.Legit.aimTick(mc, p, (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0),
 			(float) -Math.toDegrees(Math.atan2(dy, Math.hypot(dx, dz))), settings);
+		// hitting before the view has arrived is the classic aimbot pattern: turn first, hit on a later call
+		if (!onTarget) return McpHttpBridge.success(java.util.Map.of("attacked", false, "uuid", target.getUUID().toString(),
+			"note", "Turning toward it; call again to hit"));
 		mc.gameMode.attack(p, target);
 		p.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
 		return McpHttpBridge.success(java.util.Map.of("attacked", true, "uuid", target.getUUID().toString()));
@@ -1723,8 +1733,13 @@ public final class LazuliClient implements ClientModInitializer {
 		if (error != null) return McpHttpBridge.error(error);
 		var hand = "off".equalsIgnoreCase(args.has("hand") ? args.get("hand").getAsString() : "main")
 			? net.minecraft.world.InteractionHand.OFF_HAND : net.minecraft.world.InteractionHand.MAIN_HAND;
+		if (!dev.lazuli.mod.control.Legit.canUse(mc.player))
+			return McpHttpBridge.success(java.util.Map.of("used", false, "note", "Use cooldown not ready (4 ticks); call again shortly"));
 		var result = mc.gameMode.useItem(mc.player, hand);
-		if (result.consumesAction()) mc.player.swing(hand);
+		if (result.consumesAction()) {
+			dev.lazuli.mod.control.Legit.used(mc.player);
+			mc.player.swing(hand);
+		}
 		return McpHttpBridge.success(java.util.Map.of("used", result.consumesAction(), "hand", hand == net.minecraft.world.InteractionHand.MAIN_HAND ? "main" : "off"));
 	}
 
@@ -1732,12 +1747,9 @@ public final class LazuliClient implements ClientModInitializer {
 		String error = fallbackReady(mc);
 		if (error != null) return McpHttpBridge.error(error);
 		BlockPos pos = blockArg(args);
-		if (mc.player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > 36)
-			return McpHttpBridge.error("Block is out of reach; walk closer first");
-		if (!settings.mcpPacedActions.get()) {
-			boolean broken = mc.gameMode.destroyBlock(pos);
-			return McpHttpBridge.success(java.util.Map.of("broken", broken, "position", pos.toShortString()));
-		}
+		double reach = mc.player.blockInteractionRange();
+		if (mc.player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > reach * reach)
+			return McpHttpBridge.error("Block is out of reach (vanilla reach is " + reach + " blocks); walk closer first");
 		var result = dev.lazuli.mod.control.Legit.breakTick(mc, mc.player, pos, settings);
 		java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
 		out.put("position", pos.toShortString());
@@ -1752,17 +1764,9 @@ public final class LazuliClient implements ClientModInitializer {
 		String error = fallbackReady(mc);
 		if (error != null) return McpHttpBridge.error(error);
 		BlockPos pos = blockArg(args);
-		if (mc.player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > 36)
-			return McpHttpBridge.error("That spot is out of reach; walk closer first");
-		if (!settings.mcpPacedActions.get()) {
-			String faceName = args.has("face") ? args.get("face").getAsString().toUpperCase(java.util.Locale.ROOT) : "UP";
-			net.minecraft.core.Direction face = net.minecraft.core.Direction.byName(faceName);
-			if (face == null) return McpHttpBridge.error("Unknown face: " + faceName);
-			var hit = new net.minecraft.world.phys.BlockHitResult(net.minecraft.world.phys.Vec3.atCenterOf(pos), face, pos, false);
-			var result = mc.gameMode.useItemOn(mc.player, net.minecraft.world.InteractionHand.MAIN_HAND, hit);
-			if (result.consumesAction()) mc.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
-			return McpHttpBridge.success(java.util.Map.of("placed", result.consumesAction(), "position", pos.toShortString(), "face", faceName));
-		}
+		double reach = mc.player.blockInteractionRange();
+		if (mc.player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > reach * reach)
+			return McpHttpBridge.error("That spot is out of reach (vanilla reach is " + reach + " blocks); walk closer first");
 		boolean placed = dev.lazuli.mod.control.Legit.placeAt(mc, mc.player, pos, settings);
 		return McpHttpBridge.success(java.util.Map.of("placed", placed, "position", pos.toShortString(),
 			"note", placed ? "Placed against a neighbour in sight" : "Turning toward it, or nothing to place against; call again"));
@@ -1773,10 +1777,19 @@ public final class LazuliClient implements ClientModInitializer {
 		if (error != null) return McpHttpBridge.error(error);
 		net.minecraft.world.entity.Entity target = entityArg(args, mc);
 		if (target == null) return McpHttpBridge.error("No entity found for uuid");
+		var p = mc.player;
+		if (p.distanceTo(target) > dev.lazuli.mod.control.Melee.REACH)
+			return McpHttpBridge.error("Too far to interact; walk closer first");
+		if (!p.hasLineOfSight(target)) return McpHttpBridge.error("No line of sight to that entity");
+		double ex = target.getX() - p.getX(), ey = target.getEyeY() - p.getEyeY(), ez = target.getZ() - p.getZ();
+		if (!dev.lazuli.mod.control.Legit.aimTick(mc, p, (float) (Math.toDegrees(Math.atan2(ez, ex)) - 90.0),
+			(float) -Math.toDegrees(Math.atan2(ey, Math.hypot(ex, ez))), settings))
+			return McpHttpBridge.success(java.util.Map.of("interacted", false, "uuid", target.getUUID().toString(),
+				"note", "Turning toward it; call again"));
 		var hand = "off".equalsIgnoreCase(args.has("hand") ? args.get("hand").getAsString() : "main")
 			? net.minecraft.world.InteractionHand.OFF_HAND : net.minecraft.world.InteractionHand.MAIN_HAND;
-		var result = mc.gameMode.interact(mc.player, target, hand);
-		if (result.consumesAction()) mc.player.swing(hand);
+		var result = mc.gameMode.interact(p, target, hand);
+		if (result.consumesAction()) p.swing(hand);
 		return McpHttpBridge.success(java.util.Map.of("interacted", result.consumesAction(), "uuid", target.getUUID().toString(), "type", net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString()));
 	}
 
@@ -1866,8 +1879,7 @@ public final class LazuliClient implements ClientModInitializer {
 			return McpHttpBridge.error(e.getMessage() == null ? "That slot doesn't work" : e.getMessage());
 		}
 		if (plan.isEmpty()) return McpHttpBridge.success(java.util.Map.of("moved", false, "note", "Nothing to move"));
-		if (!(mc.screen instanceof net.minecraft.client.gui.screens.inventory.InventoryScreen))
-			mc.setScreen(new net.minecraft.client.gui.screens.inventory.InventoryScreen(p));
+		// no setScreen here: the click driver stands still, opens the inventory and settles before clicking
 		clicks.play(p.inventoryMenu.containerId, plan);
 		java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
 		out.put("moved", true);
@@ -2114,10 +2126,20 @@ public final class LazuliClient implements ClientModInitializer {
 			case "clone" -> net.minecraft.world.inventory.ClickType.CLONE;
 			default -> net.minecraft.world.inventory.ClickType.PICKUP;
 		};
-		int button = intArg(args, "button", type == net.minecraft.world.inventory.ClickType.THROW ? 0 : 0);
+		int button = intArg(args, "button", 0);
 		if (type == net.minecraft.world.inventory.ClickType.SWAP && (button < 0 || button > 8)) return McpHttpBridge.error("swap button must be a hotbar slot 0 through 8");
-		mc.gameMode.handleInventoryMouseClick(mc.player.containerMenu.containerId, slot, button, type, mc.player);
-		return McpHttpBridge.success(java.util.Map.of("clicked", true, "slot", slot, "action", action, "button", button));
+		if (type == net.minecraft.world.inventory.ClickType.CLONE && !mc.player.getAbilities().instabuild)
+			return McpHttpBridge.error("CLONE only works in creative; in survival the server ignores it (and flags it)");
+		dev.lazuli.core.inventory.Click click = switch (type) {
+			case QUICK_MOVE -> dev.lazuli.core.inventory.Click.shift(slot);
+			case THROW -> button == 1 ? dev.lazuli.core.inventory.Click.throwAll(slot) : dev.lazuli.core.inventory.Click.throwOne(slot);
+			case SWAP -> dev.lazuli.core.inventory.Click.swap(slot, button);
+			default -> button == 1 ? dev.lazuli.core.inventory.Click.right(slot) : dev.lazuli.core.inventory.Click.left(slot);
+		};
+		// the click driver sends one per tick once the screen has settled, like every other click Lazuli makes
+		clicks.play(mc.player.containerMenu.containerId, java.util.List.of(click));
+		return McpHttpBridge.success(java.util.Map.of("clicked", true, "slot", slot, "action", action, "button", button,
+			"note", "Queued for the next tick with the menu settled"));
 	}
 
 	private com.google.gson.JsonObject mcpClickGuiButton(com.google.gson.JsonObject args, Minecraft mc) {
