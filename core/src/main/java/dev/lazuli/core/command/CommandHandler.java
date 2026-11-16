@@ -361,6 +361,11 @@ public final class CommandHandler {
         return goal;
     }
 
+    /** Target-name predicate used by routine editors and integrations. */
+    public java.util.function.Predicate<String> targetKnown() {
+        return ctx.targetKnown();
+    }
+
     /** Returns true if the message was a command (and must not be sent to the server). */
     public boolean handle(String message) {
         String prefix = ctx.settings().prefix.get();

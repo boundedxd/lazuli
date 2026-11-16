@@ -150,6 +150,8 @@ public final class LazuliClient implements ClientModInitializer {
 	private ClickDriver clicks;
 	private McpHttpBridge mcpBridge;
 	private final ThreadLocal<java.util.List<String>> mcpReplies = new ThreadLocal<>();
+	private final java.util.concurrent.ConcurrentLinkedDeque<String> mcpMessages = new java.util.concurrent.ConcurrentLinkedDeque<>();
+	private int mcpControlTicks;
 
 	@Override
 	public void onInitializeClient() {
@@ -762,6 +764,12 @@ public final class LazuliClient implements ClientModInitializer {
 			session.restart(block);
 		});
 
+		net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.CHAT.register((message, signed, sender, params, time) -> {
+			addMcpMessage(signed != null ? signed.signedContent() : message.getString());
+		});
+		net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
+			if (!overlay) addMcpMessage(message.getString());
+		});
 		ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
 			if (Minecraft.getInstance().player == null) return true;
 			try {
@@ -1344,7 +1352,9 @@ public final class LazuliClient implements ClientModInitializer {
 
 	private void chat(String msg) {
 		java.util.List<String> captured = mcpReplies.get();
-		if (captured != null) captured.add(Chat.strip(msg));
+		String plain = Chat.strip(msg);
+		if (captured != null) captured.add(plain);
+		addMcpMessage(plain);
 		if (msg.startsWith(Chat.RED)) {
 			// an error while a routine step runs: steps that asked to care (@retry, @onfail) take it as a failure
 			stepErrored = true;
@@ -1355,6 +1365,7 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private void tickMcpBridge() {
+		tickMcpControls();
 		if (mcpBridge == null) return;
 		if (!settings.mcpEnabled.get()) {
 			mcpBridge.stop();
@@ -1395,6 +1406,28 @@ public final class LazuliClient implements ClientModInitializer {
 			case "get_job_status" -> mcpJobStatus();
 			case "get_settings" -> mcpSettings(args);
 			case "set_setting" -> mcpSetSetting(args);
+			case "chat" -> mcpChat(args, mc);
+			case "server_command" -> mcpServerCommand(args, mc);
+			case "recent_messages" -> mcpRecentMessages(args);
+			case "look" -> mcpLook(args, mc);
+			case "move" -> mcpMove(args, mc);
+			case "select_hotbar" -> mcpSelectHotbar(args, mc);
+			case "attack" -> mcpAttack(args, mc);
+			case "use_item" -> mcpUseItem(args, mc);
+			case "break_block" -> mcpBreakBlock(args, mc);
+			case "place_block" -> mcpPlaceBlock(args, mc);
+			case "interact_entity" -> mcpInteractEntity(args, mc);
+			case "inspect_block" -> mcpInspectBlock(args, mc);
+			case "list_entities" -> mcpListEntities(args, mc);
+			case "routine_save" -> mcpRoutineSave(args);
+			case "routine_check" -> mcpRoutineCheck(args);
+			case "routine_list" -> McpHttpBridge.success(routines.list());
+			case "routine_run" -> mcpRoutineRun(args);
+			case "routine_delete" -> mcpRoutineDelete(args);
+			case "inspect_gui" -> mcpInspectGui(mc);
+			case "click_gui_slot" -> mcpClickGuiSlot(args, mc);
+			case "click_gui_button" -> mcpClickGuiButton(args, mc);
+			case "close_gui" -> mcpCloseGui(mc);
 			case "stop" -> { stopAll(false); yield McpHttpBridge.success(java.util.Map.of("stopped", true)); }
 			default -> McpHttpBridge.error("Unknown Lazuli tool: " + name);
 		};
@@ -1480,6 +1513,326 @@ public final class LazuliClient implements ClientModInitializer {
 	private static String requiredString(com.google.gson.JsonObject args, String key) {
 		if (!args.has(key) || !args.get(key).isJsonPrimitive() || !args.getAsJsonPrimitive(key).isString()) throw new IllegalArgumentException("Expected string argument: " + key);
 		return args.get(key).getAsString();
+	}
+
+	private static int intArg(com.google.gson.JsonObject args, String key, int def) {
+		return args.has(key) ? args.get(key).getAsInt() : def;
+	}
+
+	private static double doubleArg(com.google.gson.JsonObject args, String key, double def) {
+		return args.has(key) ? args.get(key).getAsDouble() : def;
+	}
+
+	private static boolean boolArg(com.google.gson.JsonObject args, String key, boolean def) {
+		return args.has(key) ? args.get(key).getAsBoolean() : def;
+	}
+
+	private String fallbackReady(Minecraft mc) {
+		if (mc.player == null || mc.level == null) return "Join a world before using fallback controls";
+		if (busy()) return "Lazuli is busy; use a Lazuli command or stop it before using fallback controls";
+		return null;
+	}
+
+	private com.google.gson.JsonObject mcpChat(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		String message = requiredString(args, "message");
+		mc.player.connection.sendChat(message);
+		return McpHttpBridge.success(java.util.Map.of("sent", true, "message", message));
+	}
+
+	private com.google.gson.JsonObject mcpServerCommand(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		String command = requiredString(args, "command");
+		mc.player.connection.sendCommand(command.startsWith("/") ? command.substring(1) : command);
+		return McpHttpBridge.success(java.util.Map.of("sent", true, "command", command));
+	}
+
+	private com.google.gson.JsonObject mcpRecentMessages(com.google.gson.JsonObject args) {
+		int limit = Math.max(1, Math.min(100, intArg(args, "limit", 30)));
+		java.util.List<String> out = new java.util.ArrayList<>(mcpMessages);
+		if (out.size() > limit) out = new java.util.ArrayList<>(out.subList(out.size() - limit, out.size()));
+		return McpHttpBridge.success(java.util.Map.of("messages", out));
+	}
+
+	private com.google.gson.JsonObject mcpLook(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		float yaw = (float) doubleArg(args, "yaw", mc.player.getYRot());
+		float pitch = (float) Math.max(-90, Math.min(90, doubleArg(args, "pitch", mc.player.getXRot())));
+		mc.player.setYRot(yaw);
+		mc.player.setXRot(pitch);
+		mc.player.setYHeadRot(yaw);
+		return McpHttpBridge.success(java.util.Map.of("yaw", yaw, "pitch", pitch));
+	}
+
+	private com.google.gson.JsonObject mcpMove(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		int ticks = Math.max(1, Math.min(200, intArg(args, "ticks", 1)));
+		mc.options.keyUp.setDown(boolArg(args, "forward", false));
+		mc.options.keyDown.setDown(boolArg(args, "back", false));
+		mc.options.keyLeft.setDown(boolArg(args, "left", false));
+		mc.options.keyRight.setDown(boolArg(args, "right", false));
+		mc.options.keyJump.setDown(boolArg(args, "jump", false));
+		mc.options.keyShift.setDown(boolArg(args, "sneak", false));
+		mc.options.keySprint.setDown(boolArg(args, "sprint", false));
+		mcpControlTicks = ticks;
+		return McpHttpBridge.success(java.util.Map.of("accepted", true, "ticks", ticks));
+	}
+
+	private com.google.gson.JsonObject mcpSelectHotbar(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		int slot = intArg(args, "slot", -1);
+		if (slot < 0 || slot > 8) return McpHttpBridge.error("slot must be 0 through 8");
+		mc.player.getInventory().setSelectedSlot(slot);
+		return McpHttpBridge.success(java.util.Map.of("slot", slot));
+	}
+
+	private com.google.gson.JsonObject mcpAttack(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		net.minecraft.world.entity.Entity target = entityArg(args, mc);
+		if (target == null && mc.hitResult instanceof net.minecraft.world.phys.EntityHitResult hit) target = hit.getEntity();
+		if (target == null) return McpHttpBridge.error("No target entity or crosshair entity");
+		mc.gameMode.attack(mc.player, target);
+		mc.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+		return McpHttpBridge.success(java.util.Map.of("attacked", true, "uuid", target.getUUID().toString()));
+	}
+
+	private com.google.gson.JsonObject mcpUseItem(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		var hand = "off".equalsIgnoreCase(args.has("hand") ? args.get("hand").getAsString() : "main")
+			? net.minecraft.world.InteractionHand.OFF_HAND : net.minecraft.world.InteractionHand.MAIN_HAND;
+		var result = mc.gameMode.useItem(mc.player, hand);
+		if (result.consumesAction()) mc.player.swing(hand);
+		return McpHttpBridge.success(java.util.Map.of("used", result.consumesAction(), "hand", hand == net.minecraft.world.InteractionHand.MAIN_HAND ? "main" : "off"));
+	}
+
+	private com.google.gson.JsonObject mcpBreakBlock(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		BlockPos pos = blockArg(args);
+		if (mc.player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > 36) return McpHttpBridge.error("Block is out of reach");
+		boolean broken = mc.gameMode.destroyBlock(pos);
+		return McpHttpBridge.success(java.util.Map.of("broken", broken, "position", pos.toShortString()));
+	}
+
+	private com.google.gson.JsonObject mcpPlaceBlock(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		BlockPos pos = blockArg(args);
+		String faceName = args.has("face") ? args.get("face").getAsString().toUpperCase(java.util.Locale.ROOT) : "UP";
+		net.minecraft.core.Direction face = net.minecraft.core.Direction.byName(faceName);
+		if (face == null) return McpHttpBridge.error("Unknown face: " + faceName);
+		var hit = new net.minecraft.world.phys.BlockHitResult(net.minecraft.world.phys.Vec3.atCenterOf(pos), face, pos, false);
+		var result = mc.gameMode.useItemOn(mc.player, net.minecraft.world.InteractionHand.MAIN_HAND, hit);
+		if (result.consumesAction()) mc.player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+		return McpHttpBridge.success(java.util.Map.of("placed", result.consumesAction(), "position", pos.toShortString(), "face", faceName));
+	}
+
+	private com.google.gson.JsonObject mcpInteractEntity(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		net.minecraft.world.entity.Entity target = entityArg(args, mc);
+		if (target == null) return McpHttpBridge.error("No entity found for uuid");
+		var hand = "off".equalsIgnoreCase(args.has("hand") ? args.get("hand").getAsString() : "main")
+			? net.minecraft.world.InteractionHand.OFF_HAND : net.minecraft.world.InteractionHand.MAIN_HAND;
+		var result = mc.gameMode.interact(mc.player, target, hand);
+		if (result.consumesAction()) mc.player.swing(hand);
+		return McpHttpBridge.success(java.util.Map.of("interacted", result.consumesAction(), "uuid", target.getUUID().toString(), "type", net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString()));
+	}
+
+	private com.google.gson.JsonObject mcpInspectBlock(com.google.gson.JsonObject args, Minecraft mc) {
+		if (mc.level == null) return McpHttpBridge.error("Join a world first");
+		BlockPos pos = blockArg(args);
+		var state = mc.level.getBlockState(pos);
+		java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+		out.put("position", pos.toShortString());
+		out.put("block", net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+		out.put("state", state.toString());
+		var entity = mc.level.getBlockEntity(pos);
+		if (entity != null) out.put("blockEntity", entity.getClass().getSimpleName());
+		return McpHttpBridge.success(out);
+	}
+
+	private com.google.gson.JsonObject mcpListEntities(com.google.gson.JsonObject args, Minecraft mc) {
+		if (mc.level == null || mc.player == null) return McpHttpBridge.error("Join a world first");
+		double radius = Math.max(1, Math.min(128, doubleArg(args, "radius", 32)));
+		java.util.List<java.util.Map<String, Object>> out = new java.util.ArrayList<>();
+		for (var entity : mc.level.entitiesForRendering()) {
+			if (!entity.isAlive() || entity.distanceToSqr(mc.player) > radius * radius) continue;
+			out.add(java.util.Map.of("uuid", entity.getUUID().toString(), "type", net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
+				"name", entity.getName().getString(), "x", entity.getX(), "y", entity.getY(), "z", entity.getZ(), "distance", entity.distanceTo(mc.player)));
+		}
+		return McpHttpBridge.success(java.util.Map.of("entities", out));
+	}
+
+	private static BlockPos blockArg(com.google.gson.JsonObject args) {
+		if (!args.has("x") || !args.has("y") || !args.has("z")) throw new IllegalArgumentException("x, y and z are required");
+		return new BlockPos(args.get("x").getAsInt(), args.get("y").getAsInt(), args.get("z").getAsInt());
+	}
+
+	private static net.minecraft.world.entity.Entity entityArg(com.google.gson.JsonObject args, Minecraft mc) {
+		if (!args.has("uuid")) return null;
+		java.util.UUID uuid;
+		try { uuid = java.util.UUID.fromString(args.get("uuid").getAsString()); }
+		catch (IllegalArgumentException e) { throw new IllegalArgumentException("uuid must be a valid entity UUID"); }
+		for (var entity : mc.level.entitiesForRendering()) if (entity.getUUID().equals(uuid)) return entity;
+		return null;
+	}
+
+	private com.google.gson.JsonObject mcpRoutineSave(com.google.gson.JsonObject args) {
+		String name = requiredString(args, "name");
+		if (!args.has("steps") || !args.get("steps").isJsonArray()) return McpHttpBridge.error("steps must be an array of routine step strings");
+		java.util.List<String> steps = new java.util.ArrayList<>();
+		for (var step : args.getAsJsonArray("steps")) steps.add(mcpRoutineStep(step.getAsString()));
+		java.util.List<String> problems = dev.lazuli.core.task.Routine.check(steps, CommandHandler::isCommand, commands.targetKnown());
+		if (!problems.isEmpty()) return McpHttpBridge.success(java.util.Map.of("saved", false, "problems", problems));
+		routines.set(name, steps);
+		return McpHttpBridge.success(java.util.Map.of("saved", true, "name", name, "steps", steps));
+	}
+
+	private com.google.gson.JsonObject mcpRoutineCheck(com.google.gson.JsonObject args) {
+		java.util.List<String> steps = new java.util.ArrayList<>();
+		if (args.has("name")) {
+			var saved = routines.get(requiredString(args, "name"));
+			if (saved == null) return McpHttpBridge.error("No routine " + args.get("name").getAsString());
+			steps.addAll(saved);
+		} else if (args.has("steps") && args.get("steps").isJsonArray()) {
+			for (var step : args.getAsJsonArray("steps")) steps.add(mcpRoutineStep(step.getAsString()));
+		} else return McpHttpBridge.error("Provide name or steps");
+		return McpHttpBridge.success(java.util.Map.of("valid", dev.lazuli.core.task.Routine.check(steps, CommandHandler::isCommand, commands.targetKnown()).isEmpty(), "problems", dev.lazuli.core.task.Routine.check(steps, CommandHandler::isCommand, commands.targetKnown())));
+	}
+
+	private String mcpRoutineStep(String step) {
+		String text = step.trim();
+		if (text.isEmpty() || text.startsWith(settings.prefix.get()) || dev.lazuli.core.task.Step.isStepWord(text)) return text;
+		return settings.prefix.get() + text;
+	}
+
+	private com.google.gson.JsonObject mcpRoutineRun(com.google.gson.JsonObject args) {
+		String name = requiredString(args, "name");
+		var steps = routines.get(name);
+		if (steps == null) return McpHttpBridge.error("No routine " + name);
+		var problems = dev.lazuli.core.task.Routine.check(steps, CommandHandler::isCommand, commands.targetKnown());
+		if (!problems.isEmpty()) return McpHttpBridge.success(java.util.Map.of("started", false, "problems", problems));
+		int times = intArg(args, "times", 1);
+		startRoutine(name, steps, times);
+		return McpHttpBridge.success(java.util.Map.of("started", true, "name", name, "times", times));
+	}
+
+	private com.google.gson.JsonObject mcpRoutineDelete(com.google.gson.JsonObject args) {
+		String name = requiredString(args, "name");
+		return McpHttpBridge.success(java.util.Map.of("deleted", routines.remove(name), "name", name));
+	}
+
+	private com.google.gson.JsonObject mcpInspectGui(Minecraft mc) {
+		if (mc.player == null || mc.screen == null) return McpHttpBridge.success(java.util.Map.of("open", false));
+		boolean container = mc.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>;
+		java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+		out.put("open", true);
+		out.put("container", container);
+		out.put("screen", mc.screen.getClass().getSimpleName());
+		out.put("title", mc.screen.getTitle().getString());
+		if (!container) {
+			out.put("slots", java.util.List.of());
+			return McpHttpBridge.success(out);
+		}
+		var menu = mc.player.containerMenu;
+		out.put("containerId", menu.containerId);
+		java.util.List<java.util.Map<String, Object>> slots = new java.util.ArrayList<>();
+		for (int i = 0; i < menu.slots.size(); i++) {
+			var slot = menu.slots.get(i);
+			var stack = slot.getItem();
+			slots.add(mcpItemSlot(i, slot.getContainerSlot(), stack));
+		}
+		out.put("slots", slots);
+		out.put("carried", mcpItem(mc.player.containerMenu.getCarried()));
+		return McpHttpBridge.success(out);
+	}
+
+	private com.google.gson.JsonObject mcpClickGuiSlot(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		if (mc.screen == null || mc.player == null || !(mc.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>)) return McpHttpBridge.error("No container GUI is open");
+		int slot = intArg(args, "slot", -1);
+		if (slot < -999 || slot >= mc.player.containerMenu.slots.size()) return McpHttpBridge.error("Invalid GUI slot");
+		String action = args.has("action") ? args.get("action").getAsString().toLowerCase(java.util.Locale.ROOT) : "pickup";
+		net.minecraft.world.inventory.ClickType type = switch (action) {
+			case "quick_move", "shift" -> net.minecraft.world.inventory.ClickType.QUICK_MOVE;
+			case "throw", "drop" -> net.minecraft.world.inventory.ClickType.THROW;
+			case "swap" -> net.minecraft.world.inventory.ClickType.SWAP;
+			case "clone" -> net.minecraft.world.inventory.ClickType.CLONE;
+			default -> net.minecraft.world.inventory.ClickType.PICKUP;
+		};
+		int button = intArg(args, "button", type == net.minecraft.world.inventory.ClickType.THROW ? 0 : 0);
+		if (type == net.minecraft.world.inventory.ClickType.SWAP && (button < 0 || button > 8)) return McpHttpBridge.error("swap button must be a hotbar slot 0 through 8");
+		mc.gameMode.handleInventoryMouseClick(mc.player.containerMenu.containerId, slot, button, type, mc.player);
+		return McpHttpBridge.success(java.util.Map.of("clicked", true, "slot", slot, "action", action, "button", button));
+	}
+
+	private com.google.gson.JsonObject mcpClickGuiButton(com.google.gson.JsonObject args, Minecraft mc) {
+		String error = fallbackReady(mc);
+		if (error != null) return McpHttpBridge.error(error);
+		if (mc.screen == null || mc.player == null || !(mc.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>)) return McpHttpBridge.error("No container GUI is open");
+		int button = intArg(args, "button", -1);
+		if (button < 0) return McpHttpBridge.error("button must be non-negative");
+		mc.gameMode.handleInventoryButtonClick(mc.player.containerMenu.containerId, button);
+		return McpHttpBridge.success(java.util.Map.of("clicked", true, "button", button));
+	}
+
+	private com.google.gson.JsonObject mcpCloseGui(Minecraft mc) {
+		if (mc.player == null || mc.screen == null) return McpHttpBridge.success(java.util.Map.of("closed", false));
+		mc.player.closeContainer();
+		return McpHttpBridge.success(java.util.Map.of("closed", true));
+	}
+
+	private static java.util.Map<String, Object> mcpItemSlot(int slot, int containerSlot, net.minecraft.world.item.ItemStack stack) {
+		java.util.Map<String, Object> out = new java.util.LinkedHashMap<>(mcpItem(stack));
+		out.put("slot", slot);
+		out.put("containerSlot", containerSlot);
+		return out;
+	}
+
+	private static java.util.Map<String, Object> mcpItem(net.minecraft.world.item.ItemStack stack) {
+		java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+		if (stack == null || stack.isEmpty()) {
+			out.put("empty", true);
+			return out;
+		}
+		out.put("empty", false);
+		out.put("id", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+		out.put("count", stack.getCount());
+		out.put("name", stack.getHoverName().getString());
+		out.put("customName", stack.getCustomName() == null ? null : stack.getCustomName().getString());
+		var lore = stack.get(net.minecraft.core.component.DataComponents.LORE);
+		out.put("lore", lore == null ? java.util.List.of() : lore.lines().stream().map(net.minecraft.network.chat.Component::getString).toList());
+		out.put("components", stack.getComponentsPatch().toString());
+		return out;
+	}
+
+	private void addMcpMessage(String message) {
+		if (message == null || message.isBlank()) return;
+		while (mcpMessages.size() >= 100) mcpMessages.pollFirst();
+		mcpMessages.addLast(message);
+	}
+
+	private void tickMcpControls() {
+		if (mcpControlTicks == 0) return;
+		mcpControlTicks--;
+		if (mcpControlTicks > 0) return;
+		var mc = Minecraft.getInstance();
+		mc.options.keyUp.setDown(false);
+		mc.options.keyDown.setDown(false);
+		mc.options.keyLeft.setDown(false);
+		mc.options.keyRight.setDown(false);
+		mc.options.keyJump.setDown(false);
+		mc.options.keyShift.setDown(false);
+		mc.options.keySprint.setDown(false);
 	}
 
 	private void onChunkLoad(ClientLevel level, LevelChunk chunk) {
