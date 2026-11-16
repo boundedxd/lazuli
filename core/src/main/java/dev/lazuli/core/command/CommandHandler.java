@@ -1005,6 +1005,11 @@ public final class CommandHandler {
         "getitem", "get", "smelt", "brew", "enchant", "repair", "combine", "fly", "sel", "sort", "craft", "bucket", "hunt",
         "smith", "pick", "target", "targets", "help");
 
+    /** Commands accepted by the handler, for integrations that validate user input. */
+    public static java.util.Set<String> commands() {
+        return COMMANDS;
+    }
+
     /** Whether a command word exists (routine checks and the routine editor use it). */
     public static boolean isCommand(String word) {
         return COMMANDS.contains(word.toLowerCase(Locale.ROOT));

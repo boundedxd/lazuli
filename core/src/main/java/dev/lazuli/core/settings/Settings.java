@@ -302,6 +302,10 @@ public final class Settings {
     /** Who may (names, comma separated). */
     public final Setting<String> chatControlPlayers = register(new Setting<>("chatControlPlayers", "",
         s -> s.replace(" ", "")));
+    /** Allow the localhost MCP bridge to control Lazuli. */
+    public final Setting<Boolean> mcpEnabled = bool("mcpEnabled", false);
+    /** Port for the localhost MCP bridge. */
+    public final Setting<Integer> mcpPort = integer("mcpPort", 8765, 1024, 65535);
     /** #getitem may smelt for what it needs. */
     public final Setting<Boolean> getItemSmelt = bool("getItemSmelt", true);
     /** #getitem may upgrade at a smithing table (netherite gear: template + diamond item + netherite ingot). */

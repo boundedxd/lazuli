@@ -22,6 +22,9 @@ public final class ControlsTab {
                 Options.ofKeybind("Freecam key", LazuliConfig.FREECAM).build()),
             Ui.folded("Chat control",
                 Ui.bool(s.chatControl, "Let the players listed below run commands by saying them in chat or whispering them."),
-                Ui.nameList(s.chatControlPlayers, ListEntries.onlinePlayers(), "Who may run commands from chat (pick online players or type a name).")));
+                Ui.nameList(s.chatControlPlayers, ListEntries.onlinePlayers(), "Who may run commands from chat (pick online players or type a name).")),
+            Ui.folded("MCP",
+                Ui.bool(s.mcpEnabled, "Allow Pi and other local MCP clients to read game state and run Lazuli commands."),
+                Ui.num(s.mcpPort, 1024, 65535, 1, "Localhost-only MCP bridge port.")));
     }
 }

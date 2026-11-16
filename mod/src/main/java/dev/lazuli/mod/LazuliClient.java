@@ -58,6 +58,8 @@ import net.minecraft.world.level.chunk.LevelChunk;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 public final class LazuliClient implements ClientModInitializer {
 	private static LazuliClient instance;
@@ -146,6 +148,8 @@ public final class LazuliClient implements ClientModInitializer {
 	/** The job started through the API (see {@link Lazuli}). */
 	private final Tasks tasks = new Tasks();
 	private ClickDriver clicks;
+	private McpHttpBridge mcpBridge;
+	private final ThreadLocal<java.util.List<String>> mcpReplies = new ThreadLocal<>();
 
 	@Override
 	public void onInitializeClient() {
@@ -715,6 +719,8 @@ public final class LazuliClient implements ClientModInitializer {
 			commands.goTo(g, true);
 		}, this::chat);
 		Lazuli.Holder.set(new Api());
+		mcpBridge = new McpHttpBridge(this::handleMcpTool);
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> tickMcpBridge());
 		renderer = new LazuliRenderer(session, settings, executor::predicted, commands::goal, cache);
 		renderer.processes(processes);
 		renderer.selection(commands::selection);
@@ -1337,6 +1343,8 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private void chat(String msg) {
+		java.util.List<String> captured = mcpReplies.get();
+		if (captured != null) captured.add(Chat.strip(msg));
 		if (msg.startsWith(Chat.RED)) {
 			// an error while a routine step runs: steps that asked to care (@retry, @onfail) take it as a failure
 			stepErrored = true;
@@ -1344,6 +1352,134 @@ public final class LazuliClient implements ClientModInitializer {
 		}
 		Minecraft mc = Minecraft.getInstance();
 		mc.execute(() -> mc.gui.getChat().addMessage(Component.literal(PREFIX + msg)));
+	}
+
+	private void tickMcpBridge() {
+		if (mcpBridge == null) return;
+		if (!settings.mcpEnabled.get()) {
+			mcpBridge.stop();
+			return;
+		}
+		try {
+			mcpBridge.start(settings.mcpPort.get());
+		} catch (java.io.IOException e) {
+			org.slf4j.LoggerFactory.getLogger("lazuli").error("Could not start MCP bridge on 127.0.0.1:{}: {}", settings.mcpPort.get(), e.getMessage());
+			mcpBridge.stop();
+		}
+	}
+
+	private com.google.gson.JsonObject handleMcpTool(com.google.gson.JsonObject request) {
+		CompletableFuture<com.google.gson.JsonObject> result = new CompletableFuture<>();
+		Minecraft.getInstance().execute(() -> {
+			try {
+				result.complete(dispatchMcpTool(request));
+			} catch (Throwable e) {
+				result.complete(McpHttpBridge.error(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
+			}
+		});
+		try {
+			return result.get(8, TimeUnit.SECONDS);
+		} catch (Exception e) {
+			return McpHttpBridge.error("Minecraft did not respond to the MCP request in time");
+		}
+	}
+
+	private com.google.gson.JsonObject dispatchMcpTool(com.google.gson.JsonObject request) {
+		String name = request.has("name") ? request.get("name").getAsString() : "";
+		com.google.gson.JsonObject args = request.has("arguments") && request.get("arguments").isJsonObject()
+			? request.getAsJsonObject("arguments") : new com.google.gson.JsonObject();
+		Minecraft mc = Minecraft.getInstance();
+		return switch (name) {
+			case "command" -> mcpCommand(args, mc);
+			case "get_state" -> mcpState(mc);
+			case "get_job_status" -> mcpJobStatus();
+			case "get_settings" -> mcpSettings(args);
+			case "set_setting" -> mcpSetSetting(args);
+			case "stop" -> { stopAll(false); yield McpHttpBridge.success(java.util.Map.of("stopped", true)); }
+			default -> McpHttpBridge.error("Unknown Lazuli tool: " + name);
+		};
+	}
+
+	private com.google.gson.JsonObject mcpCommand(com.google.gson.JsonObject args, Minecraft mc) {
+		String line = requiredString(args, "line").trim();
+		String prefix = settings.prefix.get();
+		String body = line.startsWith(prefix) ? line.substring(prefix.length()).trim() : line;
+		String command = body.isEmpty() ? "" : body.split("\\s+", 2)[0].toLowerCase(java.util.Locale.ROOT);
+		if (!CommandHandler.commands().contains(command)) return McpHttpBridge.error("Unknown Lazuli command: " + command);
+		if (mc.player == null || mc.level == null) return McpHttpBridge.error("Join a world before running Lazuli commands");
+		java.util.List<String> replies = new java.util.ArrayList<>();
+		mcpReplies.set(replies);
+		try {
+			commands.handle(line.startsWith(prefix) ? line : prefix + line);
+		} finally {
+			mcpReplies.remove();
+		}
+		return McpHttpBridge.success(java.util.Map.of("accepted", true, "command", body, "messages", replies, "busy", busy()));
+	}
+
+	private com.google.gson.JsonObject mcpState(Minecraft mc) {
+		if (mc.player == null || mc.level == null) return McpHttpBridge.success(java.util.Map.of("connected", false));
+		var player = mc.player;
+		java.util.Map<String, Integer> inventory = new java.util.TreeMap<>();
+		for (int i = 0; i < 36; i++) {
+			var stack = player.getInventory().getItem(i);
+			if (!stack.isEmpty()) inventory.merge(Inventories.key(stack), stack.getCount(), Integer::sum);
+		}
+		java.util.Map<String, Object> state = new java.util.LinkedHashMap<>();
+		state.put("connected", true);
+		state.put("player", player.getName().getString());
+		state.put("position", java.util.Map.of("x", player.getX(), "y", player.getY(), "z", player.getZ()));
+		state.put("feet", java.util.Map.of("x", player.blockPosition().getX(), "y", player.blockPosition().getY(), "z", player.blockPosition().getZ()));
+		state.put("dimension", dimension(mc));
+		state.put("health", player.getHealth());
+		state.put("maxHealth", player.getMaxHealth());
+		state.put("hunger", player.getFoodData().getFoodLevel());
+		state.put("experienceLevel", player.experienceLevel);
+		state.put("inventory", inventory);
+		state.put("busy", busy());
+		return McpHttpBridge.success(state);
+	}
+
+	private com.google.gson.JsonObject mcpJobStatus() {
+		var snap = session.snapshot();
+		var runningTask = tasks.current();
+		java.util.List<java.util.Map<String, Object>> active = new java.util.ArrayList<>();
+		for (Process process : processes) if (process.active()) active.add(java.util.Map.of("type", process.getClass().getSimpleName(), "status", java.util.Objects.toString(process.status(), "active")));
+		java.util.Map<String, Object> state = new java.util.LinkedHashMap<>();
+		state.put("busy", busy());
+		state.put("pathing", java.util.Map.of("state", snap.state().name(), "trip", snap.trip(), "goal", snap.goal() == null ? "" : snap.goal().describe(), "remainingNodes", snap.path().size()));
+		state.put("processes", active);
+		state.put("routine", routine.detail());
+		if (runningTask != null) {
+			state.put("task", runningTask.name());
+			state.put("taskFinished", runningTask.finished());
+			if (runningTask.finished()) state.put("taskResult", runningTask.done().getNow(null).name());
+		}
+		return McpHttpBridge.success(state);
+	}
+
+	private com.google.gson.JsonObject mcpSettings(com.google.gson.JsonObject args) {
+		String filter = args.has("filter") ? args.get("filter").getAsString().toLowerCase(java.util.Locale.ROOT) : "";
+		java.util.Map<String, Object> values = new java.util.TreeMap<>();
+		for (var setting : settings.all()) if (setting.name().toLowerCase(java.util.Locale.ROOT).contains(filter)) values.put(setting.name(), java.util.Map.of("value", setting.get(), "description", setting.description()));
+		return McpHttpBridge.success(values);
+	}
+
+	private com.google.gson.JsonObject mcpSetSetting(com.google.gson.JsonObject args) {
+		String name = requiredString(args, "name");
+		if (!args.has("value") || args.get("value").isJsonNull()) return McpHttpBridge.error("Missing setting value");
+		var found = settings.byName(name);
+		if (found.isEmpty()) return McpHttpBridge.error("Unknown setting: " + name);
+		var setting = found.get();
+		try { setting.parse(args.get("value").getAsString()); }
+		catch (IllegalArgumentException e) { return McpHttpBridge.error("Bad value for " + setting.name() + ": " + e.getMessage()); }
+		LazuliConfig.save();
+		return McpHttpBridge.success(java.util.Map.of("name", setting.name(), "value", setting.get()));
+	}
+
+	private static String requiredString(com.google.gson.JsonObject args, String key) {
+		if (!args.has(key) || !args.get(key).isJsonPrimitive() || !args.getAsJsonPrimitive(key).isString()) throw new IllegalArgumentException("Expected string argument: " + key);
+		return args.get(key).getAsString();
 	}
 
 	private void onChunkLoad(ClientLevel level, LevelChunk chunk) {
