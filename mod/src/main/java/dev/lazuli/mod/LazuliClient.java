@@ -153,6 +153,8 @@ public final class LazuliClient implements ClientModInitializer {
 	private final ThreadLocal<java.util.List<String>> mcpReplies = new ThreadLocal<>();
 	private final java.util.concurrent.ConcurrentLinkedDeque<String> mcpMessages = new java.util.concurrent.ConcurrentLinkedDeque<>();
 	private int mcpControlTicks;
+	private long mcpInspectWindowStart;
+	private int mcpInspectCalls;
 
 	@Override
 	public void onInitializeClient() {
@@ -1418,6 +1420,8 @@ public final class LazuliClient implements ClientModInitializer {
 			case "break_block" -> mcpBreakBlock(args, mc);
 			case "place_block" -> mcpPlaceBlock(args, mc);
 			case "interact_entity" -> mcpInteractEntity(args, mc);
+			case "surroundings" -> mcpSurroundings(args, mc);
+			case "find_block" -> mcpFindBlock(args, mc);
 			case "inspect_block" -> mcpInspectBlock(args, mc);
 			case "list_entities" -> mcpListEntities(args, mc);
 			case "routine_save" -> mcpRoutineSave(args);
@@ -1657,6 +1661,9 @@ public final class LazuliClient implements ClientModInitializer {
 	}
 
 	private com.google.gson.JsonObject mcpInspectBlock(com.google.gson.JsonObject args, Minecraft mc) {
+		long now = System.nanoTime();
+		if (now - mcpInspectWindowStart > 1_000_000_000L) { mcpInspectWindowStart = now; mcpInspectCalls = 0; }
+		if (++mcpInspectCalls > 6) return McpHttpBridge.error("Too many inspect_block calls. Use surroundings for an area, or find_block to locate a block.");
 		if (mc.level == null) return McpHttpBridge.error("Join a world first");
 		BlockPos pos = blockArg(args);
 		var state = mc.level.getBlockState(pos);
@@ -1679,6 +1686,55 @@ public final class LazuliClient implements ClientModInitializer {
 				"name", entity.getName().getString(), "x", entity.getX(), "y", entity.getY(), "z", entity.getZ(), "distance", entity.distanceTo(mc.player)));
 		}
 		return McpHttpBridge.success(java.util.Map.of("entities", out));
+	}
+
+	private com.google.gson.JsonObject mcpSurroundings(com.google.gson.JsonObject args, Minecraft mc) {
+		if (mc.level == null || mc.player == null) return McpHttpBridge.error("Join a world first");
+		int radius = Math.max(0, Math.min(8, intArg(args, "radius", 4)));
+		int up = Math.max(0, Math.min(8, intArg(args, "up", 2)));
+		int down = Math.max(0, Math.min(8, intArg(args, "down", 2)));
+		BlockPos center = args.has("x") && args.has("z") ? blockArg(args) : mc.player.blockPosition();
+		BlockPos min = new BlockPos(center.getX() - radius, center.getY() - down, center.getZ() - radius);
+		BlockPos max = new BlockPos(center.getX() + radius, center.getY() + up, center.getZ() + radius);
+		java.util.List<dev.lazuli.core.mcp.ScanMap.Layer> layers = new java.util.ArrayList<>();
+		boolean unloaded = false;
+		dev.lazuli.core.mcp.ScanMap.Blocks blocks = (x, y, z) -> mc.level.hasChunkAt(x, z)
+			? net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(new BlockPos(x, y, z)).getBlock()).toString()
+			: null;
+		for (int y = min.getY(); y <= max.getY(); y++) {
+			var layer = dev.lazuli.core.mcp.ScanMap.layer(y, min.getX(), max.getX(), min.getZ(), max.getZ(), blocks);
+			layers.add(layer);
+			unloaded |= layer.unloaded();
+		}
+		java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+		out.put("center", java.util.Map.of("x", center.getX(), "y", center.getY(), "z", center.getZ()));
+		out.put("radius", radius);
+		out.put("layers", layers);
+		out.put("format", "rows go north to south (z); each character goes west to east (x); '?' is an unloaded chunk");
+		out.put("unloadedChunks", unloaded);
+		return McpHttpBridge.success(out);
+	}
+
+	private com.google.gson.JsonObject mcpFindBlock(com.google.gson.JsonObject args, Minecraft mc) {
+		if (mc.level == null || mc.player == null) return McpHttpBridge.error("Join a world first");
+		String wanted = requiredString(args, "block").toLowerCase(java.util.Locale.ROOT);
+		if (!wanted.contains(":")) wanted = "minecraft:" + wanted;
+		int radius = Math.max(1, Math.min(24, intArg(args, "radius", 16)));
+		int max = Math.max(1, Math.min(100, intArg(args, "max", 10)));
+		int[] origin = {mc.player.getBlockX(), mc.player.getBlockY(), mc.player.getBlockZ()};
+		java.util.List<BlockPos> hits = new java.util.ArrayList<>();
+		for (int x = origin[0] - radius; x <= origin[0] + radius; x++)
+			for (int z = origin[2] - radius; z <= origin[2] + radius; z++) {
+				if (!mc.level.hasChunkAt(x, z)) continue;
+				for (int y = Math.max(mc.level.getMinY(), origin[1] - radius); y <= Math.min(mc.level.getMaxY(), origin[1] + radius); y++) {
+					String id = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(new BlockPos(x, y, z)).getBlock()).toString();
+					if (id.equals(wanted)) hits.add(new BlockPos(x, y, z));
+				}
+			}
+		hits.sort(java.util.Comparator.comparingDouble(p -> p.distToCenterSqr(origin[0] + 0.5, origin[1] + 0.5, origin[2] + 0.5)));
+		java.util.List<java.util.Map<String, Object>> found = new java.util.ArrayList<>();
+		for (int i = 0; i < Math.min(max, hits.size()); i++) found.add(java.util.Map.of("x", hits.get(i).getX(), "y", hits.get(i).getY(), "z", hits.get(i).getZ(), "distance", Math.sqrt(hits.get(i).distToCenterSqr(origin[0] + 0.5, origin[1] + 0.5, origin[2] + 0.5))));
+		return McpHttpBridge.success(java.util.Map.of("block", wanted, "count", hits.size(), "found", found));
 	}
 
 	private static BlockPos blockArg(com.google.gson.JsonObject args) {

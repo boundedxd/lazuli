@@ -4,6 +4,21 @@ The stdio adapter `lazuli_mcp.py` forwards calls to Lazuli's localhost bridge.
 Enable it in game with `#set mcpEnabled true` (Controls → MCP). The default port
 is 8765; set `LAZULI_MCP_PORT` for the adapter if `mcpPort` is changed in game.
 
+## Reading the world (do this, not scan loops)
+
+- `surroundings` returns one compact map for an area. Default is a 9×5×9 box
+  around the player. Each layer has `y`, a `legend` (letter → block id) and
+  `rows` (north to south; each character west to east; `?` = unloaded chunk).
+  `radius` is capped at 8, `up`/`down` at 8. Pass `x y z` to centre elsewhere.
+- `find_block` returns the nearest loaded blocks of one type, sorted by
+  distance (`radius` ≤ 24, `max` ≤ 100 results).
+- `inspect_block` is for a single known coordinate. It is rate-limited to six
+  calls per second and refuses further calls with a reminder to use
+  `surroundings` or `find_block`.
+
+Reading is cheap; one `surroundings` call replaces hundreds of
+`inspect_block` calls.
+
 ## Server dialogs
 
 Vanilla server dialogs introduced in Minecraft 1.21.6 (including those used on
@@ -16,7 +31,7 @@ geometry and, when visible, a click point. Single/multiline inputs include their
 current text; checkboxes include their checked state. Container menus still
 include slots, item names, lore and component data.
 
-For a dialog like a server's “Choose Item” menu:
+For a dialog like a server's "Choose Item" menu:
 
 1. Call `inspect_gui` and find the search input's control id.
 2. Call `set_gui_text` with `control`, `snapshot` and `text`.
