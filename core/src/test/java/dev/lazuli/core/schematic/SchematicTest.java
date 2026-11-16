@@ -156,6 +156,21 @@ class SchematicTest {
     }
 
     @Test
+    void writesVanillaStructuresThatTheLoaderCanRead() throws IOException {
+        Schematic original = new Schematic(3, 2, 2, List.of(
+            new Schematic.Block(0, 0, 0, "minecraft:stone"),
+            new Schematic.Block(1, 0, 0, "minecraft:oak_stairs[facing=east,half=bottom]"),
+            new Schematic.Block(2, 1, 1, "minecraft:oak_log[axis=y]")));
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        StructureWriter.write(original, bytes);
+        Schematic loaded = Schematic.read(new ByteArrayInputStream(bytes.toByteArray()), "generated.nbt");
+        assertEquals(original.sizeX(), loaded.sizeX());
+        assertEquals(original.sizeY(), loaded.sizeY());
+        assertEquals(original.sizeZ(), loaded.sizeZ());
+        assertEquals(original.blocks(), loaded.blocks());
+    }
+
+    @Test
     void readsVanillaStructures() throws IOException {
         List<Object> blocks = new ArrayList<>();
         for (int y = 0; y < 2; y++)

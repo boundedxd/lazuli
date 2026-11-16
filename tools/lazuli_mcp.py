@@ -173,6 +173,20 @@ TOOLS = [
         "annotations": {"destructiveHint": True},
     },
     {
+        "name": "generate_structure",
+        "description": "Generate a complex block blueprint and optionally build it with Lazuli. Use kind=trading_hall for a deterministic villager hall, or kind=custom with validated block states. persist=true saves a reusable .nbt schematic; build=true starts the existing Lazuli builder at origin. Plan materials and ask for confirmation before building large or destructive structures.",
+        "inputSchema": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["trading_hall", "custom"]},
+            "villagers": {"type": "integer", "minimum": 1, "maximum": 96},
+            "palette": {"type": "object", "additionalProperties": {"type": "string"}},
+            "blocks": {"type": "array", "items": {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}, "z": {"type": "integer"}, "state": {"type": "string"}}, "required": ["x", "y", "z", "state"]}},
+            "sizeX": {"type": "integer", "minimum": 1, "maximum": 256}, "sizeY": {"type": "integer", "minimum": 1, "maximum": 256}, "sizeZ": {"type": "integer", "minimum": 1, "maximum": 256},
+            "persist": {"type": "boolean"}, "file": {"type": "string"}, "build": {"type": "boolean"},
+            "origin": {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}, "z": {"type": "integer"}}, "required": ["x", "y", "z"]}
+        }, "required": ["kind"], "additionalProperties": False},
+        "annotations": {"destructiveHint": True, "openWorldHint": True},
+    },
+    {
         "name": "stop",
         "description": "Stop all Lazuli pathing, processes, tasks, and routines.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -212,7 +226,7 @@ def handle(message):
             "protocolVersion": "2025-11-25",
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": "lazuli", "version": "0.1.0"},
-            "instructions": "Lazuli-first policy: use the command tool for any task Lazuli supports. Only use tools explicitly marked FALLBACK ONLY when Lazuli has no command or process for the requested action; do not use fallback movement, combat, block, entity, or GUI tools to replace Lazuli. Use get_state and get_job_status before and after jobs. Inspect entities before NPC interaction and inspect_gui before any GUI click. Long-running commands return immediately; poll get_job_status. Routines can be created with routine_save, checked with routine_check, and run only when the user asks.",
+            "instructions": "Lazuli-first policy: use the command tool for any task Lazuli supports. Only use tools explicitly marked FALLBACK ONLY when Lazuli has no command or process for the requested action; do not use fallback movement, combat, block, entity, or GUI tools to replace Lazuli. For complex builds, use generate_structure to plan a validated blueprint, report dimensions/materials, and ask for confirmation before build=true; persist=true saves a reusable .nbt schematic, while build=false is a one-time in-memory plan. Use get_state and get_job_status before and after jobs. Inspect entities before NPC interaction and inspect_gui before any GUI click. Long-running commands return immediately; poll get_job_status. Routines can be created with routine_save, checked with routine_check, and run only when the user asks.",
         }}
     if method == "ping":
         return {"jsonrpc": "2.0", "id": request_id, "result": {}}

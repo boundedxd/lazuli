@@ -1424,6 +1424,7 @@ public final class LazuliClient implements ClientModInitializer {
 			case "routine_list" -> McpHttpBridge.success(routines.list());
 			case "routine_run" -> mcpRoutineRun(args);
 			case "routine_delete" -> mcpRoutineDelete(args);
+			case "generate_structure" -> mcpGenerateStructure(args, mc);
 			case "inspect_gui" -> mcpInspectGui(mc);
 			case "click_gui_slot" -> mcpClickGuiSlot(args, mc);
 			case "click_gui_button" -> mcpClickGuiButton(args, mc);
@@ -1728,6 +1729,84 @@ public final class LazuliClient implements ClientModInitializer {
 	private com.google.gson.JsonObject mcpRoutineDelete(com.google.gson.JsonObject args) {
 		String name = requiredString(args, "name");
 		return McpHttpBridge.success(java.util.Map.of("deleted", routines.remove(name), "name", name));
+	}
+
+	private com.google.gson.JsonObject mcpGenerateStructure(com.google.gson.JsonObject args, Minecraft mc) {
+		String kind = args.has("kind") ? args.get("kind").getAsString().toLowerCase(java.util.Locale.ROOT) : "custom";
+		dev.lazuli.core.schematic.Schematic schematic;
+		try {
+			if (kind.equals("trading_hall") || kind.equals("tradinghall")) {
+				java.util.Map<String, String> palette = new java.util.LinkedHashMap<>();
+				if (args.has("palette") && args.get("palette").isJsonObject())
+					for (var e : args.getAsJsonObject("palette").entrySet()) palette.put(e.getKey(), e.getValue().getAsString());
+				schematic = dev.lazuli.core.schematic.StructureFactory.tradingHall(intArg(args, "villagers", 12), palette);
+			} else if (kind.equals("custom")) {
+				if (!args.has("blocks") || !args.get("blocks").isJsonArray()) return McpHttpBridge.error("custom structures require a blocks array");
+				int sx = intArg(args, "sizeX", -1), sy = intArg(args, "sizeY", -1), sz = intArg(args, "sizeZ", -1);
+				java.util.List<dev.lazuli.core.schematic.Schematic.Block> blocks = new java.util.ArrayList<>();
+				java.util.Set<String> seen = new java.util.HashSet<>();
+				int maxX = -1, maxY = -1, maxZ = -1;
+				for (var element : args.getAsJsonArray("blocks")) {
+					if (!element.isJsonObject()) return McpHttpBridge.error("each block must be an object with x, y, z and state");
+					var b = element.getAsJsonObject();
+					if (!b.has("x") || !b.has("y") || !b.has("z") || !b.has("state")) return McpHttpBridge.error("each block requires x, y, z and state");
+					int x = b.get("x").getAsInt(), y = b.get("y").getAsInt(), z = b.get("z").getAsInt();
+					String state = b.get("state").getAsString();
+					if (x < 0 || y < 0 || z < 0 || x >= 256 || y >= 256 || z >= 256) return McpHttpBridge.error("custom block coordinates must be between 0 and 255");
+					if (!state.matches("[a-z0-9_.-]+:[a-z0-9_/.-]+(?:\\[[a-zA-Z0-9_=,.-]+\\])?")) return McpHttpBridge.error("invalid block state: " + state);
+					if (!seen.add(x + ":" + y + ":" + z)) return McpHttpBridge.error("duplicate custom block coordinate: " + x + " " + y + " " + z);
+					blocks.add(new dev.lazuli.core.schematic.Schematic.Block(x, y, z, state));
+					maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); maxZ = Math.max(maxZ, z);
+				}
+				if (blocks.size() > 1000000) return McpHttpBridge.error("custom structure is too large (maximum 1000000 blocks)");
+				if (sx < 0) sx = maxX + 1; if (sy < 0) sy = maxY + 1; if (sz < 0) sz = maxZ + 1;
+				if (sx < 1 || sy < 1 || sz < 1 || sx > 256 || sy > 256 || sz > 256) return McpHttpBridge.error("structure dimensions must be between 1 and 256");
+				schematic = new dev.lazuli.core.schematic.Schematic(sx, sy, sz, blocks);
+			} else return McpHttpBridge.error("Unknown structure kind: " + kind + " (use trading_hall or custom)");
+		} catch (RuntimeException e) {
+			return McpHttpBridge.error("Invalid structure: " + e.getMessage());
+		}
+		boolean persist = boolArg(args, "persist", false);
+		boolean build = boolArg(args, "build", false);
+		String fileName = null;
+		if (persist) {
+			String requested = args.has("file") ? args.get("file").getAsString() : kind + ".nbt";
+			if (!requested.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,100}")) return McpHttpBridge.error("file must be a simple name without directories");
+			fileName = requested.endsWith(".nbt") ? requested : requested + ".nbt";
+			java.nio.file.Path dir = FabricLoader.getInstance().getConfigDir().resolve("lazuli").resolve("schematics");
+			try {
+				java.nio.file.Files.createDirectories(dir);
+				try (java.io.OutputStream out = java.nio.file.Files.newOutputStream(dir.resolve(fileName))) {
+					dev.lazuli.core.schematic.StructureWriter.write(schematic, out);
+				}
+			} catch (java.io.IOException e) {
+				return McpHttpBridge.error("Could not save schematic: " + e.getMessage());
+			}
+		}
+		if (build) {
+			if (mc.player == null || mc.level == null) return McpHttpBridge.error("Join a world before building");
+			if (busy()) return McpHttpBridge.error("Lazuli is busy; inspect the plan first, then stop or wait for the current job before building");
+			if (!settings.buildEnabled.get()) return McpHttpBridge.error("#build is off (buildEnabled)");
+			int[] origin = new int[]{mc.player.getBlockX(), mc.player.getBlockY(), mc.player.getBlockZ()};
+			if (args.has("origin") && args.get("origin").isJsonObject()) {
+				var o = args.getAsJsonObject("origin");
+				if (!o.has("x") || !o.has("y") || !o.has("z")) return McpHttpBridge.error("origin requires x, y and z");
+				origin = new int[]{o.get("x").getAsInt(), o.get("y").getAsInt(), o.get("z").getAsInt()};
+			}
+			stopProcesses(false);
+			builds.startSchematic(mc, fileName == null ? kind : fileName, schematic, new BlockPos(origin[0], origin[1], origin[2]));
+		}
+		java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+		result.put("created", true);
+		result.put("kind", kind);
+		result.put("size", java.util.Map.of("x", schematic.sizeX(), "y", schematic.sizeY(), "z", schematic.sizeZ()));
+		result.put("blocks", schematic.blocks().size());
+		result.put("materials", schematic.materials());
+		result.put("persisted", persist);
+		if (fileName != null) result.put("file", fileName);
+		result.put("started", build);
+		result.put("notes", java.util.List.of("This is a block blueprint, not an NPC/villager population script.", "Use Lazuli commands after building to move villagers, assign workstations, trade, and restock."));
+		return McpHttpBridge.success(result);
 	}
 
 	private com.google.gson.JsonObject mcpInspectGui(Minecraft mc) {
